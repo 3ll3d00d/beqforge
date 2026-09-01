@@ -1,12 +1,73 @@
 import logging
+import math
 import time
-import numpy as np
+from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, field, fields
 from enum import IntEnum
 
+import numpy as np
+
 logger = logging.getLogger()
 TWO_WEEKS_AGO_SECONDS = 2 * 7 * 24 * 60 * 60
+
+
+class Points:
+    def __init__(self, mask: np.ndarray, full_range: np.ndarray):
+        self.__full_range = full_range
+        if self.full_range.ndim == 1:
+            self.__band_limited = self.full_range[mask]
+        else:
+            self.__band_limited = self.full_range[
+                ..., mask[-1] if mask.ndim > 1 else mask
+            ]
+
+    @property
+    def full_range(self) -> np.ndarray:
+        return self.__full_range
+
+    @property
+    def band_limited(self) -> np.ndarray:
+        return self.__band_limited
+
+
+class Curves:
+    def __init__(
+        self,
+        min_freq: float,
+        max_freq: float,
+        magnitude: np.ndarray,
+        frequency: np.ndarray,
+    ):
+        self.__min_freq = min_freq
+        self.__max_freq = max_freq
+        mask = (frequency >= min_freq) & (frequency <= max_freq)
+        self.__magnitude = Points(mask, magnitude)
+        self.__frequency = Points(mask, frequency)
+
+    @property
+    def min_freq(self) -> float:
+        return self.__min_freq
+
+    @property
+    def max_freq(self) -> float:
+        return self.__max_freq
+
+    @property
+    def magnitude(self) -> Points:
+        return self.__magnitude
+
+    @property
+    def frequency(self) -> Points:
+        return self.__frequency
+
+    @property
+    def entry_count(self) -> int:
+        return self.magnitude.full_range.shape[0]
+
+    def __repr__(self):
+        return f"Curves(min_freq={self.min_freq}, max_freq={self.max_freq}, size={self.entry_count})"
 
 
 @dataclass
@@ -263,12 +324,6 @@ class CatalogueEntry:
 
 
 # from http://www.musicdsp.org/files/Audio-EQ-Cookbook.txt
-import math
-from abc import ABC, abstractmethod
-from collections.abc import Sequence
-
-import numpy as np
-
 COMBINED = "Combined"
 
 
@@ -853,6 +908,7 @@ class BEQFilterMapping:
 class BEQComposite:
     id: int
     mag_response: np.ndarray
+    mag_response_band_limited: np.ndarray
     biquads: list[BiquadCoefficients] = field(default_factory=list)
     mappings: list[BEQFilterMapping] = field(default_factory=list)
     fan_envelopes: list[np.ndarray] = field(default_factory=list)
@@ -920,7 +976,7 @@ class ComputationCycle:
 
 @dataclass
 class BEQCompositeComputation:
-    inputs: np.ndarray
+    inputs: Curves
     cycles: list[ComputationCycle]
 
     @property
@@ -946,7 +1002,7 @@ class BEQCompositeComputation:
 
 @dataclass
 class BEQResult:
-    inputs: np.ndarray
+    inputs: Curves
     composites: list[BEQComposite]
     calculations: list[BEQCompositeComputation]
 
@@ -964,7 +1020,7 @@ class BEQResult:
 
     @property
     def input_size(self) -> int:
-        return self.inputs.shape[0]
+        return self.inputs.entry_count
 
     @property
     def assigned_entry_ids(self) -> set[int]:

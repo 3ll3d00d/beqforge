@@ -1,459 +1,325 @@
 # BEQ Analyser
 
-NB: Code and requirements are LLM generated with human guidance/review. 
+Reduces the [BEQ catalogue](https://beqcatalogue.readthedocs.io) — thousands of individually authored
+bass-EQ filter sets — to a small number of **composite curves** that represent the catalogue as a whole,
+then fits realisable IIR filters to those composites.
+
+> NB: Code and requirements are LLM generated with human guidance/review.
 
 ---
 
-## 1. Analysis Pipeline Features
+## 1. Quick start
 
-### 1.1 Input Data Assumptions
+```bash
+uv sync
+uv run python -m beqanalyser
+```
 
-* Input is a catalogue of **N BEQ curves**
-* Curves are:
-    * Normalised
-    * Sampled on a **common frequency axis**
-    * Expressed in **dB vs frequency**
-    * Band-limited
-* Frequency axis is **linear spaced**
-* Catalogue shape:
+`python -m beqanalyser` runs the whole pipeline with the settings hard-coded in
+[`beqanalyser/__main__.py`](beqanalyser/__main__.py) — there is no CLI. To change the band, the catalogue
+filter, or the clustering schedule, edit that file (or work in the notebook, below).
 
-  ```
-  catalogue: ndarray[N, F]
-  freqs: ndarray[F]
-  ```
+[`beqanalyser/beq.ipynb`](beqanalyser/beq.ipynb) runs the same pipeline stage by stage and is the better
+place to explore results interactively.
 
-#### Frequency Axis Consistency
+### Working directory matters
 
-All input curves are assumed to share a common frequency axis and sampling resolution.
+Several paths are resolved relative to the current working directory:
 
-This is treated as a hard precondition of the analysis pipeline and is not explicitly validated at runtime. Input data must therefore be pre-aligned prior to analysis.
+| Path | Role |
+| --- | --- |
+| `database.bin` + `database.bin.sha256` | Cached catalogue (JSON, despite the extension) |
+| `<data_hash>.npy` | Cached pairwise distance matrix |
+| `beq_composites.csv` | Assignment audit trail written by `print_assignments` |
+| `<digest>/composite_delta.png` | Per-entry delta plots written by `dump_filter_delta` |
 
-### 1.2 Pipeline Overview
-
-The BEQ analysis pipeline proceeds through the following stages:
-
-1. Load and convert catalogue filters into frequency responses
-2. Apply band-limiting and optional weighting
-3. Perform prototype reduction if required
-4. Cluster prototypes to generate initial composites
-5. Assign all catalogue curves to composites with metric evaluation
-6. Recompute composite curves from assigned members
-7. Generate fan curves and visualizations
-8. Produce summary statistics and assignment reports
-
-Each stage builds on the results of the previous stage.
+All are gitignored. Both the repo root and `beqanalyser/` contain a `database.bin`, because the module is
+run from the root and the notebook from `beqanalyser/`.
 
 ---
 
-### 1.2 Distance & Similarity Metrics
+## 2. What the pipeline does
 
-Each curve-to-composite comparison computes:
+```
+beqcatalogue JSON
+   → IIR filter definitions per entry
+   → magnitude response per entry            (loader.convert)
+   → normalise + band-limit                  (Curves)
+   → pairwise distance matrix                (loader.compute_distance_matrix, cached)
+   → HDBSCAN clustering, repeated over noise (analyser.build_all_composites, phase 1)
+   → final assignment sweep of stragglers    (analyser.build_all_composites, phase 2)
+   → composite curves + fan envelopes
+   → biquad / graphic-EQ fits                (filter.py)
+   → plots, CSV, summaries                   (reporter.py)
+```
 
-| Metric               | Description                               |
-| -------------------- | ----------------------------------------- |
-| RMS                  | Root mean square deviation from composite |
-| MAX                  | Maximum absolute deviation from composite |
-| Cosine similarity    | Shape similarity independent of magnitude |
-| Derivative deviation | RMS of first derivative difference        |
+### 2.1 Loading and response generation
 
-All metrics are **stored per attempted assignment**, regardless of acceptance.
+`loader.load(predicate)` reads `database.bin` and verifies its SHA-256 against `database.bin.sha256`.
+On any failure it fetches
+`https://raw.githubusercontent.com/3ll3d00d/beqcatalogue/master/docs/database.json`, converts every entry
+that has filters, and writes both cache files.
 
-Each curve–composite comparison computes multiple complementary metrics.
-No single metric is sufficient to capture perceptual similarity in infra-bass BEQ filters; instead, the metrics collectively guard against distinct failure modes observed in real catalogue data.
+Conversion (`loader.convert`) turns each entry's `PeakingEQ` / `LowShelf` / `HighShelf` definitions into
+RBJ biquads, cascades them, filters a scaled unit impulse (`sosfilt`) and takes `freqz` of the result at
+`fs=1000`. DC is discarded, leaving **511 linearly spaced points from ~1 Hz to ~500 Hz**.
 
-#### Composite Selection
+`predicate` filters the catalogue (e.g. `entry.year >= 2023`). When a predicate is supplied, the returned
+hash is computed over the *filtered* data, so the distance-matrix cache key tracks the selection.
 
-When assigning a curve to a composite, the “best” composite is selected by selecting the highest cosine similarity from the composites with an RMS deviation within epsilon of the minimum RMS deviation.
+### 2.2 Normalisation and band limiting
 
-Other similarity metrics (maximum deviation, derivative RMS) are used exclusively as **acceptance or rejection thresholds** and do not influence the ranking of candidate composites.
+`__main__` normalises each curve to 0 dB at its top frequency (`mag_db - mag_db[-1]`), then wraps
+everything in `Curves(min_freq, max_freq, magnitude, frequency)`.
 
-As a result, RMS is the primary metric determining composite assignment with cosine similarity as a secondary tiebreaker, while the remaining metrics act as safeguards against perceptually dissimilar matches.
+`Curves` holds a `Points` for magnitude and frequency, each exposing `.full_range` and `.band_limited`.
+Distances, clustering and assignment all operate on `.band_limited` (default 5–50 Hz); the full range is
+carried alongside for plotting and filter fitting.
 
-#### Metric Weighting
+All curves are assumed to share a common frequency axis. This is a hard precondition and is **not
+validated at runtime**.
 
-Optional frequency weighting may be applied when computing RMS deviation.
+### 2.3 Distance matrix
 
-Weights affect **only the RMS metric** and are not applied to cosine similarity, derivative RMS, or maximum deviation calculations. All other metrics operate on unweighted response data.
+`loader.compute_beq_distance_matrix` builds a dense `N × N` `float64` matrix, chunked and computed across
+a process pool. Per pair it derives RMS deviation, max absolute deviation, cosine similarity and
+first-derivative RMS, then combines them in `compute_distance_components`:
 
----
+```
+base     = rms_weight · rms_adjusted + cosine_weight_adj · (1 − cos_sim) · cosine_scale
+distance = base + Σ penalties
+```
 
-### RMS Deviation (Perceptually Weighted)
+with three behaviours layered on top:
 
-**Definition**
-Root mean square of the difference between the curve and the composite over the selected band, optionally weighted by a perceptual frequency weighting.
+* **Asymmetric RMS.** When the candidate sits *below* the reference (mean difference < 0), its RMS is
+  divided by `distance_rms_undershoot_tolerance` and its RMS penalty scale reduced by the same factor —
+  undershooting a BEQ curve is treated as less harmful than overshooting it.
+* **Cosine boost when close.** When RMS is below `distance_rms_close_threshold`, the cosine weight is
+  multiplied by `distance_cosine_boost_in_close_range`, so shape dominates the ranking once magnitude
+  already agrees.
+* **Smooth tiered penalties.** Each of RMS / cosine / max / derivative has a hard limit and a soft limit
+  at `distance_soft_limit_factor` of it. Below the soft limit the penalty is zero; between the two it
+  grows exponentially; at or above the hard limit it saturates at `distance_penalty_scale` (100).
+  A distance ≥ 100 therefore signals at least one hard-limit violation.
 
-**Why it is used**
+The same function serves both the matrix build and single curve-vs-composite comparisons
+(`analyser.compute_composite_distance`), so scores are directly comparable.
 
-* Measures **overall energy deviation** across the band
-* Closely correlates with **perceived loudness difference**
-* Penalises distributed mismatches more than localised ones
-* Stable under noise and small local variations
+The matrix is computed once for the whole catalogue and cached to `<data_hash>.npy`. Each clustering pass
+takes a submatrix of it via `np.ix_` rather than recomputing.
 
-**What it catches**
+### 2.4 Clustering — phase 1 (discovery)
 
-* Filters that are broadly “too strong” or “too weak”
-* Gradual shape drift across the band
-* Cumulative differences that are perceptually obvious but locally small
+`build_all_composites` walks the list of `HDBSCANParams` it is given. Pass 1 clusters the whole
+catalogue; **each subsequent pass reclusters only the entries the previous pass rejected**, typically with
+a smaller `min_cluster_size` / `min_samples`, so successively looser structure is picked out of the noise.
 
-**What it does *not* catch well**
+Within one pass (`build_beq_composites`):
 
-* Narrow, sharp deviations
-* Directional shape inversions (e.g. shelf vs peak)
-* Localised filter topology changes
+1. HDBSCAN runs with `metric="precomputed"`, `cluster_selection_method="eom"`, `allow_single_cluster=False`.
+   Points labelled `-1` are noise.
+2. Each cluster's initial composite is its **medoid** (the member closest to the per-frequency median),
+   unless that medoid scores a hard-limit distance from the median, in which case the median is used.
+3. Every entry is scored against every composite. The lowest-distance composite is marked `is_best`; the
+   rest are marked `SUBOPTIMAL`. Entries HDBSCAN labelled as noise are marked `NOISE`.
+4. Composites are recomputed as the **per-frequency median** of their assigned members.
+5. Steps 3–4 repeat until the reject rate stops improving by more than `min_reject_rate_delta`, gets
+   worse, or `max_iterations` is hit. If it got worse, the previous cycle's state is the one kept.
 
----
+Median aggregation is used rather than mean to blunt the effect of outliers.
 
-### Maximum Absolute Deviation
+### 2.5 Final assignment — phase 2
 
-**Definition**
-Maximum absolute per-frequency difference between the curve and the composite.
+`create_final_result` flattens the composites from every pass into one list with sequential ids, remapping
+mapping references as it goes. `assign_remaining_entries` then gives every still-unassigned entry one more
+chance against **all** discovered composites, using limits scaled by
+`final_assignment_threshold_multiplier` (`1.0` = unchanged; > 1.0 relaxes them). An entry is rejected as
+`HARD_LIMIT` only if its best distance still reaches `distance_penalty_scale`. Composites and fan
+envelopes are recomputed afterwards if anything new was assigned.
 
-**Why it is used**
+### 2.6 Fan envelopes
 
-* Acts as a **hard safety constraint**
-* Prevents visually or perceptually egregious mismatches
-* Guards against narrow but extreme features being hidden by RMS averaging
-
-**What it catches**
-
-* Sharp peaking filters
-* Unexpected notches or spikes
-* Low-pass or high-pass rolloffs that diverge sharply at one end
-
-**What it does *not* catch well**
-
-* Broad but moderate deviations
-* Distributed shape differences with no extreme point
-
----
-
-### Cosine Similarity (Shape Similarity)
-
-**Definition**
-Cosine similarity between mean-removed curves, treating each curve as a vector in frequency space.
-
-**Why it is used**
-
-* Measures **directional similarity of shape**, independent of magnitude
-* Captures whether two curves “move together”
-* Robust to overall strength scaling
-
-**What it catches**
-
-* Shape inversions (e.g. shelf vs inverted shelf)
-* Filters with different structural intent:
-
-    * Shelf vs peak
-    * Boost vs cut
-* Low-pass–like rolloffs vs broadband responses
-
-**What it does *not* catch well**
-
-* Absolute strength differences
-* Localised deviations if overall trend aligns
-
----
-
-### First-Derivative Deviation (Slope / Curvature)
-
-**Definition**
-RMS deviation of the first derivative (slope) of the curve vs the composite.
-
-**Why it is used**
-
-* Captures **rate of change differences**
-* Sensitive to filter topology rather than level
-* Penalises curves that change direction or curvature unexpectedly
-
-**What it catches**
-
-* Additional poles/zeros
-* Sharp transitions or knees
-* Peaking filters applied on top of shelves
-* Low-pass filters appended to otherwise similar shapes
-
-**What it does *not* catch well**
-
-* Parallel but offset curves
-* Uniform strength differences
+`compute_fan_curves` sorts a composite's assigned curves by RMS distance from it, then slices them into
+**disjoint bands using the absolute counts in `fan_counts`** (e.g. `(5, 10, 20, 50, 100)` → the closest 5,
+then the next 5, then the next 10, …). No curve appears in more than one band. Bands beyond the available
+membership are empty arrays.
 
 ---
 
-### Why Multiple Metrics Are Required
+## 3. Distance and similarity metrics
 
-Each metric guards against a **different failure mode**:
+Four complementary metrics are recorded for every attempted assignment. No single one captures perceptual
+similarity in infra-bass BEQ filters; together they guard against distinct failure modes seen in real
+catalogue data.
 
-| Failure Mode       | RMS | Max | Cosine | Derivative |
-| ------------------ | --- | --- | ------ | ---------- |
-| Too strong / weak  | ✓   | ✗   | ✗      | ✗          |
-| Sharp spike        | ✗   | ✓   | ✗      | ✓          |
-| Shape inversion    | ✗   | ✗   | ✓      | ✓          |
-| Extra filter stage | ✗   | ✓   | ✗      | ✓          |
-| Broad drift        | ✓   | ✗   | ✗      | ✗          |
+| Metric | Definition |
+| --- | --- |
+| RMS | Root mean square of the per-frequency difference |
+| Max | Maximum absolute per-frequency difference |
+| Cosine similarity | Cosine of the angle between the two curves as vectors in frequency space |
+| Derivative RMS | RMS of the difference of first differences (slope mismatch) |
 
-Only by combining these metrics can the pipeline:
+All four are stored on **every** `BEQFilterMapping`, accepted or not, alongside the combined
+`distance_score` that actually decides the assignment.
 
-* Maintain **perceptual consistency**
-* Avoid visually misleading composites
-* Allow **looser RMS/MAX thresholds** without admitting structurally different filters
+### RMS deviation
 
----
+Measures overall energy deviation across the band, correlates with perceived loudness difference, and
+penalises distributed mismatches more than localised ones. Catches filters that are broadly too strong or
+too weak, and gradual shape drift. Misses narrow sharp deviations and directional shape inversions.
 
-### Design Principle
+### Maximum absolute deviation
 
-> **RMS measures “how much”, cosine measures “which way”, derivative measures “how”.**
+A hard safety constraint against visually or perceptually egregious mismatches that RMS averaging would
+hide — sharp peaking filters, unexpected notches, rolloffs that diverge at one end. Misses broad but
+moderate deviations.
 
-The rejection logic intentionally treats these metrics as **orthogonal constraints**, not interchangeable thresholds.
+### Cosine similarity
 
----
+Directional similarity of shape, independent of magnitude: do the two curves move together? Catches shape
+inversions (shelf vs inverted shelf), boost vs cut, and structurally different intent. Misses absolute
+strength differences.
 
-### 1.3 Clustering & Prototype Reduction
+### First-derivative deviation
 
-* Initial clustering may use:
-    * Hierarchical (Ward)
-    * k-means (optional)
-* Prototype reduction strategy:
-    * Reduce full catalogue to a smaller set of representative shapes
-    * Final composites are **real curves or averaged curves**
-* Clustering occurs **before** rejection logic
+Rate-of-change difference — sensitive to filter *topology* rather than level. Catches additional
+poles/zeros, sharp knees, peaking filters stacked on shelves. Misses parallel but offset curves.
 
-#### Prototype Reduction
+### Why all four
 
-For large catalogues, clustering is performed on a reduced subset of representative curves rather than the full dataset.
+| Failure mode | RMS | Max | Cosine | Derivative |
+| --- | --- | --- | --- | --- |
+| Too strong / weak | ✓ | ✗ | ✗ | ✗ |
+| Sharp spike | ✗ | ✓ | ✗ | ✓ |
+| Shape inversion | ✗ | ✗ | ✓ | ✓ |
+| Extra filter stage | ✗ | ✓ | ✗ | ✓ |
+| Broad drift | ✓ | ✗ | ✗ | ✗ |
 
-If the number of input responses exceeds `n_prototypes`, a **k-medoids** selection is performed to identify a subset of curves that best represent the overall catalogue. Hierarchical clustering is then applied only to this prototype set. All remaining curves are subsequently assigned to the resulting composites.
+> **RMS measures "how much", cosine measures "which way", derivative measures "how".**
 
-This step reduces computational cost while preserving the overall shape distribution of the catalogue. The choice of `n_prototypes` may influence the resulting composites.
+Treating these as orthogonal constraints rather than interchangeable thresholds is what allows looser
+RMS/max limits without admitting structurally different filters.
 
----
+### Rejection reasons
 
-### 1.4 Composite Construction & Definition
+`RejectionReason` (in `beqanalyser/__init__.py`) is authoritative:
 
-Each composite contains:
+| Reason | Meaning | Set where |
+| --- | --- | --- |
+| `SUBOPTIMAL` | A closer composite exists for this entry | Discovery, non-best mappings |
+| `NOISE` | HDBSCAN classified the entry as noise | Discovery |
+| `HARD_LIMIT` | Best distance still hit the penalty ceiling | Final assignment sweep |
+| `RMS_EXCEEDED` | RMS deviation exceeds threshold | `BEQFilterMapping.assess` (unused) |
+| `MAX_EXCEEDED` | Maximum deviation exceeds threshold | `BEQFilterMapping.assess` (unused) |
+| `RMS_MAX_EXCEEDED` | Both RMS and max exceed thresholds | `BEQFilterMapping.assess` (unused) |
+| `COSINE_TOO_LOW` | Shape similarity below threshold | `BEQFilterMapping.assess` (unused) |
+| `DERIVATIVE_TOO_HIGH` | Slope mismatch above threshold | `BEQFilterMapping.assess` (unused) |
 
-* `shape`: composite curve (mean or medoid)
-* `assigned_indices`: indices of accepted catalogue entries
-* `fan_envelopes`: multi-level envelope bands derived from assigned curves
-
-Composite curves are defined as the **per-frequency median** of all curves assigned to the composite.
-
-Median aggregation is used instead of a mean to reduce sensitivity to outliers and to produce a more robust representative shape. 
-
-Composite curves are recomputed after assignment to reflect the current membership of each composite.
-
----
-
-### 1.5 Fan Envelope Computation
-
-* Fan envelopes are computed using **sorted RMS distance**
-* Curves are partitioned into percentile bands
-* Each envelope contains:
-
-    * A **unique subset** of assigned curves
-* No curve appears in more than one envelope band
-
----
-
-### 1.6 Assignment & Rejection Logic
-
-Each catalogue entry is evaluated against **each composite** and produces exactly one `BEQFilterMapping`.
-
-#### Possible Outcomes
-
-* Assigned to a composite
-* Rejected from a composite (with reason)
-
-#### Rejection Reasons (Authoritative)
-
-| Reason                | Meaning                             |
-| --------------------- | ----------------------------------- |
-| `RMS_EXCEEDED`        | RMS deviation exceeds threshold     |
-| `MAX_EXCEEDED`        | Maximum deviation exceeds threshold |
-| `BOTH_EXCEEDED`       | RMS and MAX exceed thresholds       |
-| `COSINE_TOO_LOW`      | Shape similarity below threshold    |
-| `DERIVATIVE_TOO_HIGH` | Excessive shape roughness mismatch  |
+Only the first three are produced by the current pipeline. The per-metric reasons predate the combined
+distance score: the individual limits now feed the smooth penalty system inside the distance instead of
+acting as standalone gates, and `assess()` is dead code.
 
 ---
 
-### Assignment Records
+## 4. Filter fitting
 
-Assignment results are exported as tabular data containing, for each catalogue entry:
+`filter.py` fits realisable filters to each composite curve.
 
-- Assigned composite identifier
-- RMS deviation
-- Maximum absolute deviation
-- Cosine similarity
-- Derivative RMS
-- Assignment status (accepted or rejected)
-- Rejection reason (if applicable)
-- Catalogue metadata (e.g. title, author)
+All three entry points take the catalogue's `Points` and fit over its **full range**, against
+`BEQComposite.mag_response`. Band limiting applies to clustering and assignment, not to fitting: a filter
+you would actually deploy has to be sane across the whole response, not just 5–50 Hz. Everything below the
+`fit_all_composites_*` boundary works on plain ndarrays.
 
-These records provide a complete audit trail of the assignment decision process.
+* **`fit_all_composites_to_peq`** — iterative residual fitting. Fits a low shelf to the curve, subtracts
+  its response, then fits either another shelf (if the residual still has > 1 dB of overall tilt) or a
+  peaking filter to the most prominent residual peak, up to `max_filters` or until the residual RMS falls
+  below `residual_threshold`. Multi-filter results then get a global Nelder–Mead pass over all
+  `(fc, gain, Q)` at once, with near-zero-gain filters dropped.
+* **`fit_all_composites_to_geq`** — solves for the gains of fixed 1/3-octave bands with L-BFGS-B, using a
+  vectorised biquad cascade evaluated on a 500-point log grid, plus a smoothing penalty on adjacent-band
+  gain differences.
+* **`fit_all_composites_to_mag`** — no fitting at all; just samples the composite at 1/3-octave centres.
 
----
+All three return `{composite_id: {"freqs", "filters", "rms_error", "max_error", "target_response",
+"fitted_response"}}` (the mag variant returns only `freqs` and `filters`).
 
-## 2. Plotting Subsystem Features
-
-Plotting is divided into **assigned curves** and **rejected curves**, with **zero overlap**.
-
-## 2.1. Common Requirements
-
-### 2.1.1. Core Goals
-
-* No curve is plotted twice in the same figure
-* Assigned and rejected curves are never mixed
-* Legend appears once per figure
-* Consistent colour semantics across all plots
-* Fully deterministic ordering
-
-### 2.2. Non-Goals
-
-* No interactive widgets
-* No animated plots
-* No implicit curve downsampling
-* No curve re-normalisation during plotting
-* No silent dropping of rejected curves
+RBJ coefficient generation lives in both `filter.py` (`lowshelf_rbj` / `peaking_rbj` / `highshelf_rbj`,
+returning `BiquadCoefficients`) and `__init__.py` (the `Biquad` class hierarchy used to render the
+catalogue). They are separate implementations of the same cookbook formulae.
 
 ---
 
-## 2.2. Assigned Fan Curve Plotting
+## 5. Reporting
 
-* Grid of subplots
-* One subplot per composite
-* Maximum 3 composites per row
-* Shared axes
+| Function | Output |
+| --- | --- |
+| `summarise_result` | Assigned/rejected counts and per-composite membership, to the log |
+| `summarise_assignments` | Per-pass breakdown including rejection reasons and reject rate per cycle |
+| `plot_assigned_fan_curves` | Grid of composites (max 3 per row), fan curves in light blue with alpha ramping by RMS rank, composite overlaid in black, inset distance-score histogram |
+| `plot_composite_evolution` | How each composite's shape moved across refinement cycles, coloured by iteration |
+| `plot_distance_histograms` | Catalogue-wide histograms of RMS, max, cosine, derivative and distance score with 50/90/95th percentile markers |
+| `plot_filter_comparison` | Target composite vs fitted filter response per composite |
+| `show_filters` | Fitted filter parameters rendered as tables |
+| `print_assignments` | `beq_composites.csv` — one row per best mapping with metrics and catalogue metadata |
+| `dump_filter_delta` | Per-composite PNG of composite-minus-source delta, under `<digest>/` |
 
-### Fan Curves
-
-Fan curves visualize the variability of responses assigned to a composite.
-
-Assigned curves are first sorted by increasing RMS deviation from the composite. Fan envelopes are then constructed using progressively larger percentile subsets of this ordered set. Each fan therefore represents the range of curves within a given RMS tolerance rather than the absolute min/max bounds.
-
-This approach emphasizes typical variation while avoiding domination by extreme outliers.
-
----
-
-### 2.2.1 Fan Curve Rendering
-
-* Fan envelopes plotted from **tightest to loosest**
-* Alpha increases with RMS rank
-* Colour:
-
-    * Light blue (assigned curves)
-* No duplicate curves plotted
+Plotting is deliberately non-interactive: no widgets, no animation, no implicit downsampling, no
+re-normalisation at plot time.
 
 ---
 
-### 2.2.2 Composite Overlay
+## 6. Configuration reference
 
-* Composite curve plotted in:
+### `DistanceParams`
 
-    * Black
-    * Increased linewidth
-    * Above fan curves (z-order)
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `rms_limit` | 10.0 | Hard RMS limit (dB) |
+| `max_limit` | 10.0 | Hard max-deviation limit (dB) |
+| `cosine_limit` | 0.90 | Hard minimum cosine similarity |
+| `derivative_limit` | 1.0 | Hard maximum derivative RMS |
+| `use_constraints` | True | Apply the penalty system at all |
+| `distance_rms_weight` | 0.8 | Weight of the RMS term |
+| `distance_cosine_weight` | 0.2 | Weight of the cosine term |
+| `distance_cosine_scale` | 10.0 | Scales cosine distance into RMS units |
+| `distance_penalty_scale` | 100.0 | Penalty at/above a hard limit; also the rejection ceiling |
+| `distance_soft_limit_factor` | 0.7 | Soft limit as a fraction of the hard limit |
+| `distance_rms_undershoot_tolerance` | 2.0 | Divisor applied to RMS and RMS penalty when undershooting |
+| `distance_rms_close_threshold` | 2.0 | RMS below which cosine weight is boosted |
+| `distance_cosine_boost_in_close_range` | 2.0 | Cosine weight multiplier in the close range |
+| `distance_chunk_size` | 1000 | Rows per chunk in the matrix build |
+| `distance_n_jobs` | -1 | Worker processes (-1 = all cores) |
+| `distance_soft_penalty_scale` | 10.0 | Logged but not applied — see known issues |
 
----
+### `HDBSCANParams`
 
-### 2.2.3 Assigned RMS Histogram (Inset)
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `min_cluster_size` | 500 | Smallest admissible cluster |
+| `min_samples` | 50 | Core-point density requirement |
+| `cluster_selection_epsilon` | 0.0 | Merge clusters closer than this (0 = no merging) |
 
-* Each composite subplot includes an inset histogram
-* Histogram shows:
-
-    * RMS values of **assigned curves only**
-* Histogram properties:
-
-    * Fixed inset position
-    * Light blue bars
-    * Independent scaling per composite
-
----
-
-### 2.2.4 Titles & Labels
-
-* Subplot title includes:
-
-    * Composite index
-    * Number of assigned curves
-* Axes:
-
-    * Frequency (Hz)
-    * Magnitude (dB)
-* Grid enabled with low alpha
+One instance per discovery pass; the list length sets the number of passes.
 
 ---
 
-## 2.3. Rejected Curve Plotting (Authoritative)
+## 7. Current state and known issues
 
-### 2.3.1 Separation by Rejection Reason
-
-* Rejected curves are plotted:
-
-    * **Separately from assigned curves**
-    * In a **distinct figure per rejection reason**
-* No rejected curve appears in more than one figure
-
----
-
-### 2.3.2 Layout
-
-* Grid of subplots identical to assigned plot layout
-* One subplot per composite
-* One figure per rejection reason
+* **`distance_soft_penalty_scale` is inert.** It is threaded through and logged, but
+  `compute_distance_components` always penalises with `distance_penalty_scale`.
+* **The phase-1 loop guard is ineffective.** `while assigned_rate >= 0.01` tests the *cumulative*
+  assignment rate, which only rises, so passes are never cut short — the loop always runs once per entry
+  in `iteration_params`.
+* **`HARD_LIMIT` rejection during discovery is commented out** in `map_to_best_composite`, so `NOISE` is
+  the only non-`SUBOPTIMAL` reason a discovery pass produces.
+* **`BEQComposite.rejected_mappings_for_reason(reason, best_only=False)`** filters on
+  `m.is_best == best_only`, so the default returns *non*-best mappings. It has no callers.
+* **`plot_distance_by_composite` is a stub** (`pass`), and there is no rejected-curve plotting.
+* **`tests/` contains no tests** — only a stale `__pycache__` from a removed `test_distances`.
 
 ---
 
-### 2.3.3 Rejected Curve Rendering
+## 8. Licence
 
-* Same fan-style rendering as assigned curves
-* Sorted by RMS distance
-* Colour:
-
-    * Red-based (e.g. light coral)
-* Alpha ramps from faint to strong
-* Composite overlay in black
-
----
-
-### 2.4. Metric-Specific Histograms (Inset)
-
-Each rejected-curve subplot includes an inset histogram showing **only the metric responsible for rejection**.
-
-| Rejection Reason    | Histogram Metric      |
-| ------------------- | --------------------- |
-| RMS_EXCEEDED        | RMS                   |
-| MAX_EXCEEDED        | Max deviation         |
-| BOTH_EXCEEDED       | RMS + Max (overlaid)  |
-| COSINE_TOO_LOW      | 1 − Cosine similarity |
-| DERIVATIVE_TOO_HIGH | Derivative deviation  |
-
-Histogram rules:
-
-* Only rejected curves for that composite & reason
-* Colour-coded by metric
-* Small-font legends where needed
-
----
-
-### 2.4.1 Titles
-
-* Figure title:
-
-  ```
-  Rejected Curves — Reason: <REASON>
-  ```
-* Subplot title:
-
-    * Composite index
-    * Count of rejected curves
-
----
-
-## 3. Intended Use
-
-This document is the **single source of truth** for:
-
-* Refactoring
-* Bug fixing
-* Performance optimisation
-* Re-implementation in other languages
-* Regression testing
+MIT — see [LICENCE.md](LICENCE.md).
