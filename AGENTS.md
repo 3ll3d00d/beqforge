@@ -23,6 +23,11 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/beq.ipynb` | Same pipeline, stage by stage. **Partially stale — see gotchas.** |
 | `tests/` | Empty (stale `__pycache__` only). |
 
+[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md) is a plan for a separate, not-yet-built capability —
+deriving a BEQ filter from an audio track rather than summarising existing ones. Nothing in the table
+above implements it. Read it before starting that work; its principles section exists because several
+of its rules were arrived at by getting them wrong first.
+
 Dependency direction: `__init__` ← `loader` ← `analyser`; `filter` and `reporter` depend on `__init__`
 (and `reporter` on `filter` for the `TableRowConvertible` protocol). Don't introduce a cycle by importing
 `analyser` from `loader`.
