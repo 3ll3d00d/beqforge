@@ -54,7 +54,7 @@ def probe(path: Path, stream: int) -> dict:
             "-select_streams",
             f"a:{stream}",
             "-show_entries",
-            "stream=channels,channel_layout,duration",
+            "stream=channels,channel_layout,duration,sample_rate",
             "-of",
             "json",
             str(path),
@@ -69,25 +69,19 @@ def probe(path: Path, stream: int) -> dict:
     return streams[0]
 
 
-def decode(path: Path, stream: int, channels: int) -> np.ndarray:
-    """Every channel, decimated to ANALYSIS_FS, as (samples, channels) float64."""
+def decode(path: Path, stream: int, channels: int, source_fs: int) -> np.ndarray:
+    """Every channel, decimated to ANALYSIS_FS, as (samples, channels) float64.
+
+    Material already at the analysis rate is passed through untouched rather than resampled to
+    the rate it is already at.
+    """
+    command = ["ffmpeg", "-v", "error", "-i", str(path), "-map", f"0:a:{stream}"]
+    if source_fs != ANALYSIS_FS:
+        command += ["-af", f"aresample={ANALYSIS_FS}:resampler=soxr"]
+    else:
+        logger.info(f"source is already at {ANALYSIS_FS} Hz; not resampling")
     out = subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-i",
-            str(path),
-            "-map",
-            f"0:a:{stream}",
-            "-af",
-            f"aresample={ANALYSIS_FS}:resampler=soxr",
-            "-f",
-            "f64le",
-            "-c:a",
-            "pcm_f64le",
-            "-",
-        ],
+        command + ["-f", "f64le", "-c:a", "pcm_f64le", "-"],
         capture_output=True,
         check=True,
     )
@@ -137,7 +131,7 @@ def main() -> int:
         f"{args.source.name}: {count}ch {info.get('channel_layout')} -> {names}"
     )
 
-    samples = decode(args.source, args.stream, count)
+    samples = decode(args.source, args.stream, count, int(info["sample_rate"]))
     duration_s = len(samples) / ANALYSIS_FS
     logger.info(f"decoded {duration_s / 60:.1f} minutes at {ANALYSIS_FS} Hz")
 
