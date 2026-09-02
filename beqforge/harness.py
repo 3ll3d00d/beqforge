@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
+from beqanalyser import PeakingEQ
 from beqanalyser.design import Alignment, HighPass
 from beqanalyser.design.filters import high_pass_sos
 
@@ -49,6 +50,23 @@ class SyntheticProfile:
 
     floor_db: float = -60.0
     """Stationary broadband noise floor, relative to the loudest event."""
+
+    event_colour_db: float = 12.0
+    """Spread of the per-event spectral emphasis, in dB.
+
+    Without it every event is white and its bins are statistically independent, so nothing
+    co-varies beyond the common programme level and the coherence of §3.4 has nothing to
+    measure. Real bass events differ in character — an explosion and a door slam do not share
+    a spectrum — and that shared per-event shape is what coherence keys on.
+
+    Applied as a pair of random peaking sections rather than a single tilt. A tilt is a
+    see-saw about its pivot, which makes bins either side move in opposition and leaves a
+    reference band straddling the pivot with nothing to correlate against; real events have
+    *local* emphasis, so nearby bins co-vary more strongly than distant ones.
+    """
+
+    event_colour_sections: int = 2
+    """Number of random peaking sections shaping each event."""
 
     rumble_db: float | None = None
     """Stationary low-frequency rumble level, or None for no rumble."""
@@ -87,10 +105,12 @@ def synthesise(profile: SyntheticProfile, fs: float, seed: int = 0) -> np.ndarra
     levels = 10.0 ** (-rng.uniform(0.0, profile.event_level_spread_db, count) / 20.0)
     decay_len = int(round(profile.event_decay_s * 6.0 * fs))
     envelope = np.exp(-np.arange(decay_len) / (profile.event_decay_s * fs))
+    nyquist = fs / 2.0
     for start, level in zip(starts, levels, strict=True):
         stop = min(n, start + decay_len)
         burst = rng.standard_normal(stop - start) * envelope[: stop - start]
-        out[start:stop] += burst * level
+        burst = signal.sosfilt(_colour(profile, rng, fs, nyquist), burst)
+        out[start:stop] += burst * level / (np.std(burst) or 1.0)
 
     if profile.rumble_db is not None:
         rumble = signal.sosfilt(
@@ -102,6 +122,18 @@ def synthesise(profile: SyntheticProfile, fs: float, seed: int = 0) -> np.ndarra
 
     peak = np.max(np.abs(out))
     return out / peak if peak else out
+
+
+def _colour(
+    profile: SyntheticProfile, rng: np.random.Generator, fs: float, nyquist: float
+) -> np.ndarray:
+    """Random peaking sections giving one event its spectral character."""
+    rows: list[list[float]] = []
+    for _ in range(profile.event_colour_sections):
+        freq = float(np.exp(rng.uniform(np.log(8.0), np.log(0.6 * nyquist))))
+        gain = float(rng.uniform(-0.5, 0.5) * profile.event_colour_db)
+        rows.extend(PeakingEQ(fs, freq, 1.0, gain).get_sos())
+    return np.array(rows)
 
 
 def apply_high_pass(samples: np.ndarray, hp: HighPass, fs: float) -> np.ndarray:

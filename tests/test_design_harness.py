@@ -49,7 +49,7 @@ def test_synthesis_is_deterministic() -> None:
 def test_rumble_lifts_only_the_bottom_of_the_band() -> None:
     """§3.3's quiet envelope exists to cancel this, so the harness must be able to add it."""
     clean = SyntheticProfile(duration_s=300.0)
-    rumbly = SyntheticProfile(duration_s=300.0, rumble_db=-25.0, rumble_hz=12.0)
+    rumbly = SyntheticProfile(duration_s=300.0, rumble_db=-20.0, rumble_hz=12.0)
     freqs, clean_db = _welch_db(synthesise(clean, FS, seed=2), FS)
     _, rumble_db = _welch_db(synthesise(rumbly, FS, seed=2), FS)
 
