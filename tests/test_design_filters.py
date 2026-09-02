@@ -19,6 +19,7 @@ from beqanalyser.design import (
 from beqanalyser.design.filters import (
     Realisation,
     biquad_sos,
+    correction_band_hz,
     fit_to_biquads,
     high_pass_sos,
     inversion_target_db,
@@ -166,6 +167,50 @@ def test_numerical_fit_closes_a_mismatched_alignment() -> None:
     )
     assert repeat == specs, "designer-interface.md §1 requires a reproducible answer"
     assert repeat_error == error
+
+
+def test_sections_are_never_placed_below_the_measured_band() -> None:
+    """A section below the lowest measured frequency has its corner and Q resting on nothing.
+
+    Only its skirt is fitted. Unbounded, the fit does exactly this — it returned a low shelf
+    at 3.22 Hz with +45 dB to express a correction under 5 dB above 10 Hz, using the shelf's
+    transition as a ramp rather than using it as a shelf.
+    """
+    target = inversion_target_db(
+        HighPass(Alignment.BUTTERWORTH, 4, 14.0),
+        HighPass(Alignment.BUTTERWORTH, 4, 6.0),
+        FREQS,
+        FS,
+    )
+    evidence_floor = 5.0
+    placement = correction_band_hz(target, FREQS, evidence_floor)
+    assert placement[0] >= evidence_floor
+
+    specs, _ = fit_to_biquads(
+        target,
+        FREQS,
+        FS,
+        sections=2,
+        band_hz=BAND,
+        placement_band_hz=placement,
+        max_gain_db=26.0,
+        seeds=(0,),
+    )
+    assert all(spec.freq_hz >= evidence_floor for spec in specs)
+    assert all(abs(spec.gain_db) <= 26.0 for spec in specs)
+
+
+def test_correction_band_widens_upward_but_never_downward() -> None:
+    """The asymmetry is deliberate: reaching up is harmless, reaching down leaves the data."""
+    target = inversion_target_db(
+        HighPass(Alignment.BUTTERWORTH, 4, 20.0),
+        HighPass(Alignment.BUTTERWORTH, 4, 8.0),
+        FREQS,
+        FS,
+    )
+    low, high = correction_band_hz(target, FREQS, 5.0)
+    assert low == pytest.approx(5.0)
+    assert high > 20.0
 
 
 def test_fitted_sections_stay_inside_the_evaluated_band() -> None:

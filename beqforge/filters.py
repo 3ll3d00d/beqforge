@@ -174,19 +174,31 @@ def invert_to_shelves(rolloff: HighPass, protect: HighPass) -> list[BiquadSpec]:
 
 
 def correction_band_hz(
-    target_db: np.ndarray, freqs: np.ndarray, threshold_db: float = 0.5
+    target_db: np.ndarray,
+    freqs: np.ndarray,
+    evidence_floor_hz: float,
+    threshold_db: float = 0.5,
 ) -> tuple[float, float]:
-    """The span over which a target actually asks for something, widened by half an octave.
+    """The span over which a target actually asks for something.
 
     Sections belong where the correction is, not merely inside the band the residual is scored
     over. A bass correction that is flat above 25 Hz has no business placing a section at
     105 Hz, and one that does is spending budget to achieve nothing.
+
+    Widened upward by half an octave but **never downward below `evidence_floor_hz`**. The
+    asymmetry is the point. A section reaching up is harmless — its skirt still does its work
+    lower down. A section placed below the lowest measured frequency has its defining
+    parameters in a region where nothing was observed: only its skirt is fitted, and its corner
+    and Q rest on no evidence at all. Unbounded, the fit does exactly that — it once returned a
+    low shelf at 3.22 Hz with +45 dB of gain to express a correction that is under 5 dB
+    anywhere above 10 Hz, using the shelf's transition as a ramp rather than using it as a
+    shelf.
     """
     active = np.abs(target_db) >= threshold_db
     if not active.any():
-        return float(freqs[0]), float(freqs[-1])
+        return evidence_floor_hz, float(freqs[-1])
     low, high = float(freqs[active].min()), float(freqs[active].max())
-    return max(float(freqs[0]), low / 1.5), min(float(freqs[-1]), high * 1.5)
+    return max(evidence_floor_hz, low), min(float(freqs[-1]), high * 1.5)
 
 
 def fit_minimal_biquads(
@@ -198,6 +210,7 @@ def fit_minimal_biquads(
     band_hz: tuple[float, float] | None = None,
     placement_band_hz: tuple[float, float] | None = None,
     max_q: float = 6.0,
+    max_gain_db: float = 30.0,
     realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
@@ -218,6 +231,7 @@ def fit_minimal_biquads(
             band_hz,
             placement_band_hz,
             max_q,
+            max_gain_db,
             realisation,
             seeds,
         )
@@ -241,6 +255,7 @@ def fit_to_biquads(
     band_hz: tuple[float, float] | None = None,
     placement_band_hz: tuple[float, float] | None = None,
     max_q: float = 6.0,
+    max_gain_db: float = 30.0,
     realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
@@ -275,6 +290,7 @@ def fit_to_biquads(
                 band_hz,
                 placement,
                 max_q,
+                max_gain_db,
                 realisation,
                 seed,
             )
@@ -323,6 +339,7 @@ def _fit_structure(
     band_hz: tuple[float, float] | None,
     placement_hz: tuple[float, float] | None,
     max_q: float,
+    max_gain_db: float,
     realisation: "Realisation | None",
     seed: int,
 ) -> tuple[list[BiquadSpec], float]:
@@ -338,7 +355,7 @@ def _fit_structure(
     # the correction actually is, or spare budget gets parked in the midrange.
     low = float(placement_hz[0]) if placement_hz else float(freqs[0])
     high = float(placement_hz[1]) if placement_hz else float(freqs[-1])
-    bounds = [(low, high), (0.1, max_q), (-25.0, 45.0)] * sections
+    bounds = [(low, high), (0.1, max_q), (-max_gain_db, max_gain_db)] * sections
 
     def cost(p: np.ndarray) -> float:
         specs = _unpack(p, shelves, peaks)

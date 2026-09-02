@@ -59,7 +59,17 @@ class DesignParams:
     """How far boosted noise must stay below the content that masks it (§4.1)."""
 
     lowest_frequency_hz: float = 5.0
-    """Lowest frequency worth restoring."""
+    """Lowest frequency worth restoring — and the floor on where a section may be placed.
+
+    Nothing below this was measured, so a section placed there has its corner and Q resting on
+    no evidence."""
+
+    gain_headroom_db: float = 6.0
+    """How far a single section's gain may exceed the realised boost cap.
+
+    Some headroom is needed because sections shape each other, but not much: a fit allowed
+    45 dB used it, expressing a correction under 5 dB above 10 Hz as a 3 Hz shelf with +45 dB.
+    No BEQ should publish a section gain like that, whatever the realised response does."""
 
     max_sections: int = 6
     """Ceiling on biquads the numerical route may spend. The device budget is 10 (§5)."""
@@ -148,7 +158,8 @@ def design(
         params.max_sections,
         params.residual_target_db,
         band_hz=(5.0, 200.0),
-        placement_band_hz=correction_band_hz(target, freqs),
+        placement_band_hz=correction_band_hz(target, freqs, params.lowest_frequency_hz),
+        max_gain_db=params.max_boost_db + params.gain_headroom_db,
         realisation=params.realisation,
     )
     return _result(filters, "fitted", None, None, freqs, target, params, binds)
