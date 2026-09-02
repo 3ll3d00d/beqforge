@@ -102,3 +102,55 @@ def test_sweep_yields_the_baseline_first_and_skips_impossible_orders() -> None:
         for c in cases[1:]
         if c.injected.alignment.is_linkwitz_riley
     )
+
+
+def test_material_round_trips_through_the_extractor(tmp_path) -> None:
+    """`tools/extract.py` is how material arrives; the loader must reproduce §2's shapes."""
+    import subprocess
+
+    from beqanalyser.design.material import load
+
+    source = tmp_path / "probe.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "anoisesrc=d=10:c=pink:r=48000",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=30:duration=10:sample_rate=48000",
+            "-filter_complex",
+            "[0:a][1:a][0:a][1:a][0:a][1:a]amerge=inputs=6[a]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "pcm_s24le",
+            str(source),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "tools/extract.py",
+            str(source),
+            "--out",
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    material = load(tmp_path / "probe.npz")
+    assert material.fs == 1000
+    assert material.coverage == "complete_programme"
+    assert material.mono_mix.dtype == np.float64
+    assert set(material.channels) == {"L", "R", "C", "LFE", "Ls", "Rs"}
+    assert all(len(c) == len(material.mono_mix) for c in material.channels.values())
+    assert material.duration_s == pytest.approx(10.0, abs=0.1)

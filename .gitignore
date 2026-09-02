@@ -177,3 +177,4 @@ beq_composites.csv
 database.bin
 database.bin.sha256
 *.npy
+data/
