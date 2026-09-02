@@ -36,12 +36,32 @@ logger = logging.getLogger(__name__)
 class IdentifyParams:
     """Choices the identification makes. Each is a prior until a corpus settles it (§10)."""
 
-    fit_band_hz: tuple[float, float] = (5.0, 300.0)
-    """Band the two-part model is fitted over. Must reach well above the knee: a narrow band
-    lets the model trade `fc` against slope and still fit well (§3.5)."""
+    fit_band_hz: tuple[float, float] = (5.0, 60.0)
+    """Band the two-part model is fitted over.
 
-    envelope_order: int = 2
-    """Polynomial order of `N(f)` in log-frequency."""
+    Narrow, and that is the whole point. `N` and `A` overlap in function space, and how badly
+    depends on how many octaves `N` gets to curve over: across 5-300 Hz a quadratic absorbs
+    all but ~1 dB of a 2nd-order rolloff and the estimate is unstable, while across 5-60 Hz
+    the same fit moves the corner by 0.5 Hz between a linear and a quadratic `N`. The
+    identifiability problem is largely an artefact of fitting too wide a band.
+
+    60 Hz is also roughly where a human stops looking when reading a bass rolloff off a
+    spectrum, which is not a coincidence: above it there is nothing to learn about the corner
+    and plenty of content for `N` to chase."""
+
+    exclude_bands_hz: tuple[tuple[float, float], ...] = ()
+    """Bands to drop before fitting, for narrow authored features that are content, not shape.
+
+    The first real title carries a +14 dB feature about a third of an octave wide at 20 Hz in
+    its LFE channel. It is not a rolloff and it is not natural envelope; a robust loss does not
+    reject it because it is too broad to look like an outlier, and left in it drags the corner
+    from 13 Hz to 20."""
+
+    envelope_order: int = 1
+    """Polynomial order of `N(f)` in log-frequency.
+
+    Linear over the fitted band. Higher orders no longer change the answer much once the band
+    is narrow, so the lower order is taken for the tighter prior it represents."""
 
     min_coherence: float = 0.1
     """Below this a bin carries no event-related content and gets no weight (§3.4)."""
@@ -123,16 +143,15 @@ def _fit_inputs(
     Weighting is the coherence of §3.4 rather than any absolute noise-floor threshold: where
     coherence collapses the weight goes to zero on its own.
     """
-    band = (
-        (envelopes.freqs >= params.fit_band_hz[0])
-        & (envelopes.freqs <= params.fit_band_hz[1])
-        & envelopes.measurable
-        & (envelopes.coherence >= params.min_coherence)
+    band = (envelopes.freqs >= params.fit_band_hz[0]) & (
+        envelopes.freqs <= params.fit_band_hz[1]
     )
+    for low, high in params.exclude_bands_hz:
+        band &= ~((envelopes.freqs >= low) & (envelopes.freqs <= high))
     return (
         envelopes.freqs[band],
-        envelopes.content_db[band],
-        np.clip(envelopes.coherence[band], 0.0, None),
+        envelopes.mean_db[band],
+        np.ones(int(band.sum())),
     )
 
 

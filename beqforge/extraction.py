@@ -96,6 +96,17 @@ class Envelopes:
     """What identification fits. All arrays share `freqs`."""
 
     freqs: np.ndarray
+    mean_db: np.ndarray
+    """Long-term average spectrum over the whole signal.
+
+    What identification fits, and what a human actually reads. §3.3 originally called for a
+    high percentile and argued a mean is "dominated by quiet passages"; measured on real
+    material that is backwards. The percentile of heavy scenes is dominated by the *loudest*
+    events, which are LFE-driven and carry whatever the author sculpted into them — on the
+    first title a narrow +14 dB feature at 20 Hz — and that drags the corner estimate up with
+    it. Averaging the whole runtime averages such features away.
+    """
+
     peak_db: np.ndarray
     quiet_db: np.ndarray
     coherence: np.ndarray
@@ -165,6 +176,7 @@ def extract(
         f"of {len(band_energy_db)} frames"
     )
 
+    mean_db = 10.0 * np.log10(power.mean(axis=1) + 1e-300)
     peak_db = _envelope_db(power, loud, params.envelope_percentile)
     quiet_db = _envelope_db(power, quiet, params.envelope_percentile)
     reference = params.reference_band_hz
@@ -172,6 +184,7 @@ def extract(
 
     envelopes = Envelopes(
         freqs=freqs,
+        mean_db=mean_db,
         peak_db=peak_db,
         quiet_db=quiet_db,
         coherence=coherence,
