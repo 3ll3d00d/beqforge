@@ -22,6 +22,7 @@ import numpy as np
 from beqanalyser.design import BiquadSpec, ExactInversionUnavailable, HighPass
 from beqanalyser.design.extraction import Envelopes
 from beqanalyser.design.filters import (
+    Realisation,
     biquad_sos,
     correction_band_hz,
     fit_minimal_biquads,
@@ -62,6 +63,14 @@ class DesignParams:
 
     max_sections: int = 6
     """Ceiling on biquads the numerical route may spend. The device budget is 10 (§5)."""
+
+    realisation: Realisation | None = Realisation()
+    """How the cascade will actually be realised, scored during the fit.
+
+    On by default. Fitting in float64 alone accepts cascades built from large opposing
+    sections that cancel; on the target device the cancellation does not survive coefficient
+    quantisation. Measured on this pipeline's own output at 96 kHz in 5.23 fixed point, the
+    drift falls from 0.98 dB to 0.19 dB for no meaningful loss of accuracy."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +149,7 @@ def design(
         params.residual_target_db,
         band_hz=(5.0, 200.0),
         placement_band_hz=correction_band_hz(target, freqs),
+        realisation=params.realisation,
     )
     return _result(filters, "fitted", None, None, freqs, target, params, binds)
 

@@ -17,6 +17,7 @@ from beqanalyser.design import (
     HighPass,
 )
 from beqanalyser.design.filters import (
+    Realisation,
     biquad_sos,
     fit_to_biquads,
     high_pass_sos,
@@ -198,3 +199,44 @@ def test_biquad_spec_rejects_unpublishable_values(kwargs: dict) -> None:
 def test_linkwitz_riley_rejects_odd_order() -> None:
     with pytest.raises(ValueError):
         HighPass(Alignment.LINKWITZ_RILEY, 3, 25.0)
+
+
+def test_fitting_scores_the_realisation_not_just_float64() -> None:
+    """A cascade that only works in double precision is not a filter anyone can use.
+
+    Fitting on magnitude alone puts no cost on a solution built from large opposing sections:
+    they cancel perfectly in float64 and the residual says so. On the target device the
+    cancellation does not survive coefficient quantisation. Scoring the quantised realisation
+    inside the cost rejects those while they are being fitted.
+    """
+    target = inversion_target_db(
+        HighPass(Alignment.BUTTERWORTH, 4, 25.0),
+        HighPass(Alignment.LINKWITZ_RILEY, 4, 9.0),
+        FREQS,
+        FS,
+    )
+    realisation = Realisation()
+
+    def drift_db(specs: list[BiquadSpec]) -> float:
+        sos = biquad_sos(specs, realisation.fs)
+        exact = magnitude_db(sos, FREQS, realisation.fs)
+        quantised = magnitude_db(realisation.quantise(sos), FREQS, realisation.fs)
+        band = (FREQS >= BAND[0]) & (FREQS <= BAND[1])
+        return float(np.max(np.abs(quantised - exact)[band]))
+
+    naive, naive_error = fit_to_biquads(
+        target, FREQS, FS, sections=3, band_hz=BAND, seeds=(0,)
+    )
+    aware, aware_error = fit_to_biquads(
+        target, FREQS, FS, sections=3, band_hz=BAND, realisation=realisation, seeds=(0,)
+    )
+
+    assert drift_db(aware) < drift_db(naive)
+    assert drift_db(aware) < 1.0
+    # the accuracy given up for that has to stay small, or this is not a trade worth making
+    assert aware_error < naive_error + 0.5
+
+
+def test_quantisation_leaves_the_normalised_denominator_alone() -> None:
+    sos = biquad_sos([BiquadSpec("low_shelf", 12.0, 15.0, 0.9)], 96000.0)
+    assert np.all(Realisation().quantise(sos)[:, 3] == 1.0)

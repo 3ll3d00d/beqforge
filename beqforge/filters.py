@@ -13,6 +13,7 @@ Everything below the public boundary takes plain ndarrays.
 
 import logging
 import math
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import optimize, signal
@@ -196,6 +197,8 @@ def fit_minimal_biquads(
     residual_target_db: float,
     band_hz: tuple[float, float] | None = None,
     placement_band_hz: tuple[float, float] | None = None,
+    max_q: float = 6.0,
+    realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
     """The fewest sections that reach `residual_target_db`, or the best within the budget.
@@ -208,7 +211,15 @@ def fit_minimal_biquads(
     best: tuple[list[BiquadSpec], float] | None = None
     for sections in range(1, max_sections + 1):
         candidate = fit_to_biquads(
-            target_db, freqs, fs, sections, band_hz, placement_band_hz, seeds
+            target_db,
+            freqs,
+            fs,
+            sections,
+            band_hz,
+            placement_band_hz,
+            max_q,
+            realisation,
+            seeds,
         )
         if best is None or candidate[1] < best[1]:
             best = candidate
@@ -229,6 +240,8 @@ def fit_to_biquads(
     sections: int,
     band_hz: tuple[float, float] | None = None,
     placement_band_hz: tuple[float, float] | None = None,
+    max_q: float = 6.0,
+    realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
     """Minimax fit of `sections` publishable biquads to an arbitrary target.
@@ -261,6 +274,8 @@ def fit_to_biquads(
                 sections - shelves,
                 band_hz,
                 placement,
+                max_q,
+                realisation,
                 seed,
             )
             if best is None or candidate[1] < best[1]:
@@ -273,6 +288,32 @@ def fit_to_biquads(
     return best
 
 
+@dataclass(frozen=True, slots=True)
+class Realisation:
+    """How the published cascade will actually be realised, for robustness scoring.
+
+    A fit scored only in float64 will happily use large opposing sections that cancel — the
+    magnitude is right and the residual says so. On hardware those cancellations do not
+    survive coefficient quantisation: measured on one target, a pair of +13.6 and -16.9 dB
+    peaks at the same frequency drifts 2.8 dB, while a cascade of the same order with no
+    cancellation drifts 0.16 dB. Sensitivity tracks how much the sections rely on each other,
+    not their Q.
+    """
+
+    fs: float = 96000.0
+    """Worst-case publish rate. Higher is worse: the poles sit nearer z=1."""
+
+    coefficient_bits: int = 28
+    integer_bits: int = 5
+    """Fixed-point format of the target device. 5.23 is the conservative case."""
+
+    def quantise(self, sos: np.ndarray) -> np.ndarray:
+        step = 2.0 ** (self.integer_bits - self.coefficient_bits)
+        rounded = np.round(np.asarray(sos) / step) * step
+        rounded[:, 3] = 1.0
+        return rounded
+
+
 def _fit_structure(
     target_db: np.ndarray,
     freqs: np.ndarray,
@@ -281,6 +322,8 @@ def _fit_structure(
     peaks: int,
     band_hz: tuple[float, float] | None,
     placement_hz: tuple[float, float] | None,
+    max_q: float,
+    realisation: "Realisation | None",
     seed: int,
 ) -> tuple[list[BiquadSpec], float]:
     sections = shelves + peaks
@@ -295,12 +338,19 @@ def _fit_structure(
     # the correction actually is, or spare budget gets parked in the midrange.
     low = float(placement_hz[0]) if placement_hz else float(freqs[0])
     high = float(placement_hz[1]) if placement_hz else float(freqs[-1])
-    bounds = [(low, high), (0.1, 6.0), (-25.0, 45.0)] * sections
+    bounds = [(low, high), (0.1, max_q), (-25.0, 45.0)] * sections
 
     def cost(p: np.ndarray) -> float:
         specs = _unpack(p, shelves, peaks)
         err = magnitude_db(biquad_sos(specs, fs), freqs, fs) - target_db
-        return float(np.max(np.abs(err[mask])))
+        worst = float(np.max(np.abs(err[mask])))
+        if realisation is not None:
+            device = biquad_sos(specs, realisation.fs)
+            drift = magnitude_db(
+                realisation.quantise(device), freqs, realisation.fs
+            ) - magnitude_db(device, freqs, realisation.fs)
+            worst = max(worst, float(np.max(np.abs(drift[mask]))))
+        return worst
 
     coarse = optimize.differential_evolution(
         cost, bounds, seed=seed, maxiter=600, popsize=20, tol=1e-10, polish=True
