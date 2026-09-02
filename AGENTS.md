@@ -21,7 +21,8 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/reporter.py` | matplotlib plots, log summaries, CSV export. Presentation only. |
 | `beqanalyser/__main__.py` | The one hard-coded run configuration. |
 | `beqanalyser/beq.ipynb` | Same pipeline, stage by stage. **Partially stale — see gotchas.** |
-| `tests/` | Empty (stale `__pycache__` only). |
+| `beqanalyser/design/` | Automated filter design — a **separate capability**, not part of the pipeline above. `filters.py` synthesises high-passes and inverts them to a publishable cascade; `harness.py` builds synthetic ground truth. See `AUTOMATED_DESIGN.md`. |
+| `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
 
 [AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md) is a plan for a separate, not-yet-built capability —
 deriving a BEQ filter from an audio track rather than summarising existing ones. Nothing in the table
@@ -81,10 +82,11 @@ Notes:
   *filtered* catalogue, so changing the `load()` predicate invalidates it.
 * Every `reporter.plot_*` function calls `plt.show()` and blocks. Don't call them from a headless script
   without setting a non-interactive matplotlib backend.
-* There are no tests, so there is no fast feedback loop. To sanity-check a pipeline change, build a small
-  synthetic catalogue (a few dozen shelf curves with jitter, in three groups), run
-  `compute_distance_matrix` + `build_all_composites` with `min_cluster_size≈20`, and check the composite
-  count and reject rate. That runs in seconds.
+* The clustering pipeline has no tests, so there is no fast feedback loop there. To sanity-check a
+  pipeline change, build a small synthetic catalogue (a few dozen shelf curves with jitter, in three
+  groups), run `compute_distance_matrix` + `build_all_composites` with `min_cluster_size≈20`, and check
+  the composite count and reject rate. That runs in seconds. `beqanalyser/design/` *is* tested —
+  `uv run pytest`.
 
 ## Gotchas
 
