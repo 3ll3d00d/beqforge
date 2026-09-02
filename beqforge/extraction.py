@@ -43,27 +43,36 @@ class ExtractionParams:
     band_hz: tuple[float, float] = (4.0, 470.0)
     """Usable band. The top is where the decimation anti-alias filter takes hold, measured."""
 
-    scene_band_hz: tuple[float, float] = (40.0, 200.0)
+    scene_band_hz: tuple[float, float] = (10.0, 60.0)
     """Band whose energy decides whether a frame is a heavy scene.
 
-    Neither the full band nor the band being measured.
+    It must be dominated by the same sources as the band being measured. Measured on a real
+    7.1 title, 40-200 Hz is 84% front L/C/R — dialogue and score — and 1.6% LFE, while 10-30 Hz
+    is 50% LFE. Selecting on 40-200 Hz therefore picks the frames where the *dialogue* is loud
+    and then measures sub-bass in them, which is not the same question.
 
-    Not the full band, because selecting on broadband energy picks dialogue and music, which
-    on real material is most of a film — 70% of frames on the first title tried — and the
-    resulting "peak" envelope is then an average of the programme rather than of its heavy
-    moments. §3.3 wants the loudest *bass*, so select on bass.
-
-    But not the bottom of the band either, because rumble lives there and it lifts the floor
-    the margin is measured against. With a 10-120 Hz selection band, adding rumble at -25 dB
-    cut qualifying frames from 346 to 137 and left a 3.7 dB error that survived differencing —
-    §3.3 attributes rumble cancellation to the differencing, but the damage was done upstream,
-    in the selection. Choosing scenes above the rumble region reduces that to 0.96 dB."""
+    Rumble is not a reason to move this band up. Rumble is stationary, so it lifts every
+    frame's energy equally and does not change which frames rank highest; what it changes is
+    the floor, and therefore how many frames clear a fixed margin above it."""
 
     floor_percentile: float = 10.0
     """Frame-energy percentile taken as the title's own floor."""
 
-    scene_margin_db: float = 12.0
-    """How far above the floor a frame must sit to count as content. Absolute, per §3.2."""
+    scene_margin_db: float = 45.0
+    """How far above the floor a frame must sit to count as content. Absolute, per §3.2.
+
+    Large, because sub-bass in a film has enormous dynamic range — 61 dB from p10 to p99 on the
+    first real title — and the genuine bass events are the top 1-3% of frames. At +12 dB, 62%
+    of frames qualified and the feature being looked for was diluted out of existence: a knee
+    at 20 Hz measured +10.9 dB above 40 Hz over the top 1% of frames and -2.5 dB over that 62%.
+
+    The dilution is worst on exactly the material §2.3 says matters most. §3.2 warns that
+    *relative* selection manufactures false positives on a bass-light title; an absolute margin
+    over the wrong band manufactures the mirror image, a false negative, and on a bass-light
+    title the ratio of ordinary frames to genuine bass frames is highest of all.
+
+    The value is an unresolved prior (§10). What can be said from measurement is that the
+    recovered shape is stable from roughly +45 to +55 dB and degrades below +40."""
 
     quiet_margin_db: float = 3.0
     """How close to the floor a frame must sit to count as quiet."""
@@ -101,14 +110,32 @@ class Envelopes:
         return self.peak_db - self.quiet_db
 
     @property
+    def measurable(self) -> np.ndarray:
+        """Bins where the peak envelope actually stands above the quiet one.
+
+        Where it does not, there is no content to measure — only floor — and any number
+        derived from the difference is noise. Fitting must weight these to zero rather than
+        treat a large negative as a deep rolloff.
+        """
+        return (
+            np.isfinite(self.peak_db)
+            & np.isfinite(self.quiet_db)
+            & (self.peak_db > self.quiet_db)
+        )
+
+    @property
     def content_db(self) -> np.ndarray:
         """Peak envelope with the quiet envelope removed in power.
 
-        Rumble is present in both, so differencing cancels it. Clipped at the floor rather
-        than allowed to go negative where the two meet.
+        Rumble is present in both, so differencing cancels it. `-inf` where the two meet,
+        which is honest: the alternative is a plausible-looking large negative that reads as a
+        rolloff and is nothing of the kind. Check `measurable` before using this.
         """
         difference = 10.0 ** (self.peak_db / 10.0) - 10.0 ** (self.quiet_db / 10.0)
-        return 10.0 * np.log10(np.maximum(difference, 1e-300))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(
+                self.measurable, 10.0 * np.log10(np.abs(difference)), -np.inf
+            )
 
     def __str__(self) -> str:
         return (
@@ -153,6 +180,13 @@ def extract(
         quiet_frames=int(quiet.sum()),
         total_frames=len(band_energy_db),
     )
+    if not envelopes.loud_frames:
+        logger.warning(
+            f"No frame cleared {params.scene_margin_db:.0f} dB above the "
+            f"{params.scene_band_hz[0]:.0f}-{params.scene_band_hz[1]:.0f} Hz floor: "
+            "either the title has no heavy scenes or something stationary is filling that "
+            "band. Either way there is nothing to identify — abstain."
+        )
     logger.info(f"Extracted {envelopes}")
     return envelopes
 

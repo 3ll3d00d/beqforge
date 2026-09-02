@@ -93,10 +93,14 @@ def test_scene_selection_is_absolute_so_a_quiet_title_yields_few_scenes() -> Non
     assert quiet_fraction < 0.5 * loud_fraction
 
 
-def test_differencing_the_envelopes_cancels_rumble() -> None:
-    """§3.3 — rumble is in both envelopes, so the difference removes it."""
-    profile = SyntheticProfile(duration_s=900.0, event_rate_hz=0.08)
-    clean = extract(synthesise(profile, FS, seed=5), FS)
+def test_rumble_in_the_selection_band_forces_abstention(caplog) -> None:
+    """Rumble does not change which frames are loudest — it is stationary — but it does lift
+    the floor an absolute margin is measured against, and the selection band now sits where
+    rumble lives (§3.2). Strong rumble therefore starves the selection entirely.
+
+    That is the right outcome, not a bug: a title whose bass band is filled by something
+    stationary has nothing identifiable in it. What matters is that it says so.
+    """
     rumbly = extract(
         synthesise(
             SyntheticProfile(
@@ -107,26 +111,19 @@ def test_differencing_the_envelopes_cancels_rumble() -> None:
         ),
         FS,
     )
+    assert rumbly.loud_frames == 0
+    assert not rumbly.measurable.any()
+    assert np.all(np.isneginf(rumbly.content_db))
+    assert "abstain" in caplog.text
 
-    below = (clean.freqs >= 5.0) & (clean.freqs <= 10.0)
-    shift = np.median((rumbly.content_db - clean.content_db)[below])
-    assert abs(shift) < 2.0
 
-    # and the damage rumble does is mostly upstream, in scene selection, not in the envelope:
-    # selecting scenes down at 10 Hz lets the rumble lift the floor and starve the selection
-    contaminated = ExtractionParams(scene_band_hz=(10.0, 120.0))
-    starved = extract(
-        synthesise(
-            SyntheticProfile(
-                duration_s=900.0, event_rate_hz=0.08, rumble_db=-20.0, rumble_hz=12.0
-            ),
-            FS,
-            seed=5,
-        ),
-        FS,
-        contaminated,
-    )
-    assert starved.loud_frames < 0.75 * rumbly.loud_frames
+def test_content_is_flagged_unmeasurable_rather_than_reported_as_a_deep_rolloff(
+    baseline,
+) -> None:
+    """A peak envelope at or below the quiet one means floor, not attenuation."""
+    assert baseline.measurable.any()
+    assert np.all(np.isfinite(baseline.content_db[baseline.measurable]))
+    assert np.all(np.isneginf(baseline.content_db[~baseline.measurable]))
 
 
 def test_reference_band_does_not_move_with_the_signal(source: np.ndarray) -> None:
