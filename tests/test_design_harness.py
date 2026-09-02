@@ -147,6 +147,14 @@ def test_material_round_trips_through_the_extractor(tmp_path) -> None:
         check=True,
     )
 
+    # smoke-check the summariser in the same pass; it is how a new extraction gets eyeballed,
+    # and running it as a script is what caught tools/inspect.py shadowing stdlib `inspect`
+    subprocess.run(
+        ["uv", "run", "python", "tools/summarise.py", str(tmp_path / "probe.npz")],
+        check=True,
+        capture_output=True,
+    )
+
     material = load(tmp_path / "probe.npz")
     assert material.fs == 1000
     assert material.coverage == "complete_programme"
