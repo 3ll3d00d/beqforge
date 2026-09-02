@@ -229,7 +229,13 @@ def _fit_structure(
         if band_hz is None
         else (freqs >= band_hz[0]) & (freqs <= band_hz[1])
     )
-    bounds = [(float(freqs[0]), float(freqs[-1])), (0.1, 6.0), (-25.0, 45.0)] * sections
+    # sections are confined to the band the cost is evaluated over. Outside it they are
+    # unconstrained, and an unconstrained section is not harmless: a fit evaluated over
+    # 5-200 Hz once placed a +15 dB peak at 378 Hz, invisible to its own residual and
+    # thoroughly audible on playback.
+    low = float(band_hz[0]) if band_hz else float(freqs[0])
+    high = float(band_hz[1]) if band_hz else float(freqs[-1])
+    bounds = [(low, high), (0.1, 6.0), (-25.0, 45.0)] * sections
 
     def cost(p: np.ndarray) -> float:
         specs = _unpack(p, shelves, peaks)

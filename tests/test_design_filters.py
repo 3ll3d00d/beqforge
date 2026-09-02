@@ -167,6 +167,21 @@ def test_numerical_fit_closes_a_mismatched_alignment() -> None:
     assert repeat_error == error
 
 
+def test_fitted_sections_stay_inside_the_evaluated_band() -> None:
+    """A section outside the cost band is unconstrained, and not harmlessly so: one fit
+    evaluated over 5-200 Hz placed a +15 dB peak at 378 Hz, invisible to its own residual
+    and thoroughly audible on playback.
+    """
+    target = inversion_target_db(
+        HighPass(Alignment.BUTTERWORTH, 4, 25.0),
+        HighPass(Alignment.LINKWITZ_RILEY, 4, 10.0),
+        FREQS,
+        FS,
+    )
+    specs, _ = fit_to_biquads(target, FREQS, FS, sections=3, band_hz=BAND, seeds=(0,))
+    assert all(BAND[0] <= spec.freq_hz <= BAND[1] for spec in specs)
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
