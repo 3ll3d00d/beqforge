@@ -23,7 +23,8 @@ from beqanalyser.design import BiquadSpec, ExactInversionUnavailable, HighPass
 from beqanalyser.design.extraction import Envelopes
 from beqanalyser.design.filters import (
     biquad_sos,
-    fit_to_biquads,
+    correction_band_hz,
+    fit_minimal_biquads,
     high_pass_sos,
     inversion_target_db,
     invert_to_shelves,
@@ -47,14 +48,20 @@ class DesignParams:
     max_boost_db: float = 20.0
     """Absolute cap on the correction. Sets the protective filter's corner."""
 
+    residual_target_db: float = 0.5
+    """Accuracy the published cascade must reach against its target.
+
+    Sections are spent until this is met, then no more. Under-spending shows up here as a
+    residual that misses; over-spending would otherwise show up nowhere at all."""
+
     noise_margin_db: float = 12.0
     """How far boosted noise must stay below the content that masks it (§4.1)."""
 
     lowest_frequency_hz: float = 5.0
     """Lowest frequency worth restoring."""
 
-    sections: int = 4
-    """Biquads the numerical route may spend. The budget is 10 (§5)."""
+    max_sections: int = 6
+    """Ceiling on biquads the numerical route may spend. The device budget is 10 (§5)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,8 +132,14 @@ def design(
 
     freqs = np.logspace(math.log10(3.0), math.log10(400.0), 400)
     target = _fitted_target(freqs, fit, protect_corner, params, ceiling_db, envelopes)
-    filters, _ = fit_to_biquads(
-        target, freqs, PUBLISH_FS, params.sections, band_hz=(5.0, 200.0)
+    filters, _ = fit_minimal_biquads(
+        target,
+        freqs,
+        PUBLISH_FS,
+        params.max_sections,
+        params.residual_target_db,
+        band_hz=(5.0, 200.0),
+        placement_band_hz=correction_band_hz(target, freqs),
     )
     return _result(filters, "fitted", None, None, freqs, target, params, binds)
 

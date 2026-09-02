@@ -172,12 +172,63 @@ def invert_to_shelves(rolloff: HighPass, protect: HighPass) -> list[BiquadSpec]:
     ]
 
 
+def correction_band_hz(
+    target_db: np.ndarray, freqs: np.ndarray, threshold_db: float = 0.5
+) -> tuple[float, float]:
+    """The span over which a target actually asks for something, widened by half an octave.
+
+    Sections belong where the correction is, not merely inside the band the residual is scored
+    over. A bass correction that is flat above 25 Hz has no business placing a section at
+    105 Hz, and one that does is spending budget to achieve nothing.
+    """
+    active = np.abs(target_db) >= threshold_db
+    if not active.any():
+        return float(freqs[0]), float(freqs[-1])
+    low, high = float(freqs[active].min()), float(freqs[active].max())
+    return max(float(freqs[0]), low / 1.5), min(float(freqs[-1]), high * 1.5)
+
+
+def fit_minimal_biquads(
+    target_db: np.ndarray,
+    freqs: np.ndarray,
+    fs: float,
+    max_sections: int,
+    residual_target_db: float,
+    band_hz: tuple[float, float] | None = None,
+    placement_band_hz: tuple[float, float] | None = None,
+    seeds: tuple[int, ...] = (0, 1, 2),
+) -> tuple[list[BiquadSpec], float]:
+    """The fewest sections that reach `residual_target_db`, or the best within the budget.
+
+    `fit_to_biquads` spends whatever budget it is given, so asking it for four sections when
+    three will do parks the fourth somewhere harmless at a fraction of a dB. A section that
+    does nothing is not free: it occupies a slot, it has to be published, and it invites the
+    reader to believe it means something.
+    """
+    best: tuple[list[BiquadSpec], float] | None = None
+    for sections in range(1, max_sections + 1):
+        candidate = fit_to_biquads(
+            target_db, freqs, fs, sections, band_hz, placement_band_hz, seeds
+        )
+        if best is None or candidate[1] < best[1]:
+            best = candidate
+        if candidate[1] <= residual_target_db:
+            logger.info(
+                f"{sections} section(s) reach {candidate[1]:.3f} dB; "
+                f"not spending the remaining {max_sections - sections}"
+            )
+            return candidate
+    assert best is not None
+    return best
+
+
 def fit_to_biquads(
     target_db: np.ndarray,
     freqs: np.ndarray,
     fs: float,
     sections: int,
     band_hz: tuple[float, float] | None = None,
+    placement_band_hz: tuple[float, float] | None = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
     """Minimax fit of `sections` publishable biquads to an arbitrary target.
@@ -198,11 +249,19 @@ def fit_to_biquads(
     `residual_db` the contract asks for. Deterministic: the seeds are fixed, so repeat calls on
     identical input reproduce the same answer.
     """
+    placement = placement_band_hz or band_hz
     best: tuple[list[BiquadSpec], float] | None = None
     for shelves in range(1, sections + 1):
         for seed in seeds:
             candidate = _fit_structure(
-                target_db, freqs, fs, shelves, sections - shelves, band_hz, seed
+                target_db,
+                freqs,
+                fs,
+                shelves,
+                sections - shelves,
+                band_hz,
+                placement,
+                seed,
             )
             if best is None or candidate[1] < best[1]:
                 best = candidate
@@ -221,6 +280,7 @@ def _fit_structure(
     shelves: int,
     peaks: int,
     band_hz: tuple[float, float] | None,
+    placement_hz: tuple[float, float] | None,
     seed: int,
 ) -> tuple[list[BiquadSpec], float]:
     sections = shelves + peaks
@@ -229,12 +289,12 @@ def _fit_structure(
         if band_hz is None
         else (freqs >= band_hz[0]) & (freqs <= band_hz[1])
     )
-    # sections are confined to the band the cost is evaluated over. Outside it they are
-    # unconstrained, and an unconstrained section is not harmless: a fit evaluated over
-    # 5-200 Hz once placed a +15 dB peak at 378 Hz, invisible to its own residual and
-    # thoroughly audible on playback.
-    low = float(band_hz[0]) if band_hz else float(freqs[0])
-    high = float(band_hz[1]) if band_hz else float(freqs[-1])
+    # Evaluate wide, place narrow. The residual has to be scored well above the correction,
+    # or a section drifts upward and puts a bump where nothing penalises it — a fit scored on
+    # 5-200 Hz once placed a +15.2 dB peak at 378 Hz. But sections must be *placed* only where
+    # the correction actually is, or spare budget gets parked in the midrange.
+    low = float(placement_hz[0]) if placement_hz else float(freqs[0])
+    high = float(placement_hz[1]) if placement_hz else float(freqs[-1])
     bounds = [(low, high), (0.1, 6.0), (-25.0, 45.0)] * sections
 
     def cost(p: np.ndarray) -> float:
