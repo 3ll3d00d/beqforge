@@ -54,6 +54,9 @@ class AcceptParams:
     roughness_degree: int = 3
     """Order of the smooth trend the material's roughness is measured against."""
 
+    extent_smoothing_bins: int = 9
+    """Width of the moving average the extent clause is measured on."""
+
     turnover_min_octaves: float = 0.5
     """How far inside the band the peak must sit before a turnover is measured.
 
@@ -146,6 +149,13 @@ def corrected_extent_hz(correction: Correction, params: AcceptParams) -> float:
     R1's extent clause. Both candidates on the second title are flat across the band they
     cover; the only difference between them is how far down that band reaches, so a check
     that does not measure extent cannot tell them apart.
+
+    Judged on a smoothed curve against an envelope widened by the material's own scatter. Bin
+    noise is not something a filter can address — a hand-built design that is flat to +-1.5 dB
+    across 5-40 Hz still puts 17 of 164 bins below an absolute -3 dB line, worst -3.9, in runs
+    up to 0.7 Hz wide, and terminating on the first of those reported the correction as
+    reaching only 25.9 Hz. What this clause is for is gross failure to correct at all — the
+    design it was written to catch sits 13 dB out, not 0.9.
     """
     # bounded at both ends: the correction's own frequency axis runs to Nyquist, and walking
     # down from there reports the top of the spectrum rather than the top of the band
@@ -153,8 +163,10 @@ def corrected_extent_hz(correction: Correction, params: AcceptParams) -> float:
         correction.freqs <= correction.band_hz[1]
     )
     freqs = correction.freqs[band]
-    after = correction.after_db[band]
+    after = _smooth(correction.after_db[band], params.extent_smoothing_bins)
+    slack = spectral_roughness(correction, params.roughness_degree) / 2.0
     low, high = params.level_range_db
+    low, high = low - slack, high + slack
     inside = (after >= low) & (after <= high)
     if not inside.any():
         return float(freqs[-1])
@@ -162,6 +174,14 @@ def corrected_extent_hz(correction: Correction, params: AcceptParams) -> float:
     while index >= 0 and inside[index]:
         index -= 1
     return float(freqs[min(index + 1, len(freqs) - 1)])
+
+
+def _smooth(values: np.ndarray, window: int) -> np.ndarray:
+    """Moving average, edges preserved rather than pulled toward zero."""
+    if window <= 1 or len(values) < window:
+        return values
+    padded = np.pad(values, window // 2, mode="edge")
+    return np.convolve(padded, np.ones(window) / window, mode="valid")[: len(values)]
 
 
 def turnover_db_per_octave(

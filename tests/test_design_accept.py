@@ -259,3 +259,29 @@ def test_under_correction_is_not_reported_as_a_turnover() -> None:
     )
     assert not any("too much too soon" in f for f in verdict.failures)
     assert any("under-corrected" in f for f in verdict.failures)
+
+
+def test_bin_noise_does_not_terminate_the_extent() -> None:
+    """A flat correction scatters below an absolute line; that is the material, not the filter.
+
+    A hand-built design that is flat to +-1.5 dB across 5-40 Hz still put 17 of 164 bins below
+    -3 dB, worst -3.9, in runs up to 0.7 Hz wide. Stopping at the first of them reported the
+    correction as reaching only 25.9 Hz and rejected a filter a person judged correct.
+    """
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0.0, 1.1, len(FREQS))
+    flat = correction(lambda f: -18.0, lambda f: -1.3)
+    speckled = Correction(
+        freqs=FREQS,
+        before_db=flat.before_db + noise,
+        after_db=flat.after_db + noise,
+        band_hz=BAND,
+    )
+    assert (speckled.after_db < -3.0).sum() > 5  # genuinely dips out, in single bins
+    assert corrected_extent_hz(speckled, AcceptParams()) <= BAND[0] * 1.05
+
+
+def test_a_correction_that_genuinely_stops_is_still_caught() -> None:
+    """The clause exists for gross failure: 13 dB out, not 0.9."""
+    stopping = correction(lambda f: -13.0, lambda f: -1.5 if f >= 14.0 else -13.0)
+    assert 12.0 < corrected_extent_hz(stopping, AcceptParams()) < 16.0
