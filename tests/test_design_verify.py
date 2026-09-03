@@ -29,7 +29,7 @@ def test_the_exact_inverse_leaves_the_low_end_flat(rolled_off: np.ndarray) -> No
         HighPass(Alignment.LINKWITZ_RILEY, 4, 18.0),
         HighPass(Alignment.LINKWITZ_RILEY, 4, 4.0),
     )
-    correction = verify(exact, rolled_off, FS, band_hz=(6.0, 16.0))
+    correction = verify(exact, rolled_off, FS, band_hz=(6.0, 45.0))
 
     assert correction.improvement_db > 10.0
     assert abs(correction.tilt_db_per_octave) < 2.0
@@ -38,7 +38,7 @@ def test_the_exact_inverse_leaves_the_low_end_flat(rolled_off: np.ndarray) -> No
 
 def test_doing_nothing_is_reported_as_under_corrected(rolled_off: np.ndarray) -> None:
     nothing = [BiquadSpec("peaking_eq", 30.0, 0.0, 1.0)]
-    correction = verify(nothing, rolled_off, FS, band_hz=(6.0, 16.0))
+    correction = verify(nothing, rolled_off, FS, band_hz=(6.0, 45.0))
 
     assert correction.tilt_db_per_octave > 2.0
     assert any("under-corrected" in c for c in correction.concerns())
@@ -50,20 +50,40 @@ def test_over_correction_is_reported_as_over_corrected(rolled_off: np.ndarray) -
         HighPass(Alignment.LINKWITZ_RILEY, 4, 55.0),
         HighPass(Alignment.LINKWITZ_RILEY, 4, 4.0),
     )
-    correction = verify(too_much, rolled_off, FS, band_hz=(6.0, 16.0))
+    correction = verify(too_much, rolled_off, FS, band_hz=(6.0, 45.0))
 
-    # tilt saturates near -1.5 dB/oct however far the corner is overshot, because the inverse
-    # of a much higher corner is flat across this band; only the level runs away
+    assert correction.tilt_db_per_octave < -2.0
     assert correction.level_db > 8.0
-    assert abs(correction.tilt_db_per_octave) < 2.0
     assert any("over-corrected" in c for c in correction.concerns())
+
+
+def test_level_catches_an_overshoot_that_tilt_alone_would_miss(
+    rolled_off: np.ndarray,
+) -> None:
+    """Over a band narrower than the correction, tilt saturates and only level moves.
+
+    Measured across 6-16 Hz, inverting an 18 Hz rolloff as if its corner were anywhere from 34
+    to 70 Hz gives a tilt between -1.2 and -1.5 dB/oct — the inverse is at its plateau there,
+    so the shape barely changes however far the overshoot goes. The level does not saturate.
+    Widening the band is the better fix and is now the default, but the metric earns its place
+    for any caller that narrows it again.
+    """
+    too_much = invert_to_shelves(
+        HighPass(Alignment.LINKWITZ_RILEY, 4, 55.0),
+        HighPass(Alignment.LINKWITZ_RILEY, 4, 4.0),
+    )
+    narrow = verify(too_much, rolled_off, FS, band_hz=(6.0, 16.0))
+
+    assert abs(narrow.tilt_db_per_octave) < 2.0
+    assert narrow.level_db > 8.0
+    assert any("over-corrected" in c for c in narrow.concerns())
 
 
 def test_improvement_is_negative_when_the_filter_makes_things_worse(
     rolled_off: np.ndarray,
 ) -> None:
     wrong_way = [BiquadSpec("low_shelf", 12.0, -18.0, 0.7)]
-    correction = verify(wrong_way, rolled_off, FS, band_hz=(6.0, 16.0))
+    correction = verify(wrong_way, rolled_off, FS, band_hz=(6.0, 45.0))
 
     assert correction.improvement_db < 0.0
     assert any("less flat" in c for c in correction.concerns())

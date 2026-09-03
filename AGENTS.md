@@ -21,7 +21,17 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/reporter.py` | matplotlib plots, log summaries, CSV export. Presentation only. |
 | `beqanalyser/__main__.py` | The one hard-coded run configuration. |
 | `beqanalyser/beq.ipynb` | Same pipeline, stage by stage. **Partially stale — see gotchas.** |
-| `beqanalyser/design/` | Automated filter design — a **separate capability**, not part of the pipeline above. `filters.py` synthesises high-passes and inverts them to a publishable cascade; `harness.py` builds synthetic ground truth. See `AUTOMATED_DESIGN.md`. |
+| `beqanalyser/design/` | Automated filter design — a **separate capability**, not part of the clustering pipeline above. See `AUTOMATED_DESIGN.md`; the pipeline runs material → extraction → identify → design → verify. |
+| `beqanalyser/design/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names. |
+| `beqanalyser/design/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence. |
+| `beqanalyser/design/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
+| `beqanalyser/design/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link; see §10.** |
+| `beqanalyser/design/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
+| `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. |
+| `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
+| `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
+| `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
+| `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
 
 [AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md) is a plan for a separate, not-yet-built capability —
@@ -124,3 +134,12 @@ Notes:
   outside the notebook.
 * Numeric code stays vectorised over numpy; the distance matrix path is chunked and multiprocessed on
   purpose — preserve the chunking when editing it.
+
+## Working on `design/`
+
+* **Never trust a residual.** It says a cascade matches the target it was handed, not that the target
+  was right. Four separate outputs measured well and were wrong on sight — a +15 dB peak at 378 Hz, a
+  no-op section at 105 Hz, a +45 dB gain, a shelf placed at 3.22 Hz. Run `verify` and look at the
+  corrected curve.
+* Fits are slow (tens of seconds to minutes). Run them in the background; the test suite is ~2 minutes.
+* `data/` holds extracted material and is gitignored. Nothing in it is committed.

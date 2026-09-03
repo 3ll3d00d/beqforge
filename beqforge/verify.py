@@ -119,23 +119,32 @@ def verify(
     filters: list[BiquadSpec],
     samples: np.ndarray,
     fs: float,
-    band_hz: tuple[float, float] = (5.0, 16.0),
+    band_hz: tuple[float, float] = (5.0, 45.0),
     reference_hz: float = 40.0,
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
 ) -> Correction:
     """Apply `filters` to `samples` and measure the corrected low end.
 
-    The band deliberately stops below any authored emphasis — a hump at 20 Hz is content and
-    correcting it is not the job, so including it would penalise a correct filter.
+    The band has to be wide enough to see a slope. An earlier default of 5-16 Hz was not: two
+    designs measured +0.17 and +0.05 dB/octave there and looked identical in shape, while over
+    5-45 Hz they separate to -1.17 and +0.10 — one rising into the bottom, the other flat. A
+    window narrower than the shape being judged reads a step as a slope and a slope as nothing.
+
+    `exclude_bands_hz` drops authored emphasis, which is content: correcting a hump at 20 Hz is
+    not the job and including it would penalise a correct filter.
     """
     corrected = signal.sosfilt(biquad_sos(filters, fs), samples)
     freqs, before = _mean_db(samples, fs)
     _, after = _mean_db(corrected, fs)
     anchor = int(np.argmin(np.abs(freqs - reference_hz)))
 
+    keep = np.ones_like(freqs, dtype=bool)
+    for low, high in exclude_bands_hz:
+        keep &= ~((freqs >= low) & (freqs <= high))
     correction = Correction(
-        freqs=freqs,
-        before_db=before - before[anchor],
-        after_db=after - after[anchor],
+        freqs=freqs[keep],
+        before_db=(before - before[anchor])[keep],
+        after_db=(after - after[anchor])[keep],
         band_hz=band_hz,
     )
     logger.info(f"Applied correction: {correction}")
