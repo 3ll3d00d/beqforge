@@ -151,6 +151,31 @@ def test_a_lumpy_correction_is_rejected_on_spread() -> None:
     assert any("expected flat" in f for f in verdict.failures)
 
 
+def test_spread_is_judged_against_the_material_not_a_constant() -> None:
+    """A smooth cascade cannot flatten wobble the mean spectrum already has.
+
+    All three real titles depart from a smooth trend by 5.8-6.7 dB, so an absolute limit near
+    6 dB sits on the floor of what is achievable and fails correct answers.
+    """
+    from beqanalyser.design.accept import spectral_roughness
+
+    def wobble(f):
+        return 3.2 * np.sin(np.log2(f / 5.0) * 4.0)
+
+    # the same quality of correction, applied to smooth and to rough material. Centred so the
+    # wobble stays inside the level envelope, or this measures the extent clause instead.
+    rough = correction(lambda f: -13.0 + wobble(f), lambda f: 1.5 + wobble(f))
+    smooth = correction(lambda f: -13.0, lambda f: 1.5)
+
+    assert spectral_roughness(rough) > 5.0
+    assert spectral_roughness(smooth) < 0.5
+    assert rough.spread_db > 6.0  # would fail any absolute limit near 6 dB
+
+    specs = [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)]
+    assert assess(specs, rough, noise_floor_hz=float("nan")).passed
+    assert assess(specs, smooth, noise_floor_hz=float("nan")).passed
+
+
 def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
     """A cancelling cascade can measure well at the optimiser's exact output and badly once
     published. Two shelves that do not fight each other must stay tight under the same jitter.

@@ -38,12 +38,21 @@ class AcceptParams:
     level_range_db: tuple[float, float] = (-3.0, 8.0)
     """Where the corrected low end may sit relative to the reference."""
 
-    max_spread_db: float = 6.0
-    """Peak-to-peak of the corrected curve. "Flat" is part of R1, not a separate opinion.
+    spread_margin_db: float = 2.0
+    """How much flatter than the material's own roughness a correction need not be.
 
-    Omitting this let a design with 8.3 dB of spread and a +6 dB lump mid-band pass with no
-    objection, losing only on the ranking. A rule that a candidate passes by luck is not a
-    rule."""
+    "Flat" is part of R1, but an absolute threshold cannot express it. A smooth cascade cannot
+    remove structure the mean spectrum already has, so the material sets a floor: measured
+    against a smooth trend over the judged band, all three titles wobble by 5.8-6.7 dB. An
+    absolute 6.0 dB limit therefore sat exactly on that floor — it failed the hand-built filter
+    accepted on the first title (6.6 against 6.74 of roughness) and passed one on the second
+    only because the cascade happened to cancel some of the wobble.
+
+    Judged as an excess over roughness the populations separate: accepted designs run -1.6 to
+    -0.1 dB, while the two rejected ones run +2.4 and +4.3."""
+
+    roughness_degree: int = 3
+    """Order of the smooth trend the material's roughness is measured against."""
 
     cliff_window_octaves: float = 0.25
     """Width the local gradient is measured over. Narrow enough to see a step."""
@@ -149,6 +158,24 @@ def corrected_extent_hz(correction: Correction, params: AcceptParams) -> float:
     return float(freqs[min(index + 1, len(freqs) - 1)])
 
 
+def spectral_roughness(correction: Correction, degree: int = 3) -> float:
+    """How far the *input* departs from a smooth trend over the judged band.
+
+    The floor on achievable flatness. A cascade of shelves and peaking sections is smooth in
+    log-frequency, so whatever wobble the mean spectrum carries survives correction — judging
+    the result against a fixed number charges a filter for structure it cannot reach.
+    """
+    band = (correction.freqs >= correction.band_hz[0]) & (
+        correction.freqs <= correction.band_hz[1]
+    )
+    if band.sum() <= degree + 1:
+        return 0.0
+    octaves = np.log2(correction.freqs[band])
+    values = correction.before_db[band]
+    trend = np.polyval(np.polyfit(octaves, values, degree), octaves)
+    return float(np.ptp(values - trend))
+
+
 def drift_distribution(
     filters: list[BiquadSpec],
     grid: np.ndarray,
@@ -221,10 +248,12 @@ def assess(
             f"corrected level {correction.level_db:+.1f} dB is outside {low:+g}..{high:+g}"
         )
 
-    if correction.spread_db > params.max_spread_db:
+    roughness = spectral_roughness(correction, params.roughness_degree)
+    if correction.spread_db > roughness + params.spread_margin_db:
         failures.append(
             f"corrected low end spans {correction.spread_db:.1f} dB over "
-            f"{correction.band_hz[0]:g}-{correction.band_hz[1]:g} Hz; expected flat"
+            f"{correction.band_hz[0]:g}-{correction.band_hz[1]:g} Hz against "
+            f"{roughness:.1f} dB of roughness in the material; expected flat"
         )
 
     before, _ = worst_gradient(
