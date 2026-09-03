@@ -30,6 +30,10 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. |
 | `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
 | `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
+| `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking. Where the evidence for a rolloff actually is. |
+| `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
+| `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, target, candidates, judge. Both target routes and the disagreement between them. |
+| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
@@ -73,7 +77,8 @@ Dependency direction: `__init__` ← `loader` ← `analyser`; `filter` and `repo
 
 ```bash
 uv sync                              # first time / after dependency changes
-uv run python -m beqanalyser         # full pipeline, from the repo root
+uv run python -m beqanalyser         # clustering pipeline, from the repo root
+uv run python tools/design_beq.py data/NAME.npz   # automated design, one title
 uv run ruff check beqanalyser        # ruff is a dependency; there is no config section
 uv run ruff format beqanalyser
 ```
@@ -136,6 +141,14 @@ Notes:
   purpose — preserve the chunking when editing it.
 
 ## Working on `design/`
+
+* **Start with `uv run python tools/design_beq.py data/NAME.npz`.** It runs the whole process and
+  prints the evidence beside the answer; exit status is 0 when a candidate was accepted, 1 when the
+  correct output was to abstain. Add `--exclude LOW HIGH` for an authored feature. Fits are slow —
+  a few minutes per title — so run it in the background.
+* Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by writing
+  another one-off script. The point of the driver is that two titles become comparable; twenty
+  scratchpad scripts are how the first two were done and none of them survived.
 
 * **Never trust a residual.** It says a cascade matches the target it was handed, not that the target
   was right. Four separate outputs measured well and were wrong on sight — a +15 dB peak at 378 Hz, a

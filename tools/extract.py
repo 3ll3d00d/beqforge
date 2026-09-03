@@ -25,14 +25,16 @@ from pathlib import Path
 
 import numpy as np
 
+# the package is not installed into the venv, and tools/ rather than the repo root is what
+# lands on sys.path when this is run as a script
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
+
 logger = logging.getLogger("extract")
 
 ANALYSIS_FS = 1000
 """Decimated analysis rate. 500 Hz of usable bandwidth, decades above any plausible knee."""
-
-MAIN_GAIN = 10.0 ** (-20.2 / 20.0)
-LFE_GAIN = 10.0 ** (-10.2 / 20.0)
-"""beqdesigner's `MAIN`/`LFE` (model/ffmpeg.py:26) — 20.2 dB of headroom, LFE +10 dB on top."""
 
 LAYOUTS: dict[int, tuple[str, ...]] = {
     1: ("M",),

@@ -15,6 +15,15 @@ logger = logging.getLogger(__name__)
 
 Coverage = Literal["complete_programme", "excerpt"]
 
+MAIN_GAIN = 10.0 ** (-20.2 / 20.0)
+LFE_GAIN = 10.0 ** (-10.2 / 20.0)
+"""Gains `tools/extract.py` mixes with — beqdesigner's `MAIN`/`LFE` (model/ffmpeg.py:26).
+
+20.2 dB of headroom, LFE +10 dB on top. Here rather than in the extractor because anything
+decomposing the mix back into contributions has to use the same numbers, and two copies of
+them is one too many.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class Material:
