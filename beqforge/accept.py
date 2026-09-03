@@ -54,6 +54,12 @@ class AcceptParams:
     roughness_degree: int = 3
     """Order of the smooth trend the material's roughness is measured against."""
 
+    turnover_min_octaves: float = 0.5
+    """How far inside the band the peak must sit before a turnover is measured.
+
+    Nearer the bottom than this and the segment below it is a couple of bins of noise; nearer
+    the top and the measure is just the overall tilt under another name."""
+
     cliff_window_octaves: float = 0.25
     """Width the local gradient is measured over. Narrow enough to see a step."""
 
@@ -158,6 +164,37 @@ def corrected_extent_hz(correction: Correction, params: AcceptParams) -> float:
     return float(freqs[min(index + 1, len(freqs) - 1)])
 
 
+def turnover_db_per_octave(
+    correction: Correction, params: AcceptParams
+) -> tuple[float, float]:
+    """Slope from the corrected curve's in-band peak down to the bottom of the band.
+
+    "Too much too soon and then a rolloff": a correction that reaches full boost above the
+    bottom of the band and then falls away below it. `tilt` cannot see this — fitted across
+    the whole band, the rise above the peak and the fall below it average out, and the third
+    title's turnover measured -0.72 dB/octave overall while falling at +4.11 below its peak.
+
+    Returns the slope and the peak frequency. Sign follows `tilt`: positive falls toward the
+    bottom.
+    """
+    band = (correction.freqs >= correction.band_hz[0]) & (
+        correction.freqs <= correction.band_hz[1]
+    )
+    freqs, after = correction.freqs[band], correction.after_db[band]
+    if len(freqs) < 4:
+        return 0.0, math.nan
+    peak = int(np.argmax(after))
+    # the peak has to be interior. At the band's top edge this measure degenerates into the
+    # overall tilt, and reports plain under-correction as "too much too soon" — which the
+    # tilt clause has already said, and said correctly.
+    below_top = math.log2(freqs[-1] / freqs[peak])
+    above_bottom = math.log2(freqs[peak] / freqs[0])
+    if min(above_bottom, below_top) < params.turnover_min_octaves:
+        return 0.0, float(freqs[peak])
+    slope = float(np.polyfit(np.log2(freqs[: peak + 1]), after[: peak + 1], 1)[0])
+    return slope, float(freqs[peak])
+
+
 def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     """How far the *input* departs from a smooth trend over the judged band.
 
@@ -246,6 +283,13 @@ def assess(
     if not low <= correction.level_db <= high:
         failures.append(
             f"corrected level {correction.level_db:+.1f} dB is outside {low:+g}..{high:+g}"
+        )
+
+    turnover, peak_hz = turnover_db_per_octave(correction, params)
+    if turnover > params.max_tilt_db_per_octave:
+        failures.append(
+            f"peaks at {peak_hz:.1f} Hz then falls at {turnover:.1f} dB/oct below it — "
+            "too much too soon, then a rolloff"
         )
 
     roughness = spectral_roughness(correction, params.roughness_degree)

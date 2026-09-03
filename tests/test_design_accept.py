@@ -201,3 +201,61 @@ def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
     assert fragile.max() > 5.0 * fragile.min()
     assert np.percentile(fragile, 90) > np.percentile(robust, 90)
     assert robust.max() < fragile.max()
+
+
+def test_a_turnover_is_rejected_though_the_overall_tilt_looks_fine() -> None:
+    """ "Too much too soon and then a rolloff" — full boost reached above the band's bottom.
+
+    The third title's design measured -0.72 dB/octave over 5-45 Hz, which reads as mildly
+    rising, while falling at +4.11 below its peak at 18 Hz. A single fit across the band
+    averages the rise above the peak against the fall below it and sees neither.
+    """
+    from beqanalyser.design.accept import turnover_db_per_octave
+
+    # peaks near 18 Hz, falls away below it, rises toward the reference above
+    def after(f):
+        # a V in log-frequency: falls away below 18 Hz, and rises above it steeply enough
+        # that a single fit across the whole band nets out to almost nothing
+        return (
+            6.0 - 4.2 * abs(np.log2(f / 18.0))
+            if f < 18.0
+            else 6.0 - 3.4 * np.log2(f / 18.0)
+        )
+
+    turning = correction(
+        lambda f: -20.0 + 14.0 * np.log2(f / 5.0) / np.log2(9.0), after
+    )
+    slope, peak = turnover_db_per_octave(turning, AcceptParams())
+    assert slope > 2.0
+    assert 14.0 < peak < 24.0
+    assert abs(turning.tilt_db_per_octave) < 2.0  # the overall fit does not see it
+
+    verdict = assess(
+        [BiquadSpec("low_shelf", 20.0, 19.0, 0.86)],
+        turning,
+        noise_floor_hz=float("nan"),
+    )
+    assert not verdict.passed
+    assert any("too much too soon" in f for f in verdict.failures)
+
+
+def test_a_monotone_correction_has_no_turnover() -> None:
+    from beqanalyser.design.accept import turnover_db_per_octave
+
+    flat = correction(lambda f: -13.0, lambda f: -1.0 - 0.4 * np.log2(f / 5.0))
+    slope, _ = turnover_db_per_octave(flat, AcceptParams())
+    assert slope <= 0.0
+
+
+def test_under_correction_is_not_reported_as_a_turnover() -> None:
+    """A peak at the band's top edge is plain under-correction, which tilt already reports."""
+    from beqanalyser.design.accept import turnover_db_per_octave
+
+    sagging = correction(lambda f: -16.0, lambda f: 2.0 - 2.5 * np.log2(45.0 / f))
+    slope, _ = turnover_db_per_octave(sagging, AcceptParams())
+    assert slope == 0.0
+    verdict = assess(
+        [BiquadSpec("low_shelf", 20.0, 8.0, 0.7)], sagging, noise_floor_hz=float("nan")
+    )
+    assert not any("too much too soon" in f for f in verdict.failures)
+    assert any("under-corrected" in f for f in verdict.failures)
