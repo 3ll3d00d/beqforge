@@ -13,6 +13,9 @@ Everything below the public boundary takes plain ndarrays.
 
 import logging
 import math
+import time
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
 from dataclasses import dataclass
 
 import numpy as np
@@ -28,6 +31,38 @@ from beqanalyser.design import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class FitStats:
+    """Cost of the fitting stage, so performance work can be aimed rather than guessed.
+
+    The optimiser is the whole budget: `fit_to_biquads` runs one `_fit_structure` per split of
+    the section budget per seed, and `fit_minimal_biquads` calls that for every section count
+    up to its own. The call count is therefore `seeds * M * (M + 1) / 2`, which is easy to
+    raise by one parameter and hard to notice.
+    """
+
+    calls: int = 0
+    seconds: float = 0.0
+    cost_evaluations: int = 0
+
+    def reset(self) -> None:
+        self.calls = 0
+        self.seconds = 0.0
+        self.cost_evaluations = 0
+
+    def __str__(self) -> str:
+        per = self.seconds / self.calls if self.calls else 0.0
+        return (
+            f"{self.calls} optimiser runs, {self.seconds:.1f} s "
+            f"({per:.1f} s each), {self.cost_evaluations:,} cost evaluations"
+        )
+
+
+FIT_STATS = FitStats()
+"""Process-wide fitting cost. Reset it at the start of a run."""
+
 
 _REAL_POLE_TOLERANCE = 1e-9
 """Imaginary part below which an analogue pole is treated as real."""
@@ -201,6 +236,71 @@ def correction_band_hz(
     return max(evidence_floor_hz, low), min(float(freqs[-1]), high * 1.5)
 
 
+FitTask = tuple
+"""Positional arguments for one `_fit_structure` call."""
+
+PARALLEL_FITS = True
+"""Run independent fits in worker processes. Set False to profile or debug serially."""
+
+
+def _fit_task(task: "FitTask") -> tuple[list[BiquadSpec], float, float, int]:
+    """Picklable entry point for one fit."""
+    return _fit_structure(*task)
+
+
+def _run_fits(tasks: list["FitTask"]) -> list[tuple[list[BiquadSpec], float]]:
+    """Run independent fits, in parallel when there is more than one.
+
+    The fits are the entire cost of the design stage and they do not interact, so this is the
+    one place parallelism buys anything. Results are returned in submission order and the
+    seeds are fixed, so the answer is identical to the serial one — the pool changes how long
+    it takes, never what it decides.
+    """
+    if len(tasks) > 1 and PARALLEL_FITS:
+        workers = min(len(tasks), cpu_count())
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_fit_task, tasks))
+    else:
+        results = [_fit_task(task) for task in tasks]
+    for _, _, seconds, evaluations in results:
+        FIT_STATS.calls += 1
+        FIT_STATS.seconds += seconds
+        FIT_STATS.cost_evaluations += evaluations
+    return [(specs, residual) for specs, residual, _, _ in results]
+
+
+def _structure_tasks(
+    target_db: np.ndarray,
+    freqs: np.ndarray,
+    fs: float,
+    sections: int,
+    band_hz: tuple[float, float] | None,
+    placement: tuple[float, float] | None,
+    max_q: float,
+    max_gain_db: float,
+    realisation: "Realisation | None",
+    seeds: tuple[int, ...],
+) -> list["FitTask"]:
+    """Every shelf/peak split of a section budget, from every seed."""
+    return [
+        (
+            target_db,
+            freqs,
+            fs,
+            shelves,
+            sections - shelves,
+            band_hz,
+            placement,
+            max_q,
+            max_gain_db,
+            realisation,
+            seed,
+        )
+        for shelves in range(1, sections + 1)
+        for seed in seeds
+    ]
+
+
 def fit_minimal_biquads(
     target_db: np.ndarray,
     freqs: np.ndarray,
@@ -221,30 +321,44 @@ def fit_minimal_biquads(
     does nothing is not free: it occupies a slot, it has to be published, and it invites the
     reader to believe it means something.
     """
-    best: tuple[list[BiquadSpec], float] | None = None
-    for sections in range(1, max_sections + 1):
-        candidate = fit_to_biquads(
+    placement = placement_band_hz or band_hz
+    grouped: list[list["FitTask"]] = [
+        _structure_tasks(
             target_db,
             freqs,
             fs,
             sections,
             band_hz,
-            placement_band_hz,
+            placement,
             max_q,
             max_gain_db,
             realisation,
             seeds,
         )
-        if best is None or candidate[1] < best[1]:
-            best = candidate
+        for sections in range(1, max_sections + 1)
+    ]
+    # Every section count is enumerated up front rather than tried in turn. Serially the loop
+    # stopped as soon as one met the target; in parallel that early exit would leave most of
+    # the machine idle waiting for the smallest problem. The selection rule below is the same
+    # one, applied after the fact, so the chosen cascade is unchanged.
+    flat = [task for tasks in grouped for task in tasks]
+    results = _run_fits(flat)
+
+    at = 0
+    per_sections: list[tuple[list[BiquadSpec], float]] = []
+    for tasks in grouped:
+        window = results[at : at + len(tasks)]
+        at += len(tasks)
+        per_sections.append(min(window, key=lambda r: r[1]))
+
+    for sections, candidate in enumerate(per_sections, start=1):
         if candidate[1] <= residual_target_db:
             logger.info(
                 f"{sections} section(s) reach {candidate[1]:.3f} dB; "
-                f"not spending the remaining {max_sections - sections}"
+                f"the remaining {max_sections - sections} are not spent"
             )
             return candidate
-    assert best is not None
-    return best
+    return min(per_sections, key=lambda r: r[1])
 
 
 def fit_to_biquads(
@@ -278,25 +392,21 @@ def fit_to_biquads(
     identical input reproduce the same answer.
     """
     placement = placement_band_hz or band_hz
-    best: tuple[list[BiquadSpec], float] | None = None
-    for shelves in range(1, sections + 1):
-        for seed in seeds:
-            candidate = _fit_structure(
-                target_db,
-                freqs,
-                fs,
-                shelves,
-                sections - shelves,
-                band_hz,
-                placement,
-                max_q,
-                max_gain_db,
-                realisation,
-                seed,
-            )
-            if best is None or candidate[1] < best[1]:
-                best = candidate
-    assert best is not None
+    results = _run_fits(
+        _structure_tasks(
+            target_db,
+            freqs,
+            fs,
+            sections,
+            band_hz,
+            placement,
+            max_q,
+            max_gain_db,
+            realisation,
+            seeds,
+        )
+    )
+    best = min(results, key=lambda r: r[1])
     logger.debug(
         f"Fitted {sections} sections to {best[1]:.4f} dB "
         f"({sum(s.type == 'low_shelf' for s in best[0])} shelves)"
@@ -342,7 +452,15 @@ def _fit_structure(
     max_gain_db: float,
     realisation: "Realisation | None",
     seed: int,
-) -> tuple[list[BiquadSpec], float]:
+) -> tuple[list[BiquadSpec], float, float, int]:
+    """One stochastic fit of a fixed shelf/peak split, with its own cost.
+
+    Returns its timing and evaluation count rather than accumulating into `FIT_STATS`: these
+    run in worker processes, where a module-level counter would be incremented in the wrong
+    interpreter and silently report zero.
+    """
+    started = time.perf_counter()
+    evaluations = 0
     sections = shelves + peaks
     mask = (
         np.ones_like(freqs, dtype=bool)
@@ -358,6 +476,8 @@ def _fit_structure(
     bounds = [(low, high), (0.1, max_q), (-max_gain_db, max_gain_db)] * sections
 
     def cost(p: np.ndarray) -> float:
+        nonlocal evaluations
+        evaluations += 1
         specs = _unpack(p, shelves, peaks)
         err = magnitude_db(biquad_sos(specs, fs), freqs, fs) - target_db
         worst = float(np.max(np.abs(err[mask])))
@@ -379,7 +499,8 @@ def _fit_structure(
         options={"maxiter": 60000, "maxfev": 60000, "xatol": 1e-10, "fatol": 1e-12},
     )
     best = fine.x if fine.fun < coarse.fun else coarse.x
-    return _unpack(best, shelves, peaks), cost(best)
+    specs, residual = _unpack(best, shelves, peaks), cost(best)
+    return specs, residual, time.perf_counter() - started, evaluations
 
 
 def _unpack(params: np.ndarray, shelves: int, peaks: int) -> list[BiquadSpec]:
