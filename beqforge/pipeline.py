@@ -107,6 +107,12 @@ class PipelineParams:
     flatten_reference_hz: float = 40.0
     """Frequency `flatten` levels the mix against. Above the knee, below bass management."""
 
+    flatten_taper_ratio: float = 1.25
+    """How far above the reference the target is tapered to nothing, as a frequency ratio.
+
+    A quarter of an octave. Wide enough that the transition is smooth against a 400-point
+    log grid, narrow enough that it does not reach down into the correction."""
+
     restore_caps_db: tuple[float, ...] = (25.0, 35.0, 45.0)
     """Ceilings on the counterfactual restoration, one candidate each.
 
@@ -186,6 +192,18 @@ class Proposal:
     """What bound this target, if anything. Carried through to the `Candidate`."""
 
 
+def _taper(freqs: np.ndarray, reference_hz: float, ratio: float) -> np.ndarray:
+    """Raised cosine falling from 1 at `reference_hz` to 0 at `reference_hz * ratio`.
+
+    In log-frequency, and raised cosine rather than linear, so the target has a continuous
+    derivative where it stops as well as a continuous value. A fit is scored on the target it
+    is handed; anything the target does that a biquad cascade cannot follow is charged to the
+    cascade's residual and read as a bad fit.
+    """
+    position = np.log2(np.asarray(freqs) / reference_hz) / math.log2(ratio)
+    return 0.5 * (1.0 + np.cos(math.pi * np.clip(position, 0.0, 1.0)))
+
+
 def flatten_targets(
     material: Material,
     diagnosis: Diagnosis,
@@ -208,7 +226,17 @@ def flatten_targets(
     deficit = np.convolve(np.maximum(-response, 0.0), np.ones(15) / 15, mode="same")
 
     target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
-    target[DESIGN_GRID > params.flatten_reference_hz + 5.0] = 0.0
+    # Tapered to nothing above the reference, not cut off there. The mix keeps falling above
+    # the reference — by 5 to 11.6 dB over 45-200 Hz on the three titles — and that fall is
+    # the programme, not a deficit, so the target has to stop. Stopping it with a hard zero
+    # left a step of 0.58, 0.69 and 1.08 dB across a single grid point 0.55 Hz wide, inside
+    # the 5-200 Hz band the residual is scored over. No cascade of biquads follows a step
+    # that narrow, so the minimax residual was bounded below by half of it — 0.54 dB on the
+    # third title, above `residual_target_db` — and the fit could never stop early, spending
+    # the whole section budget to chase an artefact of where the target was truncated.
+    target *= _taper(
+        DESIGN_GRID, params.flatten_reference_hz, params.flatten_taper_ratio
+    )
     notes: list[str] = []
     # The floor binds before the cap. `max_gain_db` is a preference dial (§4.3) and the noise
     # floor is evidence, so clipping first lets the dial pre-empt the measurement: on a floor

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from beqanalyser.design.pipeline import (
+    DESIGN_GRID,
     STRATEGIES,
     PipelineParams,
     Proposal,
@@ -71,3 +72,40 @@ def test_a_single_strategy_can_be_selected(walled) -> None:
     )
     assert report.candidates
     assert all(c.label.startswith("flatten") for c in report.candidates)
+
+
+def test_the_flatten_target_stops_without_a_step(walled) -> None:
+    """A target is what the fit is scored against, so it must be followable.
+
+    The mix keeps falling above the reference and that fall is programme, not deficit, so the
+    target has to stop. Stopping it with a hard zero left a step across a single grid point —
+    0.58, 0.69 and 1.08 dB on the three real titles — inside the band the residual is scored
+    over. No biquad cascade follows a step 0.55 Hz wide, so the minimax residual was bounded
+    below by half of it and the fit could never stop early: on the third title three sections
+    reached 0.532 dB against a 0.5 target with the cut, and 0.432 with the taper.
+    """
+    from beqanalyser.design.diagnose import diagnose
+
+    diagnosis = diagnose(walled)
+    target = flatten_targets(walled, diagnosis, None, None, PipelineParams())[
+        0
+    ].target_db
+
+    reference = PipelineParams().flatten_reference_hz
+    stopping = (DESIGN_GRID >= reference * 0.9) & (DESIGN_GRID <= reference * 1.6)
+    steps = np.abs(np.diff(target))
+    assert steps[stopping[:-1]].max() < 0.25, "the target still stops with a step"
+    assert np.interp(reference * 1.3, DESIGN_GRID, target) == pytest.approx(
+        0.0, abs=1e-9
+    )
+
+
+def test_the_taper_does_not_reach_into_the_correction(walled) -> None:
+    """It has to stop the target, not shrink it."""
+    from beqanalyser.design.diagnose import diagnose
+
+    diagnosis = diagnose(walled)
+    params = PipelineParams()
+    target = flatten_targets(walled, diagnosis, None, None, params)[0].target_db
+    below = DESIGN_GRID < params.flatten_reference_hz
+    assert target[below].max() > 1.0, "the correction itself has gone"
