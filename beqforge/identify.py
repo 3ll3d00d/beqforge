@@ -63,6 +63,44 @@ class IdentifyParams:
     Linear over the fitted band. Higher orders no longer change the answer much once the band
     is narrow, so the lower order is taken for the tighter prior it represents."""
 
+    null_envelope_margin: int = 1
+    """How many degrees *more* flexible the null model's envelope is than the alternative's.
+
+    The comparison of §3.6 is not nested, deliberately. The question worth asking is not "does
+    adding `A` reduce the residual" — it always does, `A` has three free parameters — but
+    "does `A` buy more than simply letting `N` curve one degree further". A rolloff is not a
+    polynomial; a natural envelope is close to one.
+
+    Measured over synthetic envelopes with and without a rolloff, as the improvement in RMS
+    residual:
+
+    | envelope | null at the same order | null one degree higher |
+    | --- | --- | --- |
+    | quadratic `N`, no rolloff | 0.24 to 0.95 | -0.003 to -0.001 |
+    | cubic `N`, no rolloff | 0.00 to 0.23 | -0.02 to +0.03 |
+    | BW2@20 on quadratic `N` | 2.76 | 0.22 |
+    | BW8@18 on quadratic `N` | 10.63 | 2.51 |
+
+    Nested, the populations separate by 3x and a strongly curved envelope with no rolloff in
+    it scores 0.95. One degree higher they separate by 7x and every negative sits at zero.
+
+    The old code hardcoded the null at order 2 against an `envelope_order` of 1, which is this
+    rule by accident — and would have silently become the nested comparison the moment anyone
+    raised `envelope_order`."""
+
+    min_improvement_db: float = 0.1
+    """Improvement over the null below which no attenuation is claimed.
+
+    §3.6 asks for a margin rather than a threshold, and the margin is reported; this is the
+    line under which the parametric route is not offered a target at all. It was `> 0.0`,
+    which reported a detection on 0.031 dB of improvement over a smooth envelope containing
+    no rolloff whatsoever — §2.3's expensive failure, at the loosest setting available.
+
+    Set from the populations tabulated on `null_envelope_margin`: the worst negative measures
+    0.031 and the weakest positive — a 2nd-order Butterworth, the shallow case the design
+    already flags as hard — measures 0.224. Two titles' worth of synthetic evidence, so it is
+    a threshold like the others and not a law (§12)."""
+
     min_coherence: float = 0.1
     """Below this a bin carries no event-related content and gets no weight (§3.4)."""
 
@@ -86,11 +124,16 @@ class Identification:
 
     weighted_bins: int
     coherent_bandwidth_octaves: float
+    min_improvement_db: float = 0.0
+    """The margin `detected` was judged against, carried so the verdict can be read back."""
 
     @property
     def detected(self) -> bool:
         """Whether an attenuation is present at all — not whether it is *identified*."""
-        return self.improvement_db > 0.0 and self.fit.slope_db_per_octave > 1.0
+        return (
+            self.improvement_db >= self.min_improvement_db
+            and self.fit.slope_db_per_octave > 1.0
+        )
 
     def __str__(self) -> str:
         named = str(self.rolloff) if self.rolloff else "no representable alignment"
@@ -99,8 +142,8 @@ class Identification:
             f"{self.fit.slope_db_per_octave:.1f} dB/oct (order "
             f"{self.fit.implied_order:.2f}), knee {self.fit.knee:.2f} -> {named}; "
             f"model improvement {self.improvement_db:.2f} dB on "
-            f"{self.smooth_residual_db:.2f} dB, {self.coherent_bandwidth_octaves:.1f} "
-            f"coherent octaves"
+            f"{self.smooth_residual_db:.2f} dB (needs {self.min_improvement_db:.2f}), "
+            f"{self.coherent_bandwidth_octaves:.1f} coherent octaves"
         )
 
 
@@ -117,7 +160,10 @@ def identify_rolloff(
         )
 
     log_f = np.log2(freqs / freqs[0])
-    smooth_residual = _rms(_fit_smooth(log_f, values, weights) - values, weights)
+    null_order = params.envelope_order + params.null_envelope_margin
+    smooth_residual = _rms(
+        _fit_smooth(log_f, values, weights, null_order) - values, weights
+    )
     fit, model = _fit_two_part(log_f, freqs, values, weights, params)
     combined_residual = _rms(model - values, weights)
 
@@ -130,6 +176,7 @@ def identify_rolloff(
         smooth_residual_db=float(smooth_residual),
         weighted_bins=len(freqs),
         coherent_bandwidth_octaves=octaves,
+        min_improvement_db=params.min_improvement_db,
     )
     logger.info(f"Identified {identification}")
     return identification
@@ -164,10 +211,15 @@ def _design_matrix(log_f: np.ndarray, order: int) -> np.ndarray:
 
 
 def _fit_smooth(
-    log_f: np.ndarray, values: np.ndarray, weights: np.ndarray
+    log_f: np.ndarray, values: np.ndarray, weights: np.ndarray, order: int
 ) -> np.ndarray:
-    """Best smooth-only explanation of the envelope — the null model of §3.6."""
-    return _weighted_lstsq(_design_matrix(log_f, 2), values, weights)
+    """Best smooth-only explanation of the envelope — the null model of §3.6.
+
+    `order` comes from `envelope_order + null_envelope_margin`, so the null is deliberately
+    more flexible than the alternative's envelope rather than accidentally so. See
+    `IdentifyParams.null_envelope_margin` for the measurement behind that.
+    """
+    return _weighted_lstsq(_design_matrix(log_f, order), values, weights)
 
 
 def _weighted_lstsq(
