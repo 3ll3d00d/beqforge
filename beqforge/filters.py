@@ -539,6 +539,14 @@ class Realisation:
     integer_bits: int = 5
     """Fixed-point format of the target device. 5.23 is the conservative case."""
 
+    publication_precision: tuple[float, float, float] = (0.005, 0.005, 0.0005)
+    """Half-step of the precision a filter is published at: frequency, gain, Q.
+
+    A cascade is published as text and reloaded, so the coefficients that reach the hardware
+    are not the optimiser's. `accept` judges drift at the 90th percentile over this rounding,
+    and the fit has to be scored against the same thing or the optimiser is steering by a
+    statistic it is not measured on."""
+
     def quantise(self, sos: np.ndarray) -> np.ndarray:
         step = 2.0 ** (self.integer_bits - self.coefficient_bits)
         rounded = np.round(np.asarray(sos) / step) * step
@@ -588,6 +596,20 @@ def _fit_structure(
         err = magnitude_db(biquad_sos(specs, fs), freqs, fs) - target_db
         worst = float(np.max(np.abs(err[mask])))
         if realisation is not None:
+            # Drift at the exact coefficients, deliberately, though `accept` gates on the p90
+            # over publication rounding and the two are therefore not the same statistic.
+            # Widening this one to match was tried and is worse on every axis. Adding the two
+            # antipodal roundings to the max, on the third title's flatten target:
+            #
+            #   point only          28.2 s   residual 0.432   3 sections   drift p90 1.893
+            #   same sign both ways 64.8 s   residual 0.771   2 sections   drift p90 2.712
+            #   alternating signs   55.5 s   residual 0.591   2 sections   drift p90 2.590
+            #
+            # A max over samples makes the objective non-smooth, and the optimiser converges
+            # to a worse point on accuracy *and* on the drift the term was added to control,
+            # at twice the cost of a stage that is already ~90% of the run. A sensitivity
+            # penalty that helped would have to be smooth — the derivative of the response
+            # with respect to the coefficients — not a maximum over jittered evaluations.
             device = biquad_sos(specs, realisation.fs)
             drift = magnitude_db(
                 realisation.quantise(device), freqs, realisation.fs

@@ -104,9 +104,6 @@ class AcceptParams:
     populations separate by an order of magnitude, so the exact value between them matters
     little — but it is still a threshold set on two titles (§12)."""
 
-    publication_precision: tuple[float, float, float] = (0.005, 0.005, 0.0005)
-    """Half-step of the precision a filter is published at: frequency, gain, Q."""
-
     drift_samples: int = 48
     """Perturbations used to measure drift as a distribution rather than a point.
 
@@ -245,19 +242,6 @@ def turnover_db_per_octave(
     return slope, float(freqs[peak])
 
 
-def _wobble_db(correction: Correction, values_db: np.ndarray, degree: int) -> float:
-    """Peak-to-peak departure of a curve from its own smooth trend over the judged band."""
-    band = (correction.freqs >= correction.band_hz[0]) & (
-        correction.freqs <= correction.band_hz[1]
-    )
-    if band.sum() <= degree + 1:
-        return 0.0
-    octaves = np.log2(correction.freqs[band])
-    values = values_db[band]
-    trend = np.polyval(np.polyfit(octaves, values, degree), octaves)
-    return float(np.ptp(values - trend))
-
-
 def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     """How far the *input* departs from a smooth trend over the judged band.
 
@@ -265,7 +249,7 @@ def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     log-frequency, so whatever wobble the mean spectrum carries survives correction — judging
     the result against a fixed number charges a filter for structure it cannot reach.
     """
-    return _wobble_db(correction, correction.before_db, degree)
+    return correction.wobble_db(correction.before_db, degree)
 
 
 def corrected_wobble(correction: Correction, degree: int = 3) -> float:
@@ -283,7 +267,7 @@ def corrected_wobble(correction: Correction, degree: int = 3) -> float:
     of a corrected curve is what tilt, turnover and level are for, and what survives here is
     the wobble neither the material nor a smooth cascade can do anything about.
     """
-    return _wobble_db(correction, correction.after_db, degree)
+    return correction.wobble_db(correction.after_db, degree)
 
 
 def drift_distribution(
@@ -297,7 +281,7 @@ def drift_distribution(
     Deterministically seeded, so a cascade scores the same every run.
     """
     rng = np.random.default_rng(0)
-    freq_step, gain_step, q_step = params.publication_precision
+    freq_step, gain_step, q_step = realisation.publication_precision
 
     def drift_of(specs: list[BiquadSpec]) -> float:
         sos = biquad_sos(specs, realisation.fs)
