@@ -314,3 +314,60 @@ def test_a_correction_entirely_above_the_floor_is_not_noted() -> None:
         "shaping" in n
         for n in assess(shelf, flat, float("nan"), filter_floor_hz=3.5).notes
     )
+
+
+def test_flatness_does_not_re_charge_a_correction_for_its_tilt() -> None:
+    """`spread` includes the trend; `roughness` removes one. That is not like for like.
+
+    A perfectly smooth corrected curve rising within the tilt clause's own limits scores a
+    large spread purely from the tilt, so the flatness clause was mostly re-reading a
+    judgement the tilt clause had already made — and on material with real wobble the two
+    together could reject a correction neither objected to on its own.
+    """
+    from beqanalyser.design.accept import corrected_wobble, spectral_roughness
+
+    smooth_rise = correction(lambda f: -13.0, lambda f: -1.7 * np.log2(f / 15.0))
+    assert smooth_rise.spread_db > 4.0, "the tilt alone should span several dB"
+    assert corrected_wobble(smooth_rise) < 0.5, "but it carries no wobble at all"
+    assert abs(smooth_rise.tilt_db_per_octave) < 2.5, "and the tilt itself is allowed"
+
+    verdict = assess(
+        [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)],
+        smooth_rise,
+        noise_floor_hz=float("nan"),
+    )
+    assert not any("expected flat" in f for f in verdict.failures), verdict.failures
+    assert spectral_roughness(smooth_rise) < 0.5
+
+
+def test_the_turnover_peak_is_located_on_a_smoothed_curve() -> None:
+    """A single noisy bin must not decide which segment the turnover is measured over.
+
+    The extent clause was already fixed for exactly this — the material scatters by ~6 dB and
+    a raw `argmax` locates a bin rather than a peak. On the third title's corrected curve the
+    raw argmax read the turnover as +0.00 dB/oct and the smoothed one as +1.70.
+    """
+    from beqanalyser.design.accept import turnover_db_per_octave
+
+    # a genuine turnover: rising to a peak at ~18 Hz, then falling away below it
+    shape = curve(lambda f: -4.0 * abs(np.log2(f / 18.0)))
+    spike = np.zeros_like(shape)
+    spike[np.argmin(np.abs(FREQS - 40.0))] = 9.0  # one bin of scatter near the band top
+
+    clean = Correction(
+        freqs=FREQS, before_db=curve(lambda f: -13.0), after_db=shape, band_hz=BAND
+    )
+    speckled = Correction(
+        freqs=FREQS,
+        before_db=curve(lambda f: -13.0),
+        after_db=shape + spike,
+        band_hz=BAND,
+    )
+
+    slope, peak = turnover_db_per_octave(clean, AcceptParams())
+    spiked_slope, spiked_peak = turnover_db_per_octave(speckled, AcceptParams())
+    assert slope > 2.0, "the turnover is real and should be caught"
+    assert spiked_slope > 2.0, "one bin must not hide it"
+    assert abs(np.log2(spiked_peak / peak)) < 0.5, (
+        f"peak moved from {peak:.1f} to {spiked_peak:.1f} Hz on one bin"
+    )

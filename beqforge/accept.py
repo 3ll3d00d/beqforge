@@ -129,6 +129,11 @@ class Verdict:
     worst_gradient_after: float
     extent_hz: float
     drift_db: float
+    roughness_db: float = math.nan
+    """Wobble in the input over the judged band — the floor on achievable flatness."""
+
+    wobble_db: float = math.nan
+    """The same statistic on the corrected curve. The flatness clause compares these two."""
 
     def __str__(self) -> str:
         head = "accept" if self.passed else "REJECT"
@@ -217,9 +222,17 @@ def turnover_db_per_octave(
     band = (correction.freqs >= correction.band_hz[0]) & (
         correction.freqs <= correction.band_hz[1]
     )
-    freqs, after = correction.freqs[band], correction.after_db[band]
+    freqs = correction.freqs[band]
     if len(freqs) < 4:
         return 0.0, math.nan
+    # Smoothed, and for the same reason the extent clause is: the material scatters by ~6 dB,
+    # and `argmax` of a raw curve locates a bin rather than a peak. Measured on the third
+    # title's corrected curve, the raw argmax put the peak at 36.6 Hz and read the turnover as
+    # +0.00 dB/oct; the same curve through the same 9-bin window put it at 18.8 Hz and read
+    # +1.70, against a rejection threshold of 2.0. One bin of scatter moved the segment being
+    # measured by an octave, and the clause this sits in was written because a segment chosen
+    # wrongly is the whole failure mode.
+    after = _smooth(correction.after_db[band], params.extent_smoothing_bins)
     peak = int(np.argmax(after))
     # the peak has to be interior. At the band's top edge this measure degenerates into the
     # overall tilt, and reports plain under-correction as "too much too soon" — which the
@@ -232,6 +245,19 @@ def turnover_db_per_octave(
     return slope, float(freqs[peak])
 
 
+def _wobble_db(correction: Correction, values_db: np.ndarray, degree: int) -> float:
+    """Peak-to-peak departure of a curve from its own smooth trend over the judged band."""
+    band = (correction.freqs >= correction.band_hz[0]) & (
+        correction.freqs <= correction.band_hz[1]
+    )
+    if band.sum() <= degree + 1:
+        return 0.0
+    octaves = np.log2(correction.freqs[band])
+    values = values_db[band]
+    trend = np.polyval(np.polyfit(octaves, values, degree), octaves)
+    return float(np.ptp(values - trend))
+
+
 def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     """How far the *input* departs from a smooth trend over the judged band.
 
@@ -239,15 +265,25 @@ def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     log-frequency, so whatever wobble the mean spectrum carries survives correction — judging
     the result against a fixed number charges a filter for structure it cannot reach.
     """
-    band = (correction.freqs >= correction.band_hz[0]) & (
-        correction.freqs <= correction.band_hz[1]
-    )
-    if band.sum() <= degree + 1:
-        return 0.0
-    octaves = np.log2(correction.freqs[band])
-    values = correction.before_db[band]
-    trend = np.polyval(np.polyfit(octaves, values, degree), octaves)
-    return float(np.ptp(values - trend))
+    return _wobble_db(correction, correction.before_db, degree)
+
+
+def corrected_wobble(correction: Correction, degree: int = 3) -> float:
+    """The same statistic on the corrected curve, so the comparison is like for like.
+
+    `Correction.spread_db` is peak-to-peak of the corrected curve *including* its trend,
+    while `spectral_roughness` removes one — so comparing them charged a correction for tilt
+    the tilt clause has already judged. A perfectly smooth curve rising at 1.5 dB/octave over
+    5-45 Hz scores a spread of 4.70 dB against a roughness of 0.00, and at the tilt clause's
+    own limits (+2.0 / -2.5 dB/octave over 3.17 octaves) tilt alone accounts for 6.3-7.9 dB
+    of spread. The two clauses were not independent, and the flatness one was mostly
+    re-reading the tilt.
+
+    Both curves are detrended at the same degree, each against its own trend: the smooth part
+    of a corrected curve is what tilt, turnover and level are for, and what survives here is
+    the wobble neither the material nor a smooth cascade can do anything about.
+    """
+    return _wobble_db(correction, correction.after_db, degree)
 
 
 def drift_distribution(
@@ -335,11 +371,12 @@ def assess(
         )
 
     roughness = spectral_roughness(correction, params.roughness_degree)
-    if correction.spread_db > roughness + params.spread_margin_db:
+    wobble = corrected_wobble(correction, params.roughness_degree)
+    if wobble > roughness + params.spread_margin_db:
         failures.append(
-            f"corrected low end spans {correction.spread_db:.1f} dB over "
+            f"corrected low end wobbles {wobble:.1f} dB over "
             f"{correction.band_hz[0]:g}-{correction.band_hz[1]:g} Hz against "
-            f"{roughness:.1f} dB of roughness in the material; expected flat"
+            f"{roughness:.1f} dB in the material; expected flat"
         )
 
     before, _ = worst_gradient(
@@ -419,4 +456,6 @@ def assess(
         worst_gradient_after=after,
         extent_hz=extent,
         drift_db=drift,
+        roughness_db=roughness,
+        wobble_db=wobble,
     )
