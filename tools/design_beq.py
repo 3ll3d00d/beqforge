@@ -129,7 +129,7 @@ def show_candidates(report: Report) -> None:
             f"dB/oct   drift {v.drift_db:.3f} dB"
         )
         print(f"      {v}")
-        for note in v.notes:
+        for note in (*candidate.target_notes, *v.notes):
             print(f"      note: {note}")
 
 

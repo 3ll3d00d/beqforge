@@ -285,3 +285,32 @@ def test_a_correction_that_genuinely_stops_is_still_caught() -> None:
     """The clause exists for gross failure: 13 dB out, not 0.9."""
     stopping = correction(lambda f: -13.0, lambda f: -1.5 if f >= 14.0 else -13.0)
     assert 12.0 < corrected_extent_hz(stopping, AcceptParams()) < 16.0
+
+
+def test_a_correction_below_the_level_independence_floor_is_noted_not_failed() -> None:
+    """R2 is a confidence claim, not a bound.
+
+    Title 2's accepted design boosts through the region where the LFE's attenuation stops
+    being level-independent, and is right to — the content there is real, just reproduced
+    14 dB down. What was missing was anything in the output saying which part of a
+    correction rests on a measured filter and which part is shaping.
+    """
+    flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
+    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
+
+    silent = assess(shelf, flat, float("nan"))
+    noted = assess(shelf, flat, float("nan"), filter_floor_hz=19.5)
+
+    assert not any("shaping" in n for n in silent.notes)
+    assert any("shaping" in n for n in noted.notes)
+    assert noted.passed == silent.passed, "R2 must not change the verdict"
+
+
+def test_a_correction_entirely_above_the_floor_is_not_noted() -> None:
+    """The note has to mean something, so it only fires where the boost actually is."""
+    flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
+    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
+    assert not any(
+        "shaping" in n
+        for n in assess(shelf, flat, float("nan"), filter_floor_hz=3.5).notes
+    )

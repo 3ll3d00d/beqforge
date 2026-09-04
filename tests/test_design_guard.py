@@ -171,3 +171,66 @@ def test_an_unmeasurable_band_terminates_the_search() -> None:
     assert not np.isnan(result.noise_floor_hz), (
         "an unmeasurable band was read as content"
     )
+
+
+def sloped_floor(floor_db: float, order: int, seed: int = 40) -> np.ndarray:
+    """A floor with a slope of its own — the case `flatten` cannot tell from a rolloff.
+
+    A white floor produces a *flat* deficit, so holding the target below it changes nothing
+    and the guard has nothing to do. A floor that falls toward DC keeps the mix falling after
+    the content has gone, and inverting that is how a noise floor gets boosted by 40 dB.
+    """
+    rng = np.random.default_rng(seed)
+    samples = int(FS * 600.0)
+    content = high_passed(scened_noise(seed + 1, samples), 30.0, order=8)
+    floor = high_passed(rng.standard_normal(samples), 25.0, order=order)
+    floor *= np.sqrt(np.mean(content**2)) * 10.0 ** (floor_db / 20.0) / np.std(floor)
+    return content + floor
+
+
+def test_the_floor_binds_before_the_boost_cap() -> None:
+    """`max_gain_db` is a preference dial; the noise floor is evidence.
+
+    Clipping first let the dial pre-empt the measurement: on a sloped floor the raw deficit
+    runs to 43 dB, the cap flattened it to 26 before the hold was consulted, and the guard
+    then found nothing left to hold. Clipping a runaway is not the same as declining to
+    chase it, and only the second is a reason that can be reported.
+    """
+    material = material_from(
+        {"C": sloped_floor(-26.0, 1), "LFE": sloped_floor(-26.0, 1, seed=60)}
+    )
+    diagnosis = diagnose(material)
+    proposal = flatten_targets(material, diagnosis, None, None, PipelineParams())[0]
+    assert any("noise floor binds" in note for note in proposal.notes), proposal.notes
+
+
+def test_a_white_floor_needs_no_holding_and_says_so() -> None:
+    """The notes have to be worth reading, so they stay quiet where nothing bound.
+
+    A flat floor inverts to a flat boost, so the hold is a no-op and claiming otherwise
+    would be noise.
+    """
+    material = material_from(
+        {
+            "C": noise_dominated(corner_hz=30.0, floor_db=-26.0),
+            "LFE": noise_dominated(corner_hz=30.0, floor_db=-26.0, seed=60),
+        }
+    )
+    diagnosis = diagnose(material)
+    proposal = flatten_targets(material, diagnosis, None, None, PipelineParams())[0]
+    assert not proposal.notes
+
+
+def test_an_unbound_target_says_nothing() -> None:
+    """Ordinary material, nothing binding, nothing to report."""
+    samples = int(FS * 300.0)
+    material = material_from(
+        {
+            "L": scened_noise(20, samples),
+            "C": scened_noise(21, samples),
+            "LFE": high_passed(scened_noise(22, samples), 22.0, order=6),
+        }
+    )
+    diagnosis = diagnose(material)
+    proposals = flatten_targets(material, diagnosis, None, None, PipelineParams())
+    assert proposals and not proposals[0].notes

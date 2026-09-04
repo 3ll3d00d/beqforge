@@ -133,6 +133,14 @@ class Candidate:
     fit_error_db: float
     correction: Correction
     verdict: Verdict
+    target_notes: tuple[str, ...] = ()
+    """What bounded the target, if anything.
+
+    §4.1 argues a limit that binds is a signal and not merely a limit — a correction whose
+    shape is being set by the noise floor or by a boost cap says the title is in the marginal
+    regime. Nothing recorded that, so a target held flat by the guard and one that genuinely
+    flattened out looked identical in the output.
+    """
 
     @property
     def mv_adjust_db(self) -> float:
@@ -174,6 +182,8 @@ class Proposal:
     target_db: np.ndarray | None = None
     filters: list[BiquadSpec] | None = None
     residual_db: float = 0.0
+    notes: tuple[str, ...] = ()
+    """What bound this target, if anything. Carried through to the `Candidate`."""
 
 
 def flatten_targets(
@@ -199,16 +209,34 @@ def flatten_targets(
 
     target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     target[DESIGN_GRID > params.flatten_reference_hz + 5.0] = 0.0
-    target = np.clip(target, 0.0, params.max_gain_db)
+    notes: list[str] = []
+    # The floor binds before the cap. `max_gain_db` is a preference dial (§4.3) and the noise
+    # floor is evidence, so clipping first lets the dial pre-empt the measurement: on a floor
+    # with a slope of its own the raw deficit runs to 43-62 dB, the cap flattens it to 26
+    # before the hold is consulted, and the guard then finds nothing left to hold. Clipping a
+    # runaway is not the same as declining to chase it, and only the second is a reason.
     floor = diagnosis.noise_floor_hz
     if not math.isnan(floor):
         # below the noise floor there is nothing to recover; hold the boost rather than
         # continuing to chase a curve that is describing noise
         held = float(np.interp(floor, DESIGN_GRID, target))
-        target = np.where(DESIGN_GRID < floor, held, target)
+        below = DESIGN_GRID < floor
+        withheld = float(np.max(target[below])) - held if below.any() else 0.0
+        target = np.where(below, held, target)
+        if withheld >= 0.5:
+            notes.append(
+                f"noise floor binds: the mix asks for a further {withheld:.1f} dB below "
+                f"{floor:.1f} Hz, held flat because nothing down there tracks the passband"
+            )
+    if target.max() > params.max_gain_db:
+        notes.append(
+            f"boost cap binds: the target reaches {target.max():.1f} dB and is held at "
+            f"{params.max_gain_db:.1f} dB"
+        )
+    target = np.clip(target, 0.0, params.max_gain_db)
     if target.max() < 1.0:
         return []
-    return [Proposal("flatten", target_db=target)]
+    return [Proposal("flatten", target_db=target, notes=tuple(notes))]
 
 
 def counterfactual_targets(
@@ -379,6 +407,7 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
                     material,
                     diagnosis,
                     params,
+                    proposal.notes,
                 )
             )
 
@@ -404,6 +433,7 @@ def _judge(
     material: Material,
     diagnosis: Diagnosis,
     params: PipelineParams,
+    target_notes: tuple[str, ...] = (),
 ) -> Candidate:
     correction = verify(
         filters,
@@ -418,8 +448,11 @@ def _judge(
         diagnosis.noise_floor_hz,
         params.accept,
         params.realisation,
+        filter_floor_hz=diagnosis.filter_floor_hz,
     )
     logger.info(f"  {label}: {verdict}")
+    for note in target_notes:
+        logger.info(f"    {note}")
     return Candidate(
         label=label,
         filters=filters,
@@ -427,4 +460,5 @@ def _judge(
         fit_error_db=error,
         correction=correction,
         verdict=verdict,
+        target_notes=target_notes,
     )

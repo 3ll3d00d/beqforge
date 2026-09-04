@@ -1,7 +1,10 @@
 """The acceptance model of §6.4 — R1 and R3, as checks rather than prose.
 
-R2 is not here: it is a property of the material, measured by `diagnose`, and it bounds what
-a candidate may attempt rather than judging one after the fact.
+R2 is a property of the material, measured by `diagnose`, and it bounds what a candidate may
+attempt rather than judging one after the fact — so it appears here only as a note. Where a
+correction reaches below the level-independence floor it is shaping rather than inverting an
+identified filter, which lowers confidence without making the answer wrong. Title 2's accepted
+design does exactly that and is right to; what was missing was anything saying so.
 
 The reason this module exists separately from `verify` is that `Correction`'s statistics are
 aggregates — `spread`, `tilt` and `level` are all means or extrema over a band — and R1 is
@@ -75,6 +78,20 @@ class AcceptParams:
 
     min_section_contribution_db: float = 1.0
     """A section contributing less than this to the cascade has not earned its slot (§5.1)."""
+
+    shaping_note_db: float = 1.0
+    """Boost claimed below the level-independence floor worth remarking on.
+
+    Not a limit. R2 says where inverting an attenuation stops being *identification* of a
+    filter and becomes shaping, which is a claim about confidence rather than about the
+    target — title 2's accepted filter boosts through that region and is right to. But
+    nothing in the system said where the boundary was, so a reader had no way to tell a
+    correction that rests on measured level-independence from one that does not.
+
+    Measured as the boost *in excess of* what the cascade had already reached at the floor,
+    not as the boost below it. Every low shelf plateaus to DC, so the second reads as the
+    full shelf gain for any floor at all and says nothing. The excess is the part of the
+    correction that only the unmeasured region asks for."""
 
     max_drift_db: float = 3.0
     """Quantisation drift above which the cascade is not safely realisable.
@@ -278,12 +295,17 @@ def assess(
     noise_floor_hz: float,
     params: AcceptParams | None = None,
     realisation: Realisation | None = None,
+    filter_floor_hz: float = math.nan,
 ) -> Verdict:
     """Judge one candidate against R1 and R3.
 
     `noise_floor_hz` is where R1's "down to the noise floor" terminates — from `diagnose`,
     not assumed. NaN means content was found all the way down, so the correction is expected
     to reach the bottom of the band.
+
+    `filter_floor_hz` is R2's boundary, and it produces a *note* rather than a failure. Below
+    it the attenuation being inverted is not level-independent, so undoing it is shaping and
+    not identification — which lowers confidence without making the answer wrong.
     """
     params = params or AcceptParams()
     realisation = realisation or Realisation()
@@ -370,6 +392,17 @@ def assess(
             failures.append(
                 f"section {index + 1} ({section.type} at {section.freq_hz:.1f} Hz) "
                 f"contributes {contribution:.2f} dB — has not earned its slot"
+            )
+
+    if not math.isnan(filter_floor_hz):
+        below = grid < filter_floor_hz
+        at_floor = float(np.interp(filter_floor_hz, grid, full))
+        shaping = float(np.max(full[below])) - at_floor if below.any() else 0.0
+        if shaping >= params.shaping_note_db:
+            notes.append(
+                f"{shaping:.1f} dB of the correction is claimed below "
+                f"{filter_floor_hz:.1f} Hz, where the attenuation stops being "
+                "level-independent — that part is shaping rather than identification (R2)"
             )
 
     if max((abs(f.q) for f in filters), default=0.0) > 4.0:
