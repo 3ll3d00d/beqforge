@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqanalyser.design.material import load  # noqa: E402
 from beqanalyser.design.pipeline import (  # noqa: E402
+    STRATEGIES,
     PipelineParams,
     Report,
     run,
@@ -103,7 +104,7 @@ def show_identification(report: Report) -> None:
 
 def show_candidates(report: Report) -> None:
     print(RULE)
-    print("CANDIDATES")
+    print("CANDIDATES  (one per target strategy; all judged the same way)")
     if not report.candidates:
         print("  None generated.")
         return
@@ -183,6 +184,15 @@ def main() -> int:
         help="authored feature to drop, in Hz; repeatable",
     )
     parser.add_argument(
+        "--strategy",
+        action="append",
+        metavar="NAME",
+        help=(
+            "target-derivation strategy to run; repeatable. "
+            f"One of {', '.join(sorted(STRATEGIES))}, or 'all'. Default: all"
+        ),
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="report only, no progress log"
     )
     args = parser.parse_args()
@@ -190,7 +200,19 @@ def main() -> int:
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO, format="%(message)s"
     )
+    chosen = args.strategy or ["all"]
+    if "all" in chosen:
+        strategies = tuple(STRATEGIES)
+    else:
+        unknown = [s for s in chosen if s not in STRATEGIES]
+        if unknown:
+            parser.error(
+                f"unknown strategy {', '.join(unknown)}; "
+                f"have {', '.join(sorted(STRATEGIES))}"
+            )
+        strategies = tuple(chosen)
     params = PipelineParams(
+        strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
     )
     report = run(load(args.material), params)

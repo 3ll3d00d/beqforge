@@ -1,20 +1,31 @@
 """The repeatable process: material in, a judged filter and its reasoning out.
 
-Two routes to a target, chosen by what the material actually shows rather than by a switch:
+A **target** is a curve to be realised; a **strategy** is one way of deriving one. Each is a
+first-class citizen — they are run through the same fitter and the same acceptance model, so
+their outputs are directly comparable, and any of them may be selected, combined, or all run
+at once with the best surviving candidate taken. They disagree usefully, and a disagreement
+is evidence about the material rather than a problem to be resolved by picking a favourite.
 
-* **Counterfactual** — when `diagnose` finds a filtered channel. Measure that channel's
-  attenuation against its own passband, invert it, re-sum against the untouched channels and
-  read the deficit off the mix. This is what produced the accepted answer on the second
-  title, where the sum carries no usable evidence below ~15 Hz.
-* **Sum-based** — `identify_rolloff` on the mono mix, as §3.5. Used when no channel shows a
-  knee, which is the case the soft-hinge model was written for.
+* **`flatten`** — invert the measured mix response. The rule the human-validated filters on
+  all three titles turned out to represent: the shape a good correction produces is flat to
+  the bottom of the evidence, and the target is simply the mix's own curve negated. Needs no
+  model of the rolloff and no `N`/`A` separation, which is the part §0 calls the weak link.
+* **`counterfactual`** — restore the filtered channels, re-sum, read the deficit off the mix.
+  The route that answered title 2, where the sum carries no usable evidence below ~15 Hz
+  because the filtered channel is 23 dB under the mains there.
+* **`parametric`** — `identify_rolloff` on the mono mix and invert the fitted rolloff (§3.5).
+  The soft-hinge route; the only one that can produce an exact closed-form inversion when the
+  alignment is representable, which on the three titles so far it never was.
 
-Both are run whenever both are available and the disagreement is reported, because a
-disagreement is information: it says the rolloff is confined to a channel the sum cannot see.
+`flatten` is validated only on modern, bass-rich material. On a sparse or old mix, flattening
+would lift the noise floor with the content, and nothing in the target itself objects — that
+is what the guard is for. `diagnose`'s level-independence test, band tracking and noise floor
+bound how far down a correction may reach and say when to abstain; they are not on the path to
+producing a target.
 
-Candidates are then generated, judged against §6.4, and the survivors ranked. The ranking is
-deliberately shallow — the acceptance model does the work, and a scalar score that could
-overrule it would reintroduce exactly the aggregate-blindness R1 exists to defeat.
+Candidates are judged against §6.4 and the survivors ranked. The ranking is deliberately
+shallow — the acceptance model does the work, and a scalar score that could overrule it would
+reintroduce exactly the aggregate-blindness R1 exists to defeat.
 """
 
 import logging
@@ -86,6 +97,16 @@ class PipelineParams:
     accept: AcceptParams = field(default_factory=AcceptParams)
     realisation: Realisation = field(default_factory=Realisation)
 
+    strategies: tuple[str, ...] = ("flatten", "counterfactual", "parametric")
+    """Which target-derivation strategies to run, by name (see `STRATEGIES`).
+
+    All of them by default. They cost a fit each, and they disagree in ways that say something
+    about the material, so the default is to hear from all of them and let the acceptance
+    model choose."""
+
+    flatten_reference_hz: float = 40.0
+    """Frequency `flatten` levels the mix against. Above the knee, below bass management."""
+
     restore_caps_db: tuple[float, ...] = (25.0, 35.0, 45.0)
     """Ceilings on the counterfactual restoration, one candidate each.
 
@@ -145,6 +166,112 @@ class Report:
         return min(passing, key=lambda c: (c.correction.spread_db, len(c.filters)))
 
 
+@dataclass(frozen=True, slots=True)
+class Proposal:
+    """One strategy's suggestion: a curve to fit, or a cascade already known exactly."""
+
+    label: str
+    target_db: np.ndarray | None = None
+    filters: list[BiquadSpec] | None = None
+    residual_db: float = 0.0
+
+
+def flatten_targets(
+    material: Material,
+    diagnosis: Diagnosis,
+    envelopes,
+    identification: "Identification | None",
+    params: "PipelineParams",
+) -> list[Proposal]:
+    """Invert the measured mix response — make it flat.
+
+    The three human-validated filters track this within 2-4 dB, and the residual is a
+    near-constant offset rather than a shape error: one sits ~3 dB above flat, the other two
+    ~2 dB below. Flat is the shape; how far past flat to go is the preference dial of §4.3.
+    """
+    freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    keep = np.ones_like(freqs, dtype=bool)
+    for low, high in params.exclude_bands_hz:
+        keep &= ~((freqs >= low) & (freqs <= high))
+    freqs, response = freqs[keep], response[keep]
+    response = response - np.interp(params.flatten_reference_hz, freqs, response)
+    deficit = np.convolve(np.maximum(-response, 0.0), np.ones(15) / 15, mode="same")
+
+    target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+    target[DESIGN_GRID > params.flatten_reference_hz + 5.0] = 0.0
+    target = np.clip(target, 0.0, params.max_gain_db)
+    floor = diagnosis.noise_floor_hz
+    if not math.isnan(floor):
+        # below the noise floor there is nothing to recover; hold the boost rather than
+        # continuing to chase a curve that is describing noise
+        held = float(np.interp(floor, DESIGN_GRID, target))
+        target = np.where(DESIGN_GRID < floor, held, target)
+    if target.max() < 1.0:
+        return []
+    return [Proposal("flatten", target_db=target)]
+
+
+def counterfactual_targets(
+    material: Material,
+    diagnosis: Diagnosis,
+    envelopes,
+    identification: "Identification | None",
+    params: "PipelineParams",
+) -> list[Proposal]:
+    """Restore the filtered channels, re-sum, and read the deficit off the mix."""
+    if not diagnosis.filtered_channels:
+        return []
+    proposals: list[Proposal] = []
+    for cap in params.restore_caps_db:
+        target = counterfactual_target(material, diagnosis, cap, params)
+        if target.max() < 1.0:
+            logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
+            continue
+        # A cap only changes the target when it binds. On title 1 no channel is attenuated by
+        # 25 dB, so all three caps describe one deficit and fitting each spent two thirds of
+        # the run recomputing one answer.
+        for seen in proposals:
+            if np.allclose(seen.target_db, target, atol=1e-6):
+                logger.info(
+                    f"  cap {cap:.0f} dB: target identical to {seen.label}; not refitting"
+                )
+                break
+        else:
+            proposals.append(Proposal(f"counterfactual/{cap:.0f}dB", target_db=target))
+    return proposals
+
+
+def parametric_targets(
+    material: Material,
+    diagnosis: Diagnosis,
+    envelopes,
+    identification: "Identification | None",
+    params: "PipelineParams",
+) -> list[Proposal]:
+    """Invert the rolloff fitted by `identify_rolloff` (§3.5)."""
+    if identification is None or not identification.detected:
+        return []
+    result = design(
+        identification,
+        envelopes,
+        DesignParams(max_sections=params.max_sections, realisation=params.realisation),
+    )
+    if not result.filters:
+        logger.info(f"  parametric declined: {result.decline_reason}")
+        return []
+    return [
+        Proposal("parametric", filters=result.filters, residual_db=result.residual_db)
+    ]
+
+
+STRATEGIES = {
+    "flatten": flatten_targets,
+    "counterfactual": counterfactual_targets,
+    "parametric": parametric_targets,
+}
+"""Every way of deriving a target, by name. All equal citizens of the same pipeline."""
+
+
 def counterfactual_target(
     material: Material,
     diagnosis: Diagnosis,
@@ -198,7 +325,7 @@ def _fit(target: np.ndarray, params: PipelineParams) -> tuple[list[BiquadSpec], 
 
 
 def run(material: Material, params: PipelineParams | None = None) -> Report:
-    """Diagnose, target, design, judge."""
+    """Diagnose, propose, fit, judge."""
     params = params or PipelineParams()
     timings = Timings()
     FIT_STATS.reset()
@@ -219,87 +346,50 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
         except ValueError as unusable:
             logger.warning(f"Sum-based identification unavailable: {unusable}")
 
+    logger.info("=" * 80)
+    logger.info(f"Strategies: {', '.join(params.strategies)}")
+    proposals: list[Proposal] = []
+    for name in params.strategies:
+        strategy = STRATEGIES.get(name)
+        if strategy is None:
+            raise ValueError(
+                f"unknown strategy {name!r}; have {', '.join(sorted(STRATEGIES))}"
+            )
+        with timings.stage(f"target/{name}"):
+            produced = strategy(material, diagnosis, envelopes, identification, params)
+        logger.info(f"  {name}: {len(produced)} proposal(s)")
+        proposals.extend(produced)
+
     candidates: list[Candidate] = []
-    target = None
-
-    if diagnosis.filtered_channels:
-        logger.info("=" * 80)
-        logger.info(
-            f"Counterfactual targets from {', '.join(diagnosis.filtered_channels)}"
-        )
-        # Targets are derived for every cap first and identical ones collapsed. A cap only
-        # changes the target when it actually binds; on the first title no channel is
-        # attenuated by 25 dB, so all three caps describe the same deficit and fitting each
-        # of them separately spent two thirds of the run recomputing one answer.
-        derived: list[tuple[str, np.ndarray]] = []
-        for cap in params.restore_caps_db:
-            with timings.stage(f"target/{cap:.0f}dB"):
-                target = counterfactual_target(material, diagnosis, cap, params)
-            if target.max() < 1.0:
-                logger.info(
-                    f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct"
-                )
-                continue
-            for label, seen in derived:
-                if np.allclose(seen, target, atol=1e-6):
-                    logger.info(
-                        f"  cap {cap:.0f} dB: target identical to {label}; not refitting"
-                    )
-                    break
-            else:
-                derived.append((f"{cap:.0f}dB", target))
-
-        for label, target in derived:
-            with timings.stage(f"fit/{label}"):
-                filters, error = _fit(target, params)
-            with timings.stage(f"judge/{label}"):
-                candidates.append(
-                    _judge(
-                        f"counterfactual/{label}",
-                        filters,
-                        target,
-                        error,
-                        material,
-                        diagnosis,
-                        params,
-                    )
-                )
-
-    if identification is not None and identification.detected:
-        logger.info("=" * 80)
-        logger.info("Sum-based design")
-        with timings.stage("fit/sum-based"):
-            result = design(
-                identification,
-                envelopes,
-                DesignParams(
-                    max_sections=params.max_sections, realisation=params.realisation
-                ),
-            )
-        if result.filters:
-            grid_target = np.interp(
-                DESIGN_GRID, DESIGN_GRID, np.zeros_like(DESIGN_GRID)
-            )
+    for proposal in proposals:
+        if proposal.filters is not None:
+            filters, error = proposal.filters, proposal.residual_db
+        else:
+            with timings.stage(f"fit/{proposal.label}"):
+                filters, error = _fit(proposal.target_db, params)
+        with timings.stage(f"judge/{proposal.label}"):
             candidates.append(
                 _judge(
-                    "sum-based",
-                    result.filters,
-                    grid_target,
-                    result.residual_db,
+                    proposal.label,
+                    filters,
+                    proposal.target_db
+                    if proposal.target_db is not None
+                    else np.zeros_like(DESIGN_GRID),
+                    error,
                     material,
                     diagnosis,
                     params,
                 )
             )
-        else:
-            logger.info(f"  declined: {result.decline_reason}")
 
     logger.info(f"Fitting cost: {FIT_STATS}")
     return Report(
         material=material,
         diagnosis=diagnosis,
         identification=identification,
-        counterfactual_target=target,
+        counterfactual_target=next(
+            (p.target_db for p in proposals if p.target_db is not None), None
+        ),
         candidates=candidates,
         timings=timings,
         fit_stats=FIT_STATS,

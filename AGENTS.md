@@ -32,7 +32,7 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
 | `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking. Where the evidence for a rolloff actually is. |
 | `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
-| `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, target, candidates, judge. Both target routes and the disagreement between them. |
+| `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
 | `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
@@ -78,7 +78,8 @@ Dependency direction: `__init__` ← `loader` ← `analyser`; `filter` and `repo
 ```bash
 uv sync                              # first time / after dependency changes
 uv run python -m beqanalyser         # clustering pipeline, from the repo root
-uv run python tools/design_beq.py data/NAME.npz   # automated design, one title
+uv run python tools/design_beq.py data/NAME.npz   # automated design, all strategies
+uv run python tools/design_beq.py data/NAME.npz --strategy flatten   # just one
 uv run ruff check beqanalyser        # ruff is a dependency; there is no config section
 uv run ruff format beqanalyser
 ```
@@ -142,10 +143,28 @@ Notes:
 
 ## Working on `design/`
 
+* **Target strategies are first-class and interchangeable.** `flatten` (invert the measured mix
+  response), `counterfactual` (restore filtered channels, re-sum, read the deficit) and `parametric`
+  (fit and invert a rolloff) all produce a target, all go through the same fitter and the same
+  acceptance model, and all run by default. Adding one is a function plus an entry in `STRATEGIES`.
+  Select with `--strategy NAME` (repeatable, or `all`). `flatten` is the one that produces an accepted
+  filter on all three titles; it also has no opinion of its own and will invert a noise floor as
+  happily as a rolloff, which is what `diagnose`'s guard is for.
+* **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but the
+  outcome is a flat-to-rising response, and inverting the measured response reaches it directly. Do not
+  reach for `identify_rolloff` to build a target — it returned "no representable alignment" on all three
+  real titles. See AUTOMATED_DESIGN.md §3.4a and §11.
 * **Start with `uv run python tools/design_beq.py data/NAME.npz`.** It runs the whole process and
   prints the evidence beside the answer; exit status is 0 when a candidate was accepted, 1 when the
   correct output was to abstain. Add `--exclude LOW HIGH` for an authored feature. Fits are slow —
   a few minutes per title — so run it in the background.
+* Acceptance rules must be **comparative wherever possible** — corrected curve against input curve.
+  Every absolute threshold tried so far has been wrong on some title: a fixed 6 dB flatness limit sat on
+  the floor of what any smooth cascade can achieve, and a fixed ±3 dB envelope rejected a correct filter
+  on one 0.24 Hz bin. Aggregates over the whole band are the recurring failure — a step, a turnover and
+  a cliff are all invisible to a mean. Measure over the segment that matters.
+* The fit pool leaves a core free (`FIT_WORKERS`); `PARALLEL_FITS = False` forces serial for profiling.
+  Fitting is ~90% of a run.
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by writing
   another one-off script. The point of the driver is that two titles become comparable; twenty
   scratchpad scripts are how the first two were done and none of them survived.

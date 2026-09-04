@@ -242,6 +242,14 @@ FitTask = tuple
 PARALLEL_FITS = True
 """Run independent fits in worker processes. Set False to profile or debug serially."""
 
+FIT_WORKERS = max(1, cpu_count() - 1)
+"""Worker ceiling for the fit pool.
+
+One core short of the machine deliberately. The fits saturate whatever they are given for
+minutes at a time, and taking every core makes the box unusable for anything else — including
+the shell watching the run. The last core buys back responsiveness for a few percent of wall
+time, since scaling is already only ~35% efficient at this width."""
+
 
 def _fit_task(task: "FitTask") -> tuple[list[BiquadSpec], float, float, int]:
     """Picklable entry point for one fit."""
@@ -257,7 +265,7 @@ def _run_fits(tasks: list["FitTask"]) -> list[tuple[list[BiquadSpec], float]]:
     it takes, never what it decides.
     """
     if len(tasks) > 1 and PARALLEL_FITS:
-        workers = min(len(tasks), cpu_count())
+        workers = max(1, min(len(tasks), FIT_WORKERS))
         with ProcessPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(_fit_task, tasks))
     else:
@@ -313,6 +321,7 @@ def fit_minimal_biquads(
     max_gain_db: float = 30.0,
     realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
+    min_contribution_db: float = 1.0,
 ) -> tuple[list[BiquadSpec], float]:
     """The fewest sections that reach `residual_target_db`, or the best within the budget.
 
@@ -357,8 +366,74 @@ def fit_minimal_biquads(
                 f"{sections} section(s) reach {candidate[1]:.3f} dB; "
                 f"the remaining {max_sections - sections} are not spent"
             )
-            return candidate
-    return min(per_sections, key=lambda r: r[1])
+            return _prune(candidate, target_db, freqs, fs, band_hz, min_contribution_db)
+    return _prune(
+        min(per_sections, key=lambda r: r[1]),
+        target_db,
+        freqs,
+        fs,
+        band_hz,
+        min_contribution_db,
+    )
+
+
+def _prune(
+    candidate: tuple[list[BiquadSpec], float],
+    target_db: np.ndarray,
+    freqs: np.ndarray,
+    fs: float,
+    band_hz: tuple[float, float] | None,
+    min_contribution_db: float,
+) -> tuple[list[BiquadSpec], float]:
+    """Drop sections that do nothing, provided the residual does not suffer.
+
+    `fit_to_biquads` spends whatever budget it is handed, so a cascade fitted at four sections
+    can arrive with one contributing 0.01 dB. Asking for fewer sections instead is not the
+    same thing — the *fit* may genuinely need the freedom, and only afterwards is it visible
+    that a section ended up doing nothing. Two of three titles reached a good shape and were
+    then rejected for carrying a section worth 0.34 and 0.01 dB.
+    """
+    specs, residual = candidate
+    if len(specs) < 2:
+        return candidate
+    mask = (
+        np.ones_like(freqs, dtype=bool)
+        if band_hz is None
+        else (freqs >= band_hz[0]) & (freqs <= band_hz[1])
+    )
+    full = magnitude_db(biquad_sos(specs, fs), freqs, fs)
+    kept = [
+        section
+        for index, section in enumerate(specs)
+        if _contribution(specs, index, full, freqs, fs, mask) >= min_contribution_db
+    ]
+    if len(kept) == len(specs) or not kept:
+        return candidate
+    pruned = float(
+        np.max(np.abs(magnitude_db(biquad_sos(kept, fs), freqs, fs) - target_db)[mask])
+    )
+    if pruned > residual + min_contribution_db:
+        return candidate
+    logger.info(
+        f"dropped {len(specs) - len(kept)} section(s) contributing under "
+        f"{min_contribution_db:g} dB; residual {residual:.3f} -> {pruned:.3f} dB"
+    )
+    return kept, pruned
+
+
+def _contribution(
+    specs: list[BiquadSpec],
+    index: int,
+    full: np.ndarray,
+    freqs: np.ndarray,
+    fs: float,
+    mask: np.ndarray,
+) -> float:
+    without = [s for j, s in enumerate(specs) if j != index]
+    if not without:
+        return float(np.max(np.abs(full)[mask]))
+    reduced = magnitude_db(biquad_sos(without, fs), freqs, fs)
+    return float(np.max(np.abs(full - reduced)[mask]))
 
 
 def fit_to_biquads(

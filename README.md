@@ -6,6 +6,20 @@ then fits realisable IIR filters to those composites.
 
 > NB: Code and requirements are LLM generated with human guidance/review.
 
+**A second, separate capability lives in `beqanalyser/design/`**: deriving a BEQ filter from a film's
+audio rather than summarising existing ones. It shares nothing with the clustering pipeline below except
+the biquad classes. One command takes an extracted track and produces a filter with its reasoning:
+
+```bash
+uv run python tools/extract.py FILM.mkv --out data/     # ffmpeg -> 1 kHz per-channel .npz
+uv run python tools/design_beq.py data/FILM.npz         # a filter, and why
+```
+
+It derives a target three ways, fits each, and judges them against an acceptance model — printing the
+evidence beside the answer, and abstaining when nothing measures up. See
+[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got (three real
+titles) and what is still unevidenced.
+
 ---
 
 ## 1. Quick start
@@ -316,7 +330,8 @@ One instance per discovery pass; the list length sets the number of passes.
 * **`BEQComposite.rejected_mappings_for_reason(reason, best_only=False)`** filters on
   `m.is_best == best_only`, so the default returns *non*-best mappings. It has no callers.
 * **`plot_distance_by_composite` is a stub** (`pass`), and there is no rejected-curve plotting.
-* **`tests/` contains no tests** — only a stale `__pycache__` from a removed `test_distances`.
+* **The clustering pipeline has no tests.** `tests/` covers `beqanalyser/design/` only (101 tests,
+  `uv run pytest`); nothing exercises the clustering path, so there is no fast feedback loop there.
 
 ---
 

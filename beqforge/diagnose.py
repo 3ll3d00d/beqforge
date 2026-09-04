@@ -47,11 +47,20 @@ class DiagnoseParams:
     attenuation is only meaningful against its own passband — comparing channels in absolute
     terms says which is louder, not which is filtered."""
 
-    knee_slope_db_per_octave: float = 20.0
+    knee_slope_db_per_octave: float = 14.0
     """Slope over a half-octave window above which a channel is called filtered.
 
-    Well clear of a natural envelope, which measured 2.8-3.6 dB/oct on the mains of both
-    titles, and well below the 61.5 dB/oct wall that motivated this."""
+    **The weakest threshold in the system.** Across the audible channels of three titles —
+    those clearing `min_passband_share` — it has to catch title 3's LFE at 15.9 dB/octave and
+    spare title 2's unfiltered L at 13.5, so max slope alone separates the two populations by
+    2.4 dB/octave. At the original 20.0 it missed title 3 entirely, and a 2nd-order Butterworth
+    at 12 dB/octave is still below anything safe to set here.
+
+    Slope is the wrong discriminator and this value is a stopgap. `stratified_response` already
+    measures the property that actually distinguishes a filter from a natural envelope — a
+    filter's relative shape does not vary with scene loudness (§6.4 R2) — and running it per
+    audible channel rather than only on the channel already chosen would classify on evidence
+    instead of on a 2.4 dB/octave gap. See §12."""
 
     strata: tuple[tuple[float, float], ...] = (
         (40.0, 80.0),

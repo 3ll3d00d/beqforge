@@ -64,3 +64,11 @@ def test_stats_are_collected_from_workers() -> None:
     assert calls == 4  # 2 splits x 2 seeds
     assert F.FIT_STATS.seconds > 0.0
     assert F.FIT_STATS.cost_evaluations > 0
+
+
+def test_the_pool_leaves_a_core_free() -> None:
+    """The fits saturate whatever they are given; taking every core makes the box unusable."""
+    from multiprocessing import cpu_count
+
+    assert F.FIT_WORKERS <= max(1, cpu_count() - 1)
+    assert F.FIT_WORKERS >= 1
