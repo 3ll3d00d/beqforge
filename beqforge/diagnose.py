@@ -15,6 +15,10 @@ Three measurements, each answering a question no aggregate of the sum can:
 * `band_tracking` — whether energy below the knee is programme-correlated content or a
   stationary floor. This sets the terminus R1 refers to as "the noise floor".
 
+The last two are measured on whichever channel dominates the passband, and they run whether
+or not any channel was called filtered. They ask about the material, not about a filter, and
+gating them on a knee made the guard unreachable on the sparse material it exists to catch.
+
 Nothing here decides anything; it produces the numbers the pipeline and the report use.
 """
 
@@ -132,7 +136,7 @@ class Diagnosis:
     mix_db: np.ndarray
     channels: dict[str, ChannelDiagnosis]
     stratified: dict[str, np.ndarray] = field(default_factory=dict)
-    """Per-stratum response of the filtered channels, keyed by stratum label."""
+    """Per-stratum response of the passband-dominant channel, keyed by stratum label."""
 
     level_spread_db: np.ndarray | None = None
     """Spread across strata per bin. Large means the attenuation is not a fixed filter."""
@@ -145,7 +149,13 @@ class Diagnosis:
     """
 
     noise_floor_hz: float = math.nan
-    """Below this there is no programme-correlated content left — R1's terminus."""
+    """Below this there is no programme-correlated content left — R1's terminus.
+
+    NaN means every band down to the bottom tracked the passband, so the correction is
+    expected to reach the bottom of the analysis band. A band that could not be measured is
+    *not* NaN — it terminates the search like a band that failed, because being unable to
+    see content is not the same as seeing content.
+    """
 
     @property
     def filtered_channels(self) -> list[str]:
@@ -299,16 +309,31 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         logger.info(f"  {channels[name]}")
 
     filtered = [name for name, c in channels.items() if c.is_filtered]
+    # The floors are measured on the channel that dominates the passband, whether or not any
+    # channel was called filtered. Neither measurement needs a knee: "is this level-
+    # independent" and "is this programme-correlated" are questions about the material, and
+    # nesting them inside the filtered branch made the guard unreachable on exactly the case
+    # it exists for. Content high-passed at 30 Hz over a -26 dB floor is found at order 8
+    # (slope 40.7 dB/oct, floor at 15.6 Hz) and missed entirely at order 2 (13.6 dB/oct, no
+    # channel filtered, no floor, `flatten` free to ask for +22 dB at 5 Hz) — the same
+    # material either way, separated only by a steepness the floor does not depend on.
     if not filtered:
         logger.info("No channel shows a knee; the sum is the only available evidence")
+    if not channels:
         return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
 
     # the channel that dominates the passband, not whichever came first in the dict: on the
     # first title `filtered` is [L, R, C, LFE] and the mains carry 6-8% each against the LFE's
     # 76%, so stratifying the first one measures a channel nobody hears down there
-    dominant = max(filtered, key=lambda name: channels[name].passband_share)
+    dominant = max(channels, key=lambda name: channels[name].passband_share)
     subject = material.channels[dominant]
     strata_freqs, strata = stratified_response(subject, material.fs, params)
+    if not strata:
+        logger.warning(
+            f"{dominant} has too few frames in any loudness stratum to test level "
+            "independence; no floor measured"
+        )
+        return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
     stacked = np.vstack(list(strata.values()))
     spread = np.ptp(stacked, axis=0)
     # searched downward from the *bottom* of the passband, not from the top of the spectrum
@@ -323,16 +348,17 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
 
     noise_floor = math.nan
     for low, high in _octave_bands(params.band_hz[0], params.passband_hz[0]):
-        if (
-            band_tracking(subject, material.fs, (low, high), params)
-            < params.tracking_floor
-        ):
+        tracking = band_tracking(subject, material.fs, (low, high), params)
+        # `not >=` rather than `<`, so a band that could not be measured at all fails the
+        # same way one that failed does. NaN is not evidence of content, and reading it as
+        # such is how a floor gets missed in the direction that costs something.
+        if not tracking >= params.tracking_floor:
             noise_floor = high
             break
 
     logger.info(
-        f"Filtered: {', '.join(filtered)} (stratified on {dominant}); "
-        f"level-independent above "
+        f"Filtered: {', '.join(filtered) if filtered else 'none'} "
+        f"(floors measured on {dominant}); level-independent above "
         f"{filter_floor:.1f} Hz, content down to "
         f"{'the bottom of the band' if math.isnan(noise_floor) else f'{noise_floor:.1f} Hz'}"
     )
