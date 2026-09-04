@@ -193,6 +193,12 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--charts",
+        type=Path,
+        metavar="DIR",
+        help="write peak-vs-average charts per candidate into DIR",
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="report only, no progress log"
     )
     args = parser.parse_args()
@@ -215,7 +221,21 @@ def main() -> int:
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
     )
-    report = run(load(args.material), params)
+    material = load(args.material)
+    report = run(material, params)
+
+    if args.charts:
+        from beqanalyser.design.charts import render
+
+        relevant = [
+            name
+            for name, channel in report.diagnosis.channels.items()
+            if channel.passband_share >= params.diagnose.min_passband_share
+        ]
+        out = args.charts / material.name
+        for candidate in report.candidates:
+            render(candidate.label, candidate.filters, material, relevant, out)
+        print(f"\n  charts written to {out}/")
 
     print()
     show_channels(report)

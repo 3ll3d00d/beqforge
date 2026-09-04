@@ -13,6 +13,7 @@ Everything below the public boundary takes plain ndarrays.
 
 import logging
 import math
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
@@ -242,13 +243,43 @@ FitTask = tuple
 PARALLEL_FITS = True
 """Run independent fits in worker processes. Set False to profile or debug serially."""
 
-FIT_WORKERS = max(1, cpu_count() - 1)
-"""Worker ceiling for the fit pool.
 
-One core short of the machine deliberately. The fits saturate whatever they are given for
-minutes at a time, and taking every core makes the box unusable for anything else — including
-the shell watching the run. The last core buys back responsiveness for a few percent of wall
-time, since scaling is already only ~35% efficient at this width."""
+def _physical_cores() -> int:
+    """Cores, not hardware threads.
+
+    `cpu_count()` reports threads: on an 8-core machine with SMT it says 16. Sizing a pool of
+    CPU-bound fits by that number oversubscribes the machine two to one — capping at "all but
+    one" of 16 put 15 processes on 8 cores and saturated it completely, which is the opposite
+    of leaving headroom.
+    """
+    try:
+        seen: set[tuple[str, str]] = set()
+        physical = core = None
+        with open("/proc/cpuinfo") as handle:
+            for line in handle:
+                key, _, value = line.partition(":")
+                key, value = key.strip(), value.strip()
+                if key == "physical id":
+                    physical = value
+                elif key == "core id":
+                    core = value
+                if physical is not None and core is not None:
+                    seen.add((physical, core))
+                    physical = core = None
+        if seen:
+            return len(seen)
+    except OSError:
+        pass
+    return cpu_count()
+
+
+FIT_WORKERS = int(os.environ.get("BEQ_FIT_WORKERS") or max(1, _physical_cores() - 1))
+"""Worker ceiling for the fit pool, in physical cores and one short of the machine.
+
+The fits are CPU-bound and saturate whatever they are given for minutes at a time, so taking
+the whole machine makes it unusable for anything else — including the shell watching the run.
+Scaling is only ~35% efficient at this width anyway, so the last core costs a few percent of
+wall time and buys back a responsive box. Override with `BEQ_FIT_WORKERS`."""
 
 
 def _fit_task(task: "FitTask") -> tuple[list[BiquadSpec], float, float, int]:

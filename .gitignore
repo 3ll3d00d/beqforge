@@ -178,3 +178,6 @@ database.bin
 database.bin.sha256
 *.npy
 data/
+
+# generated debug charts (PNGs, regenerated per run)
+charts/

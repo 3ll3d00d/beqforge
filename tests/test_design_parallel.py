@@ -66,9 +66,15 @@ def test_stats_are_collected_from_workers() -> None:
     assert F.FIT_STATS.cost_evaluations > 0
 
 
-def test_the_pool_leaves_a_core_free() -> None:
-    """The fits saturate whatever they are given; taking every core makes the box unusable."""
+def test_the_pool_leaves_a_physical_core_free() -> None:
+    """Sized in cores, not hardware threads.
+
+    `cpu_count()` reports threads, so "all but one" of 16 put 15 CPU-bound fits on 8 cores and
+    saturated the machine — the opposite of leaving headroom.
+    """
     from multiprocessing import cpu_count
 
-    assert F.FIT_WORKERS <= max(1, cpu_count() - 1)
+    physical = F._physical_cores()
+    assert 1 <= physical <= cpu_count()
+    assert F.FIT_WORKERS <= max(1, physical - 1)
     assert F.FIT_WORKERS >= 1

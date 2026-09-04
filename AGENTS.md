@@ -33,7 +33,8 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking. Where the evidence for a rolloff actually is. |
 | `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
 | `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
-| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. |
+| `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB). Fixed colour per channel across every chart. |
+| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
