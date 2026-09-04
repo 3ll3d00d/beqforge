@@ -410,13 +410,16 @@ def fit_minimal_biquads(
     ]
     realisable = _realisable(pruned, freqs, realisation, max_drift_db)
 
-    for sections, candidate in enumerate(realisable, start=1):
-        if candidate[1] <= residual_target_db:
+    # `realisable` may be a subset, so the section count is read off the cascade rather than
+    # from its position: after screening, the first survivor is not necessarily the 1-section
+    # fit, and reporting it as one would misdescribe the answer in the run's own log.
+    for specs, residual in realisable:
+        if residual <= residual_target_db:
             logger.info(
-                f"{sections} section(s) reach {candidate[1]:.3f} dB; "
-                f"the remaining {len(realisable) - sections} are not spent"
+                f"{len(specs)} section(s) reach {residual:.3f} dB; "
+                f"the remaining {max_sections - len(specs)} are not spent"
             )
-            return candidate
+            return specs, residual
     return min(realisable, key=lambda r: r[1])
 
 
