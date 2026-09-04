@@ -392,6 +392,7 @@ def _fit(target: np.ndarray, params: PipelineParams) -> tuple[list[BiquadSpec], 
         max_gain_db=params.max_gain_db,
         realisation=params.realisation,
         seeds=params.fit_seeds,
+        max_drift_db=params.accept.max_drift_db,
     )
 
 

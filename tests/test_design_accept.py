@@ -180,11 +180,11 @@ def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
     """A cancelling cascade can measure well at the optimiser's exact output and badly once
     published. Two shelves that do not fight each other must stay tight under the same jitter.
     """
-    from beqanalyser.design.accept import drift_distribution
+    from beqanalyser.design.filters import drift_distribution
     from beqanalyser.design.filters import Realisation
 
     grid = np.logspace(np.log10(3.0), np.log10(400.0), 400)
-    params, realisation = AcceptParams(), Realisation()
+    realisation = Realisation()
     cancelling = [
         BiquadSpec("low_shelf", 10.59, 14.36, 0.945),
         BiquadSpec("peaking_eq", 8.36, 1.29, 4.110),
@@ -195,8 +195,8 @@ def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
         BiquadSpec("low_shelf", 19.74, 2.32, 2.495),
         BiquadSpec("low_shelf", 16.23, 10.93, 0.744),
     ]
-    fragile = drift_distribution(cancelling, grid, params, realisation)
-    robust = drift_distribution(clean, grid, params, realisation)
+    fragile = drift_distribution(cancelling, grid, realisation)
+    robust = drift_distribution(clean, grid, realisation)
     # the fragile cascade's spread is the signal; a point estimate cannot see it
     assert fragile.max() > 5.0 * fragile.min()
     assert np.percentile(fragile, 90) > np.percentile(robust, 90)

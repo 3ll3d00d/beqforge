@@ -16,6 +16,7 @@ from beqanalyser.design import (
     ExactInversionUnavailable,
     HighPass,
 )
+import beqanalyser.design.filters as F
 from beqanalyser.design.filters import (
     Realisation,
     biquad_sos,
@@ -285,3 +286,60 @@ def test_fitting_scores_the_realisation_not_just_float64() -> None:
 def test_quantisation_leaves_the_normalised_denominator_alone() -> None:
     sos = biquad_sos([BiquadSpec("low_shelf", 12.0, 15.0, 0.9)], 96000.0)
     assert np.all(Realisation().quantise(sos)[:, 3] == 1.0)
+
+
+def test_the_fit_selects_on_the_drift_that_will_be_published() -> None:
+    """The cost scores drift at the exact coefficients; publication rounds them first.
+
+    Selecting on residual alone therefore picks the most accurate cascade in the budget even
+    when it is the one the acceptance model will then reject. On the third title's flatten
+    target that is what happened: the 3-section fit measured 0.43 dB in the cost and 3.44 dB
+    at the p90 of its publication rounding, against a 3.0 limit, while the 2-section fit at
+    0.59 dB drifts 2.69 and passes. Selecting the second is worth 0.16 dB of accuracy.
+
+    Exercised on hand-built cascades rather than fitted ones, so the case is the one intended
+    rather than whatever the optimiser happens to produce.
+    """
+    freqs = np.logspace(np.log10(3.0), np.log10(400.0), 400)
+    realisation = F.Realisation()
+    fragile = [
+        BiquadSpec("low_shelf", 10.59, 14.36, 0.945),
+        BiquadSpec("peaking_eq", 8.36, 1.29, 4.110),
+        BiquadSpec("peaking_eq", 7.17, -0.85, 5.688),
+        BiquadSpec("peaking_eq", 10.59, -3.63, 5.349),
+    ]
+    robust = [
+        BiquadSpec("low_shelf", 19.74, 2.32, 2.495),
+        BiquadSpec("low_shelf", 16.23, 10.93, 0.744),
+    ]
+
+    def drift_of(specs):
+        return float(np.percentile(F.drift_distribution(specs, freqs, realisation), 90))
+
+    assert drift_of(fragile) > drift_of(robust), "the fixture no longer separates"
+    limit = 0.5 * (drift_of(fragile) + drift_of(robust))
+
+    # the fragile one is the more accurate, so residual alone would take it
+    candidates = [(robust, 0.59), (fragile, 0.43)]
+    kept = F._realisable(candidates, freqs, realisation, limit)
+    assert [specs for specs, _ in kept] == [robust]
+    assert F._realisable(candidates, freqs, realisation, None) == candidates
+
+
+def test_an_impossible_drift_limit_still_returns_a_cascade() -> None:
+    """Abstaining is the acceptance model's job, and it can say why; this cannot."""
+    freqs = np.logspace(np.log10(3.0), np.log10(400.0), 300)
+    target = 12.0 / (1.0 + (freqs / 18.0) ** 2)
+    specs, _ = F.fit_minimal_biquads(
+        target,
+        freqs,
+        96000.0,
+        2,
+        0.05,
+        band_hz=(5.0, 200.0),
+        placement_band_hz=(5.0, 40.0),
+        realisation=F.Realisation(),
+        seeds=(0,),
+        max_drift_db=0.0,
+    )
+    assert specs

@@ -353,6 +353,7 @@ def fit_minimal_biquads(
     realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
     min_contribution_db: float = 1.0,
+    max_drift_db: float | None = None,
 ) -> tuple[list[BiquadSpec], float]:
     """The fewest sections that reach `residual_target_db`, or the best within the budget.
 
@@ -360,6 +361,18 @@ def fit_minimal_biquads(
     three will do parks the fourth somewhere harmless at a fraction of a dB. A section that
     does nothing is not free: it occupies a slot, it has to be published, and it invites the
     reader to believe it means something.
+
+    `max_drift_db` screens the candidates on the statistic that will actually judge them.
+    The cost function scores quantisation drift at the optimiser's exact coefficients, but a
+    published cascade is rounded first, and the two differ: on the third title the most
+    accurate cascade in the budget measured 0.43 dB in the fit and 3.44 dB at the p90 of the
+    rounding it will undergo, so selecting on residual alone chose a filter the acceptance
+    model then rejected, over a slightly less accurate one that passes.
+
+    Widening the *cost* to cover that was tried and is worse on every axis (see
+    `_fit_structure`) — a max over sampled roundings is non-smooth and degrades the search.
+    Measuring it once per surviving candidate instead costs a few evaluations rather than
+    millions, which is where a statistic this expensive belongs.
     """
     placement = placement_band_hz or band_hz
     grouped: list[list["FitTask"]] = [
@@ -391,21 +404,53 @@ def fit_minimal_biquads(
         at += len(tasks)
         per_sections.append(min(window, key=lambda r: r[1]))
 
-    for sections, candidate in enumerate(per_sections, start=1):
+    pruned = [
+        _prune(candidate, target_db, freqs, fs, band_hz, min_contribution_db)
+        for candidate in per_sections
+    ]
+    realisable = _realisable(pruned, freqs, realisation, max_drift_db)
+
+    for sections, candidate in enumerate(realisable, start=1):
         if candidate[1] <= residual_target_db:
             logger.info(
                 f"{sections} section(s) reach {candidate[1]:.3f} dB; "
-                f"the remaining {max_sections - sections} are not spent"
+                f"the remaining {len(realisable) - sections} are not spent"
             )
-            return _prune(candidate, target_db, freqs, fs, band_hz, min_contribution_db)
-    return _prune(
-        min(per_sections, key=lambda r: r[1]),
-        target_db,
-        freqs,
-        fs,
-        band_hz,
-        min_contribution_db,
-    )
+            return candidate
+    return min(realisable, key=lambda r: r[1])
+
+
+def _realisable(
+    candidates: list[tuple[list[BiquadSpec], float]],
+    freqs: np.ndarray,
+    realisation: "Realisation | None",
+    max_drift_db: float | None,
+) -> list[tuple[list[BiquadSpec], float]]:
+    """Those that survive the publication rounding, or all of them if none does.
+
+    Falling back to the whole set rather than to nothing is deliberate: the acceptance model
+    is what declines, and it can say *why*. Returning no candidate here would abstain without
+    a reason attached, which §2.5 asks for the opposite of.
+    """
+    if realisation is None or max_drift_db is None:
+        return candidates
+    kept = []
+    for specs, residual in candidates:
+        drift = float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
+        if drift <= max_drift_db:
+            kept.append((specs, residual))
+        else:
+            logger.info(
+                f"{len(specs)} section(s) at {residual:.3f} dB drift {drift:.2f} dB "
+                f"once published, over the {max_drift_db:.1f} dB limit; not selected"
+            )
+    if not kept:
+        logger.warning(
+            "no cascade in the budget survives publication rounding; keeping the most "
+            "accurate so the acceptance model can say so"
+        )
+        return candidates
+    return kept
 
 
 def _prune(
@@ -539,6 +584,16 @@ class Realisation:
     integer_bits: int = 5
     """Fixed-point format of the target device. 5.23 is the conservative case."""
 
+    drift_samples: int = 48
+    """Perturbations used to measure drift as a distribution rather than a point.
+
+    A cascade is published as text and loaded at whatever precision the device accepts, so
+    the coefficients that reach the hardware are not the optimiser's. Evaluated once at the
+    exact output, a four-section cancelling cascade measured 1.23 dB of drift; jittered
+    within the rounding it will actually undergo, the same cascade ranges 1.23 to 18.86 dB.
+    The single figure was the luckiest sample in a 15x spread, which is precisely the
+    fragility §5.1 exists to reject."""
+
     publication_precision: tuple[float, float, float] = (0.005, 0.005, 0.0005)
     """Half-step of the precision a filter is published at: frequency, gain, Q.
 
@@ -552,6 +607,44 @@ class Realisation:
         rounded = np.round(np.asarray(sos) / step) * step
         rounded[:, 3] = 1.0
         return rounded
+
+
+def drift_distribution(
+    filters: list[BiquadSpec],
+    grid: np.ndarray,
+    realisation: Realisation,
+) -> np.ndarray:
+    """Coefficient drift over the roundings the published filter might undergo.
+
+    Deterministically seeded, so a cascade scores the same every run.
+    """
+    rng = np.random.default_rng(0)
+    freq_step, gain_step, q_step = realisation.publication_precision
+
+    def drift_of(specs: list[BiquadSpec]) -> float:
+        sos = biquad_sos(specs, realisation.fs)
+        return float(
+            np.max(
+                np.abs(
+                    magnitude_db(realisation.quantise(sos), grid, realisation.fs)
+                    - magnitude_db(sos, grid, realisation.fs)
+                )
+            )
+        )
+
+    samples = [drift_of(filters)]
+    for _ in range(realisation.drift_samples):
+        jittered = [
+            BiquadSpec(
+                section.type,
+                section.freq_hz + rng.uniform(-freq_step, freq_step),
+                section.gain_db + rng.uniform(-gain_step, gain_step),
+                max(section.q + rng.uniform(-q_step, q_step), 1e-3),
+            )
+            for section in filters
+        ]
+        samples.append(drift_of(jittered))
+    return np.array(samples)
 
 
 def _fit_structure(

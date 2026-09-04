@@ -22,7 +22,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import Realisation, biquad_sos, magnitude_db
+from beqanalyser.design.filters import (
+    Realisation,
+    biquad_sos,
+    drift_distribution,
+    magnitude_db,
+)
 from beqanalyser.design.verify import Correction
 
 logger = logging.getLogger(__name__)
@@ -103,16 +108,6 @@ class AcceptParams:
     the first title at 2.33, while the four-section cancelling cascade reaches 13.59. The
     populations separate by an order of magnitude, so the exact value between them matters
     little — but it is still a threshold set on two titles (§12)."""
-
-    drift_samples: int = 48
-    """Perturbations used to measure drift as a distribution rather than a point.
-
-    A cascade is published as text and loaded at whatever precision the device accepts, so the
-    coefficients that reach the hardware are not the optimiser's. Evaluated once at the exact
-    output, a four-section cancelling cascade measured 1.23 dB of drift; jittered within the
-    rounding it will actually undergo, the same cascade ranges 1.23 to 18.86 dB. The single
-    figure was the luckiest sample in a 15x spread, which is precisely the fragility §5.1
-    exists to reject."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,45 +265,6 @@ def corrected_wobble(correction: Correction, degree: int = 3) -> float:
     return correction.wobble_db(correction.after_db, degree)
 
 
-def drift_distribution(
-    filters: list[BiquadSpec],
-    grid: np.ndarray,
-    params: AcceptParams,
-    realisation: Realisation,
-) -> np.ndarray:
-    """Coefficient drift over the roundings the published filter might undergo.
-
-    Deterministically seeded, so a cascade scores the same every run.
-    """
-    rng = np.random.default_rng(0)
-    freq_step, gain_step, q_step = realisation.publication_precision
-
-    def drift_of(specs: list[BiquadSpec]) -> float:
-        sos = biquad_sos(specs, realisation.fs)
-        return float(
-            np.max(
-                np.abs(
-                    magnitude_db(realisation.quantise(sos), grid, realisation.fs)
-                    - magnitude_db(sos, grid, realisation.fs)
-                )
-            )
-        )
-
-    samples = [drift_of(filters)]
-    for _ in range(params.drift_samples):
-        jittered = [
-            BiquadSpec(
-                section.type,
-                section.freq_hz + rng.uniform(-freq_step, freq_step),
-                section.gain_db + rng.uniform(-gain_step, gain_step),
-                max(section.q + rng.uniform(-q_step, q_step), 1e-3),
-            )
-            for section in filters
-        ]
-        samples.append(drift_of(jittered))
-    return np.array(samples)
-
-
 def assess(
     filters: list[BiquadSpec],
     correction: Correction,
@@ -391,7 +347,7 @@ def assess(
 
     # --- R3: parsimonious, no cancellation, realisable
     grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
-    samples = drift_distribution(filters, grid, params, realisation)
+    samples = drift_distribution(filters, grid, realisation)
     drift = float(np.percentile(samples, 90))
     if drift > params.max_drift_db:
         failures.append(
