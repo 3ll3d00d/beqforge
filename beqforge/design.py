@@ -19,7 +19,12 @@ from typing import Literal
 
 import numpy as np
 
-from beqanalyser.design import BiquadSpec, ExactInversionUnavailable, HighPass
+from beqanalyser.design import (
+    Alignment,
+    BiquadSpec,
+    ExactInversionUnavailable,
+    HighPass,
+)
 from beqanalyser.design.extraction import Envelopes
 from beqanalyser.design.filters import (
     Realisation,
@@ -38,8 +43,13 @@ from beqanalyser.design.rolloff import attenuation_db
 logger = logging.getLogger(__name__)
 
 DesignMethod = Literal["exact", "fitted", "non_parametric"]
-PUBLISH_FS = 48000.0
-"""Rate the cascade is realised at for measuring its own residual. Not published (§5)."""
+PUBLISH_FS = 96000.0
+"""Rate the cascade is realised at for measuring its own residual. Not published (§5).
+
+A `BiquadSpec` is rate-independent, so this only sets the rate the residual is *read* at —
+but it was 48 kHz while the pipeline judges, quantises and reports at 96 kHz, so a parametric
+candidate's residual was the one number in the run measured somewhere else. 96 kHz is also the
+worse case: the poles sit nearer z=1 (§5.1)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +195,7 @@ def _fitted_target(
     termination = magnitude_db(
         high_pass_sos(
             HighPass(
-                _nearest_even_alignment(order),
+                PROTECTIVE_ALIGNMENT,
                 _nearest_even_order(order),
                 protect_corner,
             ),
@@ -202,10 +212,14 @@ def _nearest_even_order(order: float) -> int:
     return max(2, 2 * int(round(order / 2.0)))
 
 
-def _nearest_even_alignment(order: float):
-    from beqanalyser.design import Alignment
+PROTECTIVE_ALIGNMENT = Alignment.BUTTERWORTH
+"""Alignment of the protective high-pass on the *fitted* path.
 
-    return Alignment.BUTTERWORTH
+§4.3 says to default this to the identified rolloff's alignment, which is what makes the
+output the exact inverse rather than a fit to it. That is what the `exact` path above does.
+This constant is only reached when no alignment was identified, so there is nothing to match
+and Butterworth is a stated choice rather than a derived one. It was a function taking the
+implied order and ignoring it, which read as though the alignment were being chosen."""
 
 
 def _noise_ceiling(

@@ -109,8 +109,7 @@ def test_mix_shares_sum_to_one() -> None:
             "LFE": scened_noise(7, samples),
         }
     )
-    freqs = np.linspace(5.0, 100.0, 50)
-    shares = mix_shares(material, freqs)
+    shares = mix_shares(material)
     assert sum(shares.values()) == pytest.approx(
         np.ones(len(next(iter(shares.values())))), abs=0.02
     )

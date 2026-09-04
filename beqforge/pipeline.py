@@ -28,6 +28,7 @@ shallow — the acceptance model does the work, and a scalar score that could ov
 reintroduce exactly the aggregate-blindness R1 exists to defeat.
 """
 
+import dataclasses
 import logging
 import math
 import time
@@ -45,7 +46,7 @@ from beqanalyser.design.diagnose import (
     diagnose,
     mean_spectrum,
 )
-from beqanalyser.design.extraction import extract
+from beqanalyser.design.extraction import ExtractionParams, extract
 from beqanalyser.design.filters import (
     FIT_STATS,
     FitStats,
@@ -93,6 +94,7 @@ class PipelineParams:
     """Everything the run may vary, in one place so a refinement is one edit."""
 
     diagnose: DiagnoseParams = field(default_factory=DiagnoseParams)
+    extraction: ExtractionParams = field(default_factory=ExtractionParams)
     identify: IdentifyParams = field(default_factory=IdentifyParams)
     accept: AcceptParams = field(default_factory=AcceptParams)
     realisation: Realisation = field(default_factory=Realisation)
@@ -126,7 +128,13 @@ class PipelineParams:
     fit_seeds: tuple[int, ...] = (0, 1)
     verify_band_hz: tuple[float, float] = (5.0, 45.0)
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
-    """Authored features to drop, still manual (§3.1, §10)."""
+    """Authored features to drop, still manual (§3.1, §10).
+
+    Reaches every stage that reads the spectrum: the `flatten` target, the verification band,
+    and identification. It used to reach the first two only, because `IdentifyParams` carries
+    a field of the same name that nothing set — so `--exclude 12 25` removed a hand-authored
+    feature from the target and from the judgement while `identify_rolloff` went on fitting
+    it, which is the failure §3.5 records as dragging a corner from 13 Hz to 20."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,17 +175,24 @@ class Report:
     material: Material
     diagnosis: Diagnosis
     identification: Identification | None
-    counterfactual_target: np.ndarray | None
     candidates: list[Candidate]
     timings: Timings
     fit_stats: FitStats
 
     @property
     def accepted(self) -> Candidate | None:
+        """The best of the candidates the acceptance model let through.
+
+        Ranked on the statistic the model actually judged — wobble against the material's own
+        roughness — rather than on `spread_db`, which includes a tilt the tilt clause has
+        already ruled on. Deliberately shallow either way: the acceptance model does the work,
+        and a scalar score that could overrule it would reintroduce exactly the
+        aggregate-blindness R1 exists to defeat.
+        """
         passing = [c for c in self.candidates if c.verdict.passed]
         if not passing:
             return None
-        return min(passing, key=lambda c: (c.correction.spread_db, len(c.filters)))
+        return min(passing, key=lambda c: (c.verdict.wobble_db, len(c.filters)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,11 +409,18 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
         diagnosis = diagnose(material, params.diagnose)
 
     with timings.stage("extract"):
-        envelopes = extract(material.mono_mix, float(material.fs))
+        envelopes = extract(material.mono_mix, float(material.fs), params.extraction)
     identification: Identification | None = None
+    # the run's exclusions are the run's, whichever stage reads the spectrum
+    identify_params = dataclasses.replace(
+        params.identify,
+        exclude_bands_hz=tuple(
+            dict.fromkeys((*params.identify.exclude_bands_hz, *params.exclude_bands_hz))
+        ),
+    )
     with timings.stage("identify"):
         try:
-            identification = identify_rolloff(envelopes, params.identify)
+            identification = identify_rolloff(envelopes, identify_params)
         except ValueError as unusable:
             logger.warning(f"Sum-based identification unavailable: {unusable}")
 
@@ -444,9 +466,6 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
         material=material,
         diagnosis=diagnosis,
         identification=identification,
-        counterfactual_target=next(
-            (p.target_db for p in proposals if p.target_db is not None), None
-        ),
         candidates=candidates,
         timings=timings,
         fit_stats=FIT_STATS,

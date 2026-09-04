@@ -199,7 +199,7 @@ def steepest_slope(
     return best, at
 
 
-def mix_shares(material: Material, freqs: np.ndarray) -> dict[str, np.ndarray]:
+def mix_shares(material: Material) -> dict[str, np.ndarray]:
     """Fraction of summed-mix power each channel supplies, per bin.
 
     Uses the same gains `tools/extract.py` applied when building the mix, so the shares sum
@@ -284,7 +284,7 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
     band = (freqs >= params.band_hz[0]) & (freqs <= params.band_hz[1])
     freqs, mix_db = freqs[band], mix_db[band]
-    shares = mix_shares(material, freqs)
+    shares = mix_shares(material)
 
     channels: dict[str, ChannelDiagnosis] = {}
     for name, samples in material.channels.items():

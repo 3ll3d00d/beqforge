@@ -66,9 +66,24 @@ class Correction:
     def _in_band(self, values: np.ndarray) -> np.ndarray:
         return values[(self.freqs >= self.band_hz[0]) & (self.freqs <= self.band_hz[1])]
 
+    def wobble_db(self, values_db: np.ndarray, degree: int = 3) -> float:
+        """Peak-to-peak departure of a curve from its own smooth trend over the band.
+
+        The comparable form of `spread_db`. A cascade of shelves and peaking sections is
+        smooth in log-frequency, so structure the mean spectrum already carries survives
+        correction; what a filter can be held to is the wobble, not the wobble plus a tilt
+        that is judged separately.
+        """
+        octaves = np.log2(self._in_band(self.freqs))
+        values = self._in_band(values_db)
+        if len(values) <= degree + 1:
+            return 0.0
+        trend = np.polyval(np.polyfit(octaves, values, degree), octaves)
+        return float(np.ptp(values - trend))
+
     def concerns(
         self,
-        max_spread_db: float = 6.0,
+        spread_margin_db: float = 2.0,
         max_tilt_db: float = 2.0,
         level_range_db: tuple[float, float] = (-3.0, 8.0),
     ) -> list[str]:
@@ -76,6 +91,13 @@ class Correction:
 
         `level_range_db` encodes "flat, or mildly rising at the bottom": the corrected low end
         should sit near the reference, a little above it at most.
+
+        A smoke test logged during `verify`, not the acceptance model — `accept` is what
+        decides. It nonetheless has to agree with `accept` about what flat means, or it warns
+        on answers the model correctly accepts: this took an absolute 6 dB spread limit that
+        §6.4 records as sitting exactly on the floor of what a smooth cascade can achieve, and
+        the third title's own accepted shape trips it at 6.4 dB. Judged as wobble against the
+        material's own, as `accept` does.
         """
         found: list[str] = []
         if self.level_db > level_range_db[1]:
@@ -88,10 +110,13 @@ class Correction:
                 f"corrected low end sits {-self.level_db:.1f} dB below the reference — "
                 "under-corrected"
             )
-        if self.spread_db > max_spread_db:
+        wobble = self.wobble_db(self.after_db)
+        roughness = self.wobble_db(self.before_db)
+        if wobble > roughness + spread_margin_db:
             found.append(
-                f"corrected low end spans {self.spread_db:.1f} dB over "
-                f"{self.band_hz[0]:.0f}-{self.band_hz[1]:.0f} Hz; expected flat"
+                f"corrected low end wobbles {wobble:.1f} dB over "
+                f"{self.band_hz[0]:.0f}-{self.band_hz[1]:.0f} Hz against {roughness:.1f} dB "
+                "in the material; expected flat"
             )
         if self.tilt_db_per_octave > max_tilt_db:
             found.append(
