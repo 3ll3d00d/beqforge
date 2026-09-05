@@ -126,7 +126,8 @@ def show_candidates(report: Report) -> None:
         )
         print(
             f"      cliff: {v.worst_gradient_before:.1f} -> {v.worst_gradient_after:.1f} "
-            f"dB/oct   wobble {v.wobble_db:.2f} vs {v.roughness_db:.2f} in the material"
+            f"dB/oct   turnover: {v.turnover_before:.1f} -> {v.turnover_after:.1f} dB/oct"
+            f"   wobble {v.wobble_db:.2f} vs {v.roughness_db:.2f}"
             f"   drift {v.drift_db:.3f} dB"
         )
         print(f"      {v}")

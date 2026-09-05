@@ -371,3 +371,38 @@ def test_the_turnover_peak_is_located_on_a_smoothed_curve() -> None:
     assert abs(np.log2(spiked_peak / peak)) < 0.5, (
         f"peak moved from {peak:.1f} to {spiked_peak:.1f} Hz on one bin"
     )
+
+
+def test_a_turnover_the_material_already_has_is_not_the_correction_s() -> None:
+    """The peak a corrected curve falls away from may be one the filter never touched.
+
+    Title 1's mix is +8.6 dB at 20 Hz against its own 40 Hz level — an authored hump, +14.2 dB
+    in the LFE — so `flatten` correctly asks for no boost across 12-31 Hz. The hump survives
+    into the corrected curve as its in-band peak, and everything below it reads as falling
+    away from it. The input turns over at +12.23 dB/oct unaided; the candidate left +3.2 and
+    was rejected for a fourfold improvement.
+    """
+    humped = correction(
+        lambda f: 8.0 * np.exp(-((np.log2(f / 20.0) / 0.45) ** 2)) - 14.0 * (f < 14.0),
+        lambda f: 8.0 * np.exp(-((np.log2(f / 20.0) / 0.45) ** 2)),
+    )
+    shelf = [BiquadSpec("low_shelf", 12.0, 14.0, 0.7)]
+    verdict = assess(shelf, humped, noise_floor_hz=float("nan"))
+    assert verdict.turnover_before > 4.0, "the fixture's material should turn over"
+    assert verdict.turnover_after < verdict.turnover_before
+    assert not any("too much too soon" in f for f in verdict.failures), verdict.failures
+
+
+def test_a_turnover_the_correction_creates_is_still_rejected() -> None:
+    """Flat material, so the tolerance collapses to the old absolute limit.
+
+    Title 3's input turns over at +0.00 dB/oct, and its parametric candidate at +4.1 fails
+    exactly as it did before the clause became comparative.
+    """
+    turning = correction(lambda f: 0.0, lambda f: -4.0 * abs(np.log2(f / 18.0)))
+    verdict = assess(
+        [BiquadSpec("low_shelf", 18.0, 10.0, 0.7)], turning, noise_floor_hz=float("nan")
+    )
+    assert verdict.turnover_before < 1.0
+    assert verdict.turnover_after > 2.0
+    assert any("too much too soon" in f for f in verdict.failures)

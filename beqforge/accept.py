@@ -121,6 +121,12 @@ class Verdict:
     worst_gradient_after: float
     extent_hz: float
     drift_db: float
+    turnover_before: float = math.nan
+    """Slope below the *input's* in-band peak. What the material does on its own."""
+
+    turnover_after: float = math.nan
+    """The same on the corrected curve. The turnover clause compares these two."""
+
     roughness_db: float = math.nan
     """Wobble in the input over the judged band — the floor on achievable flatness."""
 
@@ -199,9 +205,12 @@ def _smooth(values: np.ndarray, window: int) -> np.ndarray:
 
 
 def turnover_db_per_octave(
-    correction: Correction, params: AcceptParams
+    correction: Correction, params: AcceptParams, values_db: np.ndarray | None = None
 ) -> tuple[float, float]:
-    """Slope from the corrected curve's in-band peak down to the bottom of the band.
+    """Slope from a curve's in-band peak down to the bottom of the band.
+
+    Defaults to the corrected curve; pass `correction.before_db` to measure what the material
+    does on its own, which is what the clause compares against.
 
     "Too much too soon and then a rolloff": a correction that reaches full boost above the
     bottom of the band and then falls away below it. `tilt` cannot see this — fitted across
@@ -217,6 +226,7 @@ def turnover_db_per_octave(
     freqs = correction.freqs[band]
     if len(freqs) < 4:
         return 0.0, math.nan
+    values_db = correction.after_db if values_db is None else values_db
     # Smoothed, and for the same reason the extent clause is: the material scatters by ~6 dB,
     # and `argmax` of a raw curve locates a bin rather than a peak. Measured on the third
     # title's corrected curve, the raw argmax put the peak at 36.6 Hz and read the turnover as
@@ -224,7 +234,7 @@ def turnover_db_per_octave(
     # +1.70, against a rejection threshold of 2.0. One bin of scatter moved the segment being
     # measured by an octave, and the clause this sits in was written because a segment chosen
     # wrongly is the whole failure mode.
-    after = _smooth(correction.after_db[band], params.extent_smoothing_bins)
+    after = _smooth(values_db[band], params.extent_smoothing_bins)
     peak = int(np.argmax(after))
     # the peak has to be interior. At the band's top edge this measure degenerates into the
     # overall tilt, and reports plain under-correction as "too much too soon" — which the
@@ -303,11 +313,26 @@ def assess(
             f"corrected level {correction.level_db:+.1f} dB is outside {low:+g}..{high:+g}"
         )
 
+    # Comparative, like the cliff clause and for the same reason: the peak the corrected curve
+    # turns over from may be one the correction never touched. On title 1 the mix is +8.6 dB
+    # at 20 Hz against its own 40 Hz level — an authored hump, +14.2 dB in the LFE — so
+    # `flatten` correctly asks for no boost across 12-31 Hz, the hump survives into the
+    # corrected curve as its in-band peak, and everything below it reads as falling away from
+    # something the filter did not put there. The input turns over at +12.23 dB/oct on its
+    # own; the candidate left +3.2 and was rejected for a fourfold improvement.
+    #
+    # The tolerance is `max_tilt_db_per_octave` rather than a new constant, which makes this
+    # identical to the old absolute test whenever the material is flat below its peak — title
+    # 3's input turns over at +0.00, so its parametric candidate at +4.1 still fails.
     turnover, peak_hz = turnover_db_per_octave(correction, params)
-    if turnover > params.max_tilt_db_per_octave:
+    material_turnover, material_peak_hz = turnover_db_per_octave(
+        correction, params, correction.before_db
+    )
+    if turnover > material_turnover + params.max_tilt_db_per_octave:
         failures.append(
-            f"peaks at {peak_hz:.1f} Hz then falls at {turnover:.1f} dB/oct below it — "
-            "too much too soon, then a rolloff"
+            f"peaks at {peak_hz:.1f} Hz then falls at {turnover:.1f} dB/oct below it "
+            f"against {material_turnover:.1f} in the material — too much too soon, then a "
+            "rolloff"
         )
 
     roughness = spectral_roughness(correction, params.roughness_degree)
@@ -396,6 +421,8 @@ def assess(
         worst_gradient_after=after,
         extent_hz=extent,
         drift_db=drift,
+        turnover_before=material_turnover,
+        turnover_after=turnover,
         roughness_db=roughness,
         wobble_db=wobble,
     )
