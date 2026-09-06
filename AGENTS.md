@@ -30,11 +30,14 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. |
 | `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
 | `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
-| `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking. Where the evidence for a rolloff actually is. |
+| `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
 | `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
 | `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
-| `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB). Fixed colour per channel across every chart. |
-| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures. |
+| `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
+| `beqanalyser/design/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
+| `beqanalyser/design/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
+| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures; writes a `.run.json.gz` record beside the material unless `--no-record`. |
+| `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
@@ -81,6 +84,8 @@ uv sync                              # first time / after dependency changes
 uv run python -m beqanalyser         # clustering pipeline, from the repo root
 uv run python tools/design_beq.py data/NAME.npz   # automated design, all strategies
 uv run python tools/design_beq.py data/NAME.npz --strategy flatten   # just one
+uv run python tools/replay.py data/NAME.run.json.gz --charts charts   # redraw, no rerun
+uv run python tools/replay.py data/NAME.run.json.gz --beq out/NAME.beq  # into beqdesigner
 uv run ruff check beqanalyser        # ruff is a dependency; there is no config section
 uv run ruff format beqanalyser
 ```
@@ -149,7 +154,7 @@ Notes:
   (fit and invert a rolloff) all produce a target, all go through the same fitter and the same
   acceptance model, and all run by default. Adding one is a function plus an entry in `STRATEGIES`.
   Select with `--strategy NAME` (repeatable, or `all`). `flatten` is the one that produces an accepted
-  filter on all three titles; it also has no opinion of its own and will invert a noise floor as
+  filter on three of the four titles; it also has no opinion of its own and will invert a noise floor as
   happily as a rolloff, which is what `diagnose`'s guard is for.
 * **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but the
   outcome is a flat-to-rising response, and inverting the measured response reaches it directly. Do not
@@ -170,9 +175,29 @@ Notes:
   another one-off script. The point of the driver is that two titles become comparable; twenty
   scratchpad scripts are how the first two were done and none of them survived.
 
+* **No fixed frequency band may decide anything per title.** A constant band asserts where the
+  interesting frequencies are, which is the §2.1 move, and it has already failed once: the 22-35 Hz
+  channel reference sat on the fourth title's knee and understated its mains by 13-17 dB. Channels are
+  now referenced to their own plateau (`plateau_reference`). `AUTOMATED_DESIGN.md` §13 is the register
+  of every remaining constant and what each is standing in for — read §13.5 before adding a band.
+* **Every run writes a record; use it rather than rerunning.** `tools/design_beq.py` writes
+  `data/<name>.run.json.gz` — diagnosis, candidates, verdicts and the chart curves — and
+  `tools/replay.py` redraws charts or exports a `.beq` from it in seconds. The record is
+  fingerprinted on the material hash, the non-default params and the git revision, and
+  `replay` refuses a stale one. That check exists because charts were once redrawn from
+  cascades typed back in by hand and went stale across two behaviour changes without anything
+  looking wrong.
+* **The record and the `.beq` export are two different things.** The record is ours and has to
+  be exact and complete for re-analysis; the export is beqdesigner's and only needs the
+  filters plus the underlying signal. Do not merge them — it would make the cache hostage to a
+  schema this repo does not own. beqdesigner is not importable (PyQt6, qtawesome), so its
+  schema is reproduced in `beqd.py` and pinned by `tests/test_design_record.py`.
 * **Never trust a residual.** It says a cascade matches the target it was handed, not that the target
   was right. Four separate outputs measured well and were wrong on sight — a +15 dB peak at 378 Hz, a
   no-op section at 105 Hz, a +45 dB gain, a shelf placed at 3.22 Hz. Run `verify` and look at the
   corrected curve.
 * Fits are slow (tens of seconds to minutes). Run them in the background; the test suite is ~2 minutes.
+  [PERFORMANCE.md](PERFORMANCE.md) is the profile and the plan — where the time goes, which changes
+  cannot alter an output and which trade accuracy for it. Read it before optimising anything here;
+  it records what was already measured and ruled out (`tol` is not a lever, `verify` is 0.3 s).
 * `data/` holds extracted material and is gitignored. Nothing in it is committed.

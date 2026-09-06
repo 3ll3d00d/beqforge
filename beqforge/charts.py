@@ -297,5 +297,74 @@ def render(
     return written
 
 
+def render_cached(document: dict, out_dir: Path) -> list[Path]:
+    """Redraw a run's charts from its record, with no material and no filtering.
+
+    The curves were computed during the run and stored, so this is the same picture rather
+    than an approximation of it. Applying a magnitude response to a stored curve would be the
+    approximation — it is what beqdesigner shows, and it is not what `peak` means here, since
+    each bin's loudest frame moves once the signal is filtered.
+    """
+    curves = document.get("curves")
+    if not curves:
+        raise ValueError("the record carries no curves; rerun with recording enabled")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    freqs = np.asarray(curves["freqs"], dtype=np.float64)
+    title = document["material"]["name"]
+    channels = [n for n in curves["unfiltered"] if n != "mono"]
+    written: list[Path] = []
+
+    def chart(name: str, names: list[str], label: str, subtitle: str) -> Path:
+        figure, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        for axis, which in zip(axes, ("peak", "average")):
+            for channel in names:
+                before = curves["unfiltered"][channel]
+                after = curves["filtered"][label][channel]
+                colour = colour_for(channel)
+                _plot_pair(
+                    axis,
+                    freqs,
+                    np.asarray(before[which]),
+                    np.asarray(after[which]),
+                    colour,
+                    channel,
+                )
+                if which == "peak":
+                    _plot_loudest(
+                        axis,
+                        ProgrammeLevels(
+                            freqs,
+                            np.asarray(before["peak"]),
+                            np.asarray(before["average"]),
+                            np.asarray(before["loudest_second"]),
+                            int(before["loudest_index"]),
+                        ),
+                        ProgrammeLevels(
+                            freqs,
+                            np.asarray(after["peak"]),
+                            np.asarray(after["average"]),
+                            np.asarray(after["loudest_second"]),
+                            int(before["loudest_index"]),
+                        ),
+                        colour,
+                        channel,
+                    )
+            _style(axis, f"{which} — {subtitle}", label_x=which == "average")
+            axis.legend(fontsize=7, ncols=2, loc="lower right")
+        figure.suptitle(f"{title} — {label}", fontsize=11)
+        figure.tight_layout()
+        path = out_dir / f"{_slug(label)}_{name}.png"
+        figure.savefig(path, dpi=110)
+        plt.close(figure)
+        return path
+
+    for label in curves["filtered"]:
+        written.append(chart("mono", ["mono"], label, "summed mono mix"))
+        if channels:
+            written.append(chart("channels", channels, label, "contributing channels"))
+    logger.info(f"  redrawn: {', '.join(p.name for p in written)}")
+    return written
+
+
 def _slug(label: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "-" for c in label)
