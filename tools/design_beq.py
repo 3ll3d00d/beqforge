@@ -14,6 +14,7 @@ as shape (still manual; §3.1).
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -47,7 +48,22 @@ def show_channels(report: Report) -> None:
     d = report.diagnosis
     print(RULE)
     print("PER-CHANNEL DECOMPOSITION")
-    print("\n  Response in dB relative to each channel's own 22-35 Hz passband:")
+    print(
+        "\n  Plateau each channel's response is referenced to — derived per channel per"
+    )
+    print(
+        "  title, never a fixed band (§2.1). Width is what to watch: a reference resting"
+    )
+    print("  on well under an octave is resting on very little.")
+    for name, channel in d.channels.items():
+        low, high = channel.plateau_hz
+        octaves = math.log2(high / low) if low > 0.0 else math.nan
+        flag = "  <- narrow" if octaves < 1.0 else ""
+        print(
+            f"    {name:<5s}{low:7.1f} - {high:6.1f} Hz  ({octaves:4.2f} octaves, "
+            f"knee {channel.max_slope_hz:5.1f} Hz){flag}"
+        )
+    print("\n  Response in dB relative to each channel's own plateau:")
     print(_row("Hz", [str(p) for p in DECADES]))
     for name, channel in d.channels.items():
         print(_row(name, _at(d.freqs, channel.response_db)))
@@ -75,8 +91,13 @@ def show_floors(report: Report) -> None:
         print(_row(label, _at(d.freqs, response)))
     if d.level_spread_db is not None:
         print(_row("spread", _at(d.freqs, d.level_spread_db)))
+    subject = max(d.channels, key=lambda n: d.channels[n].passband_share)
+    low, high = d.channels[subject].plateau_hz
     print(
-        f"\n  Level-independent down to {d.filter_floor_hz:.1f} Hz — below that the "
+        f"\n  Measured on {subject}, referenced to its {low:.1f}-{high:.1f} Hz plateau."
+    )
+    print(
+        f"  Level-independent down to {d.filter_floor_hz:.1f} Hz — below that the "
         "attenuation\n  is not a fixed filter, so inverting it is shaping, not identification."
     )
     floor = d.noise_floor_hz
@@ -201,6 +222,17 @@ def main() -> int:
         help="write peak-vs-average charts per candidate into DIR",
     )
     parser.add_argument(
+        "--record",
+        type=Path,
+        metavar="PATH",
+        help="where to write the run record (default: alongside the material)",
+    )
+    parser.add_argument(
+        "--no-record",
+        action="store_true",
+        help="skip the run record; charts then need a rerun to redraw",
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="report only, no progress log"
     )
     args = parser.parse_args()
@@ -226,18 +258,30 @@ def main() -> int:
     material = load(args.material)
     report = run(material, params)
 
+    relevant = [
+        name
+        for name, channel in report.diagnosis.channels.items()
+        if channel.passband_share >= params.diagnose.min_passband_share
+    ]
     if args.charts:
         from beqanalyser.design.charts import render
 
-        relevant = [
-            name
-            for name, channel in report.diagnosis.channels.items()
-            if channel.passband_share >= params.diagnose.min_passband_share
-        ]
         out = args.charts / material.name
         for candidate in report.candidates:
             render(candidate.label, candidate.filters, material, relevant, out)
         print(f"\n  charts written to {out}/")
+
+    if not args.no_record:
+        from beqanalyser.design import record
+
+        curves = record.curves_from(
+            material,
+            {c.label: c.filters for c in report.candidates},
+            relevant,
+        )
+        destination = args.record or args.material.with_suffix(".run.json.gz")
+        record.write(destination, report, params, args.material, curves)
+        print(f"  run record written to {destination}")
 
     print()
     show_channels(report)

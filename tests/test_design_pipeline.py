@@ -91,13 +91,17 @@ def test_the_flatten_target_stops_without_a_step(walled) -> None:
         0
     ].target_db
 
-    reference = PipelineParams().flatten_reference_hz
-    stopping = (DESIGN_GRID >= reference * 0.9) & (DESIGN_GRID <= reference * 1.6)
+    # where it stops is derived from the material now, so the test finds it rather than
+    # naming it: the taper's endpoint is the top of the non-zero target
+    live = np.flatnonzero(target > 1e-9)
+    stop = DESIGN_GRID[live[-1]]
+    anchor = stop / PipelineParams().flatten_taper_ratio
     steps = np.abs(np.diff(target))
-    assert steps[stopping[:-1]].max() < 0.25, "the target still stops with a step"
-    assert np.interp(reference * 1.3, DESIGN_GRID, target) == pytest.approx(
-        0.0, abs=1e-9
-    )
+    # the taper's own span only. Below the anchor the target is still following the
+    # correction, where a step is the rolloff and not a truncation.
+    tapering = (DESIGN_GRID >= anchor * 0.9) & (DESIGN_GRID <= stop)
+    assert steps[tapering[:-1]].max() < 0.25, "the target still stops with a step"
+    assert np.interp(stop * 1.1, DESIGN_GRID, target) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_the_taper_does_not_reach_into_the_correction(walled) -> None:
@@ -107,5 +111,59 @@ def test_the_taper_does_not_reach_into_the_correction(walled) -> None:
     diagnosis = diagnose(walled)
     params = PipelineParams()
     target = flatten_targets(walled, diagnosis, None, None, params)[0].target_db
-    below = DESIGN_GRID < params.flatten_reference_hz
-    assert target[below].max() > 1.0, "the correction itself has gone"
+    live = np.flatnonzero(target > 1e-9)
+    assert target[: live[-1]].max() > 1.0, "the correction itself has gone"
+    # and it survives well under the stop, not only at its shoulder
+    assert np.interp(15.0, DESIGN_GRID, target) > 1.0
+
+
+def test_flatten_stops_where_the_material_stops_being_short() -> None:
+    """The anchor moves with the corner, because it is derived rather than named.
+
+    `flatten_reference_hz` was 40.0 for every title, justified as "above the knee, below bass
+    management" — the sentence §3.1 had to remove from the channel reference. A wall an octave
+    higher must push the correction an octave higher with it.
+    """
+    from beqanalyser.design.diagnose import diagnose
+
+    samples = int(FS * 300.0)
+
+    def walled_at(corner: float):
+        return material_from(
+            {
+                "L": scened_noise(30, samples),
+                "C": scened_noise(31, samples),
+                "LFE": high_passed(scened_noise(32, samples), corner, order=6),
+            }
+        )
+
+    def stop_hz(corner: float) -> float:
+        material = walled_at(corner)
+        target = flatten_targets(
+            material, diagnose(material), None, None, PipelineParams()
+        )[0].target_db
+        return float(DESIGN_GRID[np.flatnonzero(target > 1e-9)[-1]])
+
+    assert stop_hz(44.0) > stop_hz(18.0) * 1.3
+
+
+def test_flatten_does_not_read_the_high_frequency_fall_as_deficit() -> None:
+    """Referenced to a plateau level, the mix drops below it again above the plateau's top.
+
+    That return is programme, not deficit. The anchor is the *first* upward crossing into
+    nothing for exactly this reason, so nothing above it may reach the target.
+    """
+    from beqanalyser.design.diagnose import diagnose
+
+    samples = int(FS * 300.0)
+    material = material_from(
+        {
+            "L": scened_noise(40, samples),
+            "C": scened_noise(41, samples),
+            "LFE": high_passed(scened_noise(42, samples), 22.0, order=6),
+        }
+    )
+    target = flatten_targets(
+        material, diagnose(material), None, None, PipelineParams()
+    )[0].target_db
+    assert np.all(target[DESIGN_GRID > 120.0] == 0.0)

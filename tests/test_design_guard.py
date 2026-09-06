@@ -26,6 +26,13 @@ from tests.test_design_diagnose import FS, high_passed, material_from, scened_no
 
 PARAMS = DiagnoseParams()
 
+REFERENCE_HZ = (22.0, 35.0)
+"""The reference band these synthetic cases are built around.
+
+Real material gets this from `plateau_reference` on the channel itself; the harness states
+it, because the content here is synthesised with a known passband and the point of the test
+is the tracking, not the reference."""
+
 
 def noise_dominated(corner_hz: float, floor_db: float, seed: int = 40) -> np.ndarray:
     """Programme content high-passed at `corner_hz`, over a stationary floor.
@@ -47,8 +54,8 @@ def noise_dominated(corner_hz: float, floor_db: float, seed: int = 40) -> np.nda
 def test_band_tracking_sees_the_floor_and_not_the_content() -> None:
     """The measurement the guard rests on, checked against a known crossover."""
     mixed = noise_dominated(corner_hz=30.0, floor_db=-26.0)
-    in_content = band_tracking(mixed, FS, (34.0, 46.0), PARAMS)
-    in_floor = band_tracking(mixed, FS, (7.0, 13.0), PARAMS)
+    in_content = band_tracking(mixed, FS, (34.0, 46.0), PARAMS, REFERENCE_HZ)
+    in_floor = band_tracking(mixed, FS, (7.0, 13.0), PARAMS, REFERENCE_HZ)
     assert in_content > PARAMS.tracking_floor
     assert in_floor < in_content
 
@@ -143,12 +150,12 @@ def test_band_tracking_agrees_with_the_true_content_to_floor_ratio() -> None:
         return float(10.0 * np.log10(np.mean(signal.sosfiltfilt(sos, x) ** 2) + 1e-300))
 
     scored = 0
-    for low, high in _octave_bands(PARAMS.band_hz[0], PARAMS.passband_hz[0]):
+    for low, high in _octave_bands(PARAMS.band_hz[0], REFERENCE_HZ[0]):
         margin = band_power_db(content, low, high) - band_power_db(floor, low, high)
         if abs(margin) <= 3.0:
             continue
         scored += 1
-        tracks = band_tracking(content + floor, FS, (low, high), PARAMS)
+        tracks = band_tracking(content + floor, FS, (low, high), PARAMS, REFERENCE_HZ)
         assert (tracks >= PARAMS.tracking_floor) == (margin > 0.0), (
             f"{low:.1f}-{high:.1f} Hz is {margin:+.1f} dB content-to-floor "
             f"but tracking says {tracks:+.3f}"
@@ -209,6 +216,11 @@ def test_a_white_floor_needs_no_holding_and_says_so() -> None:
 
     A flat floor inverts to a flat boost, so the hold is a no-op and claiming otherwise
     would be noise.
+
+    Scoped to the hold rather than to every note. The boost cap is a separate backstop and
+    this fixture sits within a few tenths of a dB of it, so asserting silence about *that*
+    made the test turn on where the mix reference lands rather than on whether the floor
+    bound anything.
     """
     material = material_from(
         {
@@ -218,7 +230,7 @@ def test_a_white_floor_needs_no_holding_and_says_so() -> None:
     )
     diagnosis = diagnose(material)
     proposal = flatten_targets(material, diagnosis, None, None, PipelineParams())[0]
-    assert not proposal.notes
+    assert not [n for n in proposal.notes if "noise floor binds" in n], proposal.notes
 
 
 def test_an_unbound_target_says_nothing() -> None:

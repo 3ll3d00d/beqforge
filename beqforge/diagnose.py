@@ -33,6 +33,9 @@ from beqanalyser.design.material import Material
 
 logger = logging.getLogger(__name__)
 
+REFERENCE_POINTS = 400
+"""Log-spaced samples the plateau reference is taken over."""
+
 WELCH_NPERSEG = 4096
 """Long enough to resolve ~0.25 Hz at the 1 kHz analysis rate."""
 
@@ -44,12 +47,37 @@ class DiagnoseParams:
     band_hz: tuple[float, float] = (4.0, 200.0)
     """Range the diagnostics report over."""
 
-    passband_hz: tuple[float, float] = (22.0, 35.0)
-    """Reference band a channel's own response is expressed relative to.
+    share_band_hz: tuple[float, float] = (22.0, 35.0)
+    """Common band the per-channel *mix shares* are compared over.
 
-    Above any plausible knee and below where mains content starts dominating. A channel's
-    attenuation is only meaningful against its own passband — comparing channels in absolute
-    terms says which is louder, not which is filtered."""
+    Cross-channel comparison needs one band for every channel; which channel supplies the
+    low end is a question about the mix, not about any channel's own shape. Only the shares
+    use this. A channel's own response is referenced to its own plateau — see
+    `reference_percentile`."""
+
+    reference_percentile: float = 90.0
+    """Percentile of a channel's own response, in log frequency, taken as its reference level.
+
+    This replaces a fixed reference band, which could not work. The band it replaced was
+    22-35 Hz, justified as "above any plausible knee and below where mains content starts
+    dominating" — which is §2.1's forbidden move written down, since it makes a knee above
+    22 Hz unrepresentable rather than unusual. Measured, the band is not a passband on any
+    channel of any title tried: it slopes at +0.8 to +40 dB/octave, and on the fourth title
+    the mains fall at +40 dB/octave straight through it, because that title's wall is at
+    19-21 Hz and the "reference" sits on its shoulder. Referencing there understated those
+    channels' attenuation by 13-17 dB.
+
+    A single fixed band cannot be right for both a full-range channel and the LFE in any
+    case: the LFE carries its own lowpass, measured at 32-62 Hz across four titles, so a band
+    high enough to clear a mains knee is already on the LFE's downslope.
+
+    Sampling uniformly in log frequency weights each octave equally, so the LFE's passband is
+    not swamped by the two octaves above its lowpass; a high percentile rather than the
+    maximum so a narrow authored feature — the first title's +14 dB hump at 20 Hz — does not
+    become the reference."""
+
+    reference_tolerance_db: float = 3.0
+    """How far below the reference still counts as plateau, for the reported extent."""
 
     knee_slope_db_per_octave: float = 14.0
     """Slope over a half-octave window above which a channel is called filtered.
@@ -102,7 +130,7 @@ class ChannelDiagnosis:
 
     name: str
     response_db: np.ndarray
-    """Mean spectrum in dB relative to this channel's own passband."""
+    """Mean spectrum in dB relative to this channel's own plateau."""
 
     share: np.ndarray
     """Fraction of summed-mix power this channel supplies, per bin."""
@@ -110,9 +138,17 @@ class ChannelDiagnosis:
     max_slope_db_per_octave: float
     max_slope_hz: float
     passband_share: float
-    """Share of summed-mix power this channel supplies across the passband."""
+    """Share of summed-mix power this channel supplies across `share_band_hz`."""
 
     is_filtered: bool
+
+    plateau_hz: tuple[float, float] = (math.nan, math.nan)
+    """Where this channel sits within `reference_tolerance_db` of its own reference level.
+
+    Reported because it is the assumption every attenuation figure rests on, and it is not a
+    constant: measured across four titles the lower edge runs 12.8-36.7 Hz and the LFE's
+    upper edge 31.7-62.2 Hz. A plateau whose lower edge sits at or above the channel's knee
+    means the reference is on the knee's shoulder and the attenuation is understated."""
 
     def __str__(self) -> str:
         if self.is_filtered:
@@ -123,8 +159,9 @@ class ChannelDiagnosis:
             verdict = "no knee"
         return (
             f"{self.name:4s} max slope {self.max_slope_db_per_octave:5.1f} dB/oct "
-            f"at {self.max_slope_hz:5.1f} Hz, {self.passband_share * 100:4.1f}% of "
-            f"passband -> {verdict}"
+            f"at {self.max_slope_hz:5.1f} Hz, plateau {self.plateau_hz[0]:5.1f}-"
+            f"{self.plateau_hz[1]:5.1f} Hz, {self.passband_share * 100:4.1f}% of "
+            f"share band -> {verdict}"
         )
 
 
@@ -169,6 +206,23 @@ def mean_spectrum(
     freqs, power = signal.welch(samples, fs=fs, nperseg=nperseg, noverlap=nperseg // 2)
     keep = freqs > 0
     return freqs[keep], 10.0 * np.log10(power[keep] + 1e-300)
+
+
+def plateau_reference(
+    values_db: np.ndarray,
+    freqs: np.ndarray,
+    params: DiagnoseParams,
+) -> tuple[float, tuple[float, float]]:
+    """A channel's own reference level, and the band over which it holds it.
+
+    The level a channel's attenuation is measured against has to come from that channel on
+    that title. See `DiagnoseParams.reference_percentile` for why a fixed band cannot do it.
+    """
+    grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
+    curve = np.interp(grid, freqs, values_db)
+    level = float(np.percentile(curve, params.reference_percentile))
+    within = np.flatnonzero(curve >= level - params.reference_tolerance_db)
+    return level, (float(grid[within[0]]), float(grid[within[-1]]))
 
 
 def band_slope(
@@ -220,8 +274,13 @@ def stratified_response(
     samples: np.ndarray,
     fs: float,
     params: DiagnoseParams,
+    reference_hz: tuple[float, float],
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    """Response relative to the passband, measured separately per scene-loudness stratum.
+    """Response relative to the channel's plateau, per scene-loudness stratum.
+
+    `reference_hz` is that channel's own plateau, not a constant: normalising on the knee's
+    shoulder makes the normalisation point itself level-dependent and contaminates the very
+    spread this measures.
 
     This is the level-independence test of §6.4 R2. A linear filter's relative response is
     the same however loud the scene; content's is not. On the second title the LFE measured
@@ -235,7 +294,7 @@ def stratified_response(
     window = np.hanning(WELCH_NPERSEG)
     power = np.abs(np.fft.rfft(frames * window, axis=1)) ** 2
     freqs = np.fft.rfftfreq(WELCH_NPERSEG, 1.0 / fs)
-    passband = (freqs >= params.passband_hz[0]) & (freqs <= params.passband_hz[1])
+    passband = (freqs >= reference_hz[0]) & (freqs <= reference_hz[1])
     level = 10.0 * np.log10(power[:, passband].mean(axis=1) + 1e-300)
 
     responses: dict[str, np.ndarray] = {}
@@ -255,6 +314,7 @@ def band_tracking(
     fs: float,
     band_hz: tuple[float, float],
     params: DiagnoseParams,
+    reference_hz: tuple[float, float],
 ) -> float:
     """Correlation between a band's scene envelope and the passband's.
 
@@ -270,7 +330,7 @@ def band_tracking(
         smoothed = np.convolve(filtered**2, np.ones(width) / width, mode="valid")
         return 10.0 * np.log10(smoothed + 1e-30)
 
-    reference = envelope(*params.passband_hz)
+    reference = envelope(*reference_hz)
     target = envelope(*band_hz)
     live = reference > (np.percentile(reference, 99) - 30.0)
     if live.sum() < 100:
@@ -290,21 +350,27 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     for name, samples in material.channels.items():
         _, response = mean_spectrum(samples, material.fs)
         response = response[band]
-        passband = (freqs >= params.passband_hz[0]) & (freqs <= params.passband_hz[1])
-        response = response - response[passband].mean()
+        level, plateau = plateau_reference(response, freqs, params)
+        response = response - level
         slope, at = steepest_slope(response, freqs, params.band_hz)
         share = shares[name][band] if len(shares[name]) != len(freqs) else shares[name]
+        # the share band is common to every channel on purpose: which channel supplies the
+        # low end is a comparison, and a comparison needs one yardstick
+        in_share_band = (freqs >= params.share_band_hz[0]) & (
+            freqs <= params.share_band_hz[1]
+        )
         channels[name] = ChannelDiagnosis(
             name=name,
             response_db=response,
             share=share,
             max_slope_db_per_octave=slope,
             max_slope_hz=at,
-            passband_share=float(share[passband].mean()),
+            passband_share=float(share[in_share_band].mean()),
             is_filtered=(
                 slope >= params.knee_slope_db_per_octave
-                and float(share[passband].mean()) >= params.min_passband_share
+                and float(share[in_share_band].mean()) >= params.min_passband_share
             ),
+            plateau_hz=plateau,
         )
         logger.info(f"  {channels[name]}")
 
@@ -327,7 +393,11 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     # 76%, so stratifying the first one measures a channel nobody hears down there
     dominant = max(channels, key=lambda name: channels[name].passband_share)
     subject = material.channels[dominant]
-    strata_freqs, strata = stratified_response(subject, material.fs, params)
+    # the floors are that channel's, so they are referenced to that channel's plateau
+    reference_hz = channels[dominant].plateau_hz
+    strata_freqs, strata = stratified_response(
+        subject, material.fs, params, reference_hz
+    )
     if not strata:
         logger.warning(
             f"{dominant} has too few frames in any loudness stratum to test level "
@@ -336,19 +406,26 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
     stacked = np.vstack(list(strata.values()))
     spread = np.ptp(stacked, axis=0)
-    # searched downward from the *bottom* of the passband, not from the top of the spectrum
-    # or the top of the passband. Above the passband the strata diverge because loud scenes
-    # have a different content spectrum, not because anything was filtered, and the spread is
-    # already climbing at the passband's upper edge — starting there stops on the first step.
+    # searched downward from the *bottom* of the channel's plateau, not from the top of the
+    # spectrum or the top of the plateau. Above it the strata diverge because loud scenes have
+    # a different content spectrum, not because anything was filtered, and the spread is
+    # already climbing at the plateau's upper edge — starting there stops on the first step.
     consistent = spread <= params.level_tolerance_db
-    region = (strata_freqs >= params.band_hz[0]) & (
-        strata_freqs <= params.passband_hz[0]
+    region = (strata_freqs >= params.band_hz[0]) & (strata_freqs <= reference_hz[0])
+    # a plateau reaching the bottom of the analysis band leaves nothing to search: there is
+    # no attenuation under it whose level-independence could fail. That is the honest answer
+    # rather than an error, and it is what unfiltered material looks like.
+    filter_floor = (
+        _lowest_run(strata_freqs[region], consistent[region])
+        if region.any()
+        else params.band_hz[0]
     )
-    filter_floor = _lowest_run(strata_freqs[region], consistent[region])
 
     noise_floor = math.nan
-    for low, high in _octave_bands(params.band_hz[0], params.passband_hz[0]):
-        tracking = band_tracking(subject, material.fs, (low, high), params)
+    for low, high in _octave_bands(params.band_hz[0], reference_hz[0]):
+        tracking = band_tracking(
+            subject, material.fs, (low, high), params, reference_hz
+        )
         # `not >=` rather than `<`, so a band that could not be measured at all fails the
         # same way one that failed does. NaN is not evidence of content, and reading it as
         # such is how a floor gets missed in the direction that costs something.
@@ -358,7 +435,8 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
 
     logger.info(
         f"Filtered: {', '.join(filtered) if filtered else 'none'} "
-        f"(floors measured on {dominant}); level-independent above "
+        f"(floors measured on {dominant}, referenced to its {reference_hz[0]:.1f}-"
+        f"{reference_hz[1]:.1f} Hz plateau); level-independent above "
         f"{filter_floor:.1f} Hz, content down to "
         f"{'the bottom of the band' if math.isnan(noise_floor) else f'{noise_floor:.1f} Hz'}"
     )

@@ -26,6 +26,12 @@ FS = 1000.0
 DURATION_S = 600.0
 PARAMS = DiagnoseParams()
 
+REFERENCE_HZ = (22.0, 35.0)
+"""Reference band for the synthetic cases, which are built with a known passband.
+
+Real material derives this per channel via `plateau_reference`; stating it here keeps these
+tests about the statistic under test rather than about the reference."""
+
 
 def scened_noise(seed: int, samples: int) -> np.ndarray:
     """Broadband noise with scene-scale level variation, so strata are not all alike."""
@@ -44,7 +50,9 @@ def high_passed(samples: np.ndarray, corner_hz: float, order: int = 8) -> np.nda
 def test_a_fixed_filter_is_level_independent() -> None:
     """The defining property: a linear filter's relative response cannot vary with level."""
     signal_in = scened_noise(0, int(FS * DURATION_S))
-    freqs, responses = stratified_response(high_passed(signal_in, 20.0), FS, PARAMS)
+    freqs, responses = stratified_response(
+        high_passed(signal_in, 20.0), FS, PARAMS, REFERENCE_HZ
+    )
     stacked = np.vstack(list(responses.values()))
     band = (freqs >= 6.0) & (freqs <= 16.0)
     assert np.max(np.ptp(stacked, axis=0)[band]) < PARAMS.level_tolerance_db
@@ -56,7 +64,7 @@ def test_a_stationary_floor_is_not_level_independent() -> None:
     rng = np.random.default_rng(1)
     content = high_passed(scened_noise(2, samples), 20.0, order=10)
     floor = rng.standard_normal(samples) * np.sqrt(np.mean(content**2)) * 0.004
-    freqs, responses = stratified_response(content + floor, FS, PARAMS)
+    freqs, responses = stratified_response(content + floor, FS, PARAMS, REFERENCE_HZ)
     stacked = np.vstack(list(responses.values()))
     band = (freqs >= 6.0) & (freqs <= 16.0)
     assert np.max(np.ptp(stacked, axis=0)[band]) > PARAMS.level_tolerance_db
@@ -66,10 +74,10 @@ def test_band_tracking_separates_content_from_a_stationary_floor() -> None:
     samples = int(FS * DURATION_S)
     rng = np.random.default_rng(3)
     content = scened_noise(4, samples)
-    tracked = band_tracking(content, FS, (7.0, 13.0), PARAMS)
+    tracked = band_tracking(content, FS, (7.0, 13.0), PARAMS, REFERENCE_HZ)
     floor = rng.standard_normal(samples)
     mixed = high_passed(content, 25.0, order=10) + floor * 0.002 * np.std(content)
-    untracked = band_tracking(mixed, FS, (7.0, 13.0), PARAMS)
+    untracked = band_tracking(mixed, FS, (7.0, 13.0), PARAMS, REFERENCE_HZ)
     assert tracked > PARAMS.tracking_floor
     assert untracked < tracked
 
@@ -176,3 +184,29 @@ def test_the_filter_floor_is_searched_down_from_the_passband() -> None:
     result = diagnose(material)
     # a real filter is level-independent to the bottom of the band, not to 500 Hz
     assert result.filter_floor_hz <= 10.0
+
+
+def test_the_plateau_reference_follows_the_channel_not_a_constant() -> None:
+    """Two channels filtered at different corners get different references.
+
+    The band this replaced was fixed at 22-35 Hz, which on real material sat on one title's
+    knee and understated its mains by 13-17 dB. The reference has to move with the channel.
+    """
+    low_corner = high_passed(scened_noise(80, int(FS * 180)), 12.0, order=6)
+    high_corner = high_passed(scened_noise(80, int(FS * 180)), 45.0, order=6)
+    result = diagnose(material_from({"C": low_corner, "LFE": high_corner}))
+    assert (
+        result.channels["LFE"].plateau_hz[0] > result.channels["C"].plateau_hz[0] * 1.5
+    )
+
+
+def test_the_plateau_reference_clears_the_knee() -> None:
+    """The reference must sit above the corner, or attenuation is measured against itself."""
+    material = material_from(
+        {"C": high_passed(scened_noise(81, int(FS * 180)), 30.0, order=8)}
+    )
+    channel = diagnose(material).channels["C"]
+    assert channel.plateau_hz[0] > 30.0
+    # and the response it produces is referenced there, so 30 Hz reads as attenuated
+    freqs = diagnose(material).freqs
+    assert np.interp(30.0, freqs, channel.response_db) < -2.0

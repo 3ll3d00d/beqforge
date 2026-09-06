@@ -45,6 +45,7 @@ from beqanalyser.design.diagnose import (
     DiagnoseParams,
     diagnose,
     mean_spectrum,
+    plateau_reference,
 )
 from beqanalyser.design.extraction import ExtractionParams, extract
 from beqanalyser.design.filters import (
@@ -87,6 +88,8 @@ class Timings:
 
 PUBLISH_FS = 96000.0
 DESIGN_GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+_GRID_OCTAVES = math.log2(400.0 / 3.0)
+"""Span of `DESIGN_GRID`, so a width in octaves becomes a count of points."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,11 +109,34 @@ class PipelineParams:
     about the material, so the default is to hear from all of them and let the acceptance
     model choose."""
 
-    flatten_reference_hz: float = 40.0
-    """Frequency `flatten` levels the mix against. Above the knee, below bass management."""
+    flatten_settled_octaves: float = 0.33
+    """How long the deficit must stay shut before the correction is called over.
+
+    A third of an octave. The material wobbles around its own plateau by several dB (§6.4), so
+    a single point under the floor is roughness, not the end of the correction."""
+
+    flatten_deficit_floor_db: float = 0.5
+    """Deficit below which `flatten`'s correction is over, scanning upward from the bottom.
+
+    This replaces `flatten_reference_hz`, which was 40.0 and justified as "above the knee,
+    below bass management" — the same sentence that justified the 22-35 Hz channel reference
+    §3.1 had to remove, on the strategy that produces every accepted filter. `flatten` now
+    levels the mix against the mix's **own plateau** (`plateau_reference`) and stops where its
+    own deficit stops, so neither the level nor the extent is a constant.
+
+    Measured, the mix plateau begins at 13.9, 18.3, 21.6 and 32.3 Hz across the four titles.
+    40 Hz fell inside all four, so the old constant was not yet wrong — but by only 1.24x on
+    the fourth, and a title with a knee near 50 Hz would have been levelled inside its own
+    rolloff.
+
+    Scanning **upward from the bottom** and taking the first crossing is what keeps the
+    high-frequency fall out of the target. Referenced to a plateau level rather than to a
+    point, the mix drops back below that level above the plateau's top — by construction —
+    and a deficit computed over the whole band would read that fall as something to correct.
+    The correction is the *first* region, not every region."""
 
     flatten_taper_ratio: float = 1.25
-    """How far above the reference the target is tapered to nothing, as a frequency ratio.
+    """How far above the anchor the target is tapered to nothing, as a frequency ratio.
 
     A quarter of an octave. Wide enough that the transition is smooth against a 400-point
     log grid, narrow enough that it does not reach down into the correction."""
@@ -207,6 +233,43 @@ class Proposal:
     """What bound this target, if anything. Carried through to the `Candidate`."""
 
 
+def _deficit_anchor(
+    grid: np.ndarray,
+    deficit_db: np.ndarray,
+    params: "PipelineParams",
+    plateau_hz: tuple[float, float],
+) -> float:
+    """Where `flatten`'s correction stops — the first upward crossing into nothing.
+
+    The target has to stop somewhere or the mix's own high-frequency fall is read as a deficit
+    (§3.4a). Stopping it with a hard zero left a step of 0.58-1.08 dB across one 0.55 Hz grid
+    point, inside the band the residual is scored over, and no biquad cascade follows a step
+    that narrow — so the minimax residual was bounded below by half of it and the fit could
+    never stop early. The taper is that fix; this is where to put it.
+
+    Scanned upward from the bottom so only the *first* zero counts. A deficit measured against
+    a plateau level necessarily returns above the plateau's top, and that return is programme,
+    not deficit.
+    """
+    over = deficit_db >= params.flatten_deficit_floor_db
+    if not over.any():
+        # nothing to correct anywhere; the caller discards the proposal on max() < 1 dB
+        return float(plateau_hz[0])
+    # a sustained run below the floor, not one point under it. A mix wobbles around its own
+    # plateau by several dB (§6.4), so a single crossing is the material's roughness rather
+    # than the end of the correction, and stopping on one would truncate the target in a dip.
+    # Same reasoning as `_lowest_run` in `diagnose`.
+    run = max(1, int(round(len(grid) * params.flatten_settled_octaves / _GRID_OCTAVES)))
+    first = int(np.argmax(over))
+    settled = np.convolve((~over[first:]).astype(float), np.ones(run), mode="valid")
+    closed = np.flatnonzero(settled >= run)
+    if closed.size:
+        return float(grid[first + int(closed[0])])
+    # the deficit never closes inside the band — the plateau's lower edge is the last honest
+    # statement about where the mix stops being short, so stop there rather than off the end
+    return float(plateau_hz[0])
+
+
 def _taper(freqs: np.ndarray, reference_hz: float, ratio: float) -> np.ndarray:
     """Raised cosine falling from 1 at `reference_hz` to 0 at `reference_hz * ratio`.
 
@@ -237,10 +300,23 @@ def flatten_targets(
     for low, high in params.exclude_bands_hz:
         keep &= ~((freqs >= low) & (freqs <= high))
     freqs, response = freqs[keep], response[keep]
-    response = response - np.interp(params.flatten_reference_hz, freqs, response)
+    # "flat" means the mix's own plateau, measured on the mix, not a level read off one
+    # nominated frequency. A point reference also inherits whatever local wobble sits at that
+    # point: across the four titles the plateau level and the level at 40 Hz differ by -2.5 to
+    # +2.8 dB, which is a straight offset on the whole target.
+    _, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    held = (freqs >= plateau_hz[0]) & (freqs <= plateau_hz[1])
+    # the *median across the plateau*, not the percentile that located it. A high percentile
+    # is the right way to find where a channel holds level — it ignores a narrow authored
+    # feature — but the wrong level to ask a mix to reach, because ~90% of the curve sits
+    # under it by construction and the deficit then never closes. On the synthetic fixture,
+    # flat to within a couple of dB across the whole band, that put the target's stop at
+    # 150 Hz regardless of where the wall was.
+    response = response - float(np.median(response[held]))
     deficit = np.convolve(np.maximum(-response, 0.0), np.ones(15) / 15, mode="same")
 
     target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+    anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
     # Tapered to nothing above the reference, not cut off there. The mix keeps falling above
     # the reference — by 5 to 11.6 dB over 45-200 Hz on the three titles — and that fall is
     # the programme, not a deficit, so the target has to stop. Stopping it with a hard zero
@@ -249,9 +325,7 @@ def flatten_targets(
     # that narrow, so the minimax residual was bounded below by half of it — 0.54 dB on the
     # third title, above `residual_target_db` — and the fit could never stop early, spending
     # the whole section budget to chase an artefact of where the target was truncated.
-    target *= _taper(
-        DESIGN_GRID, params.flatten_reference_hz, params.flatten_taper_ratio
-    )
+    target *= _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
     notes: list[str] = []
     # The floor binds before the cap. `max_gain_db` is a preference dial (§4.3) and the noise
     # floor is evidence, so clipping first lets the dial pre-empt the measurement: on a floor
@@ -362,7 +436,10 @@ def counterfactual_target(
         samples = material.channels[name]
         response = diagnosis.channels[name].response_db
         boost = np.clip(-np.minimum(response, 0.0), 0.0, restore_cap_db)
-        knee = freqs > params.diagnose.passband_hz[0]
+        # restoration stops at this channel's own plateau, since that is what its response
+        # was referenced to — a common cutoff would restore one channel into its passband
+        # while stopping another short of its knee
+        knee = freqs > diagnosis.channels[name].plateau_hz[0]
         boost = np.where(knee, 0.0, boost)
         spectrum = np.fft.rfft(samples)
         bins = np.fft.rfftfreq(len(samples), 1.0 / material.fs)
@@ -376,7 +453,7 @@ def counterfactual_target(
     deficit = np.maximum(after - before, 0.0)
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
     target = np.maximum(np.convolve(target, np.ones(9) / 9, mode="same"), 0.0)
-    target[DESIGN_GRID > params.diagnose.passband_hz[1]] = 0.0
+    target[DESIGN_GRID > params.diagnose.share_band_hz[1]] = 0.0
     return target
 
 
