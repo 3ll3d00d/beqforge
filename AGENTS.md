@@ -33,6 +33,7 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
 | `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
 | `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
+| `beqanalyser/design/cache.py` | Stage cache — the analysis, and any strategy declaring `cache_modules`. On by default; keyed per stage so work on the fitter does not drop the analysis. |
 | `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
 | `beqanalyser/design/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
 | `beqanalyser/design/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
@@ -109,6 +110,38 @@ Notes:
   groups), run `compute_distance_matrix` + `build_all_composites` with `min_cluster_size≈20`, and check
   the composite count and reject rate. That runs in seconds. `beqanalyser/design/` *is* tested —
   `uv run pytest`.
+
+### Waiting on a long run without leaking shells
+
+A design run is minutes and the test suite is ~2, so an agent working here will want to wait on
+something. Waiting is where shells get leaked, and a leaked waiter is a `sleep` loop that outlives
+the session and quietly competes for the cores the next run is being timed on.
+
+**One waiter per condition, ever.** Arm it once, record its task id, and *check that id* on later
+turns. Do not arm a second waiter on the same condition because the first has not fired yet — that
+is how nine of them end up blocked on one `ALLDONE`. If it has not fired, it has not fired.
+
+**Wait on a fact, not on a process.** `pgrep`/`/proc` conditions invert the moment the process
+exits, and an empty `pgrep` substitutes into nonsense:
+
+```bash
+until [ ! -e /proc/$(pgrep -f thing.py | head -1) ]; do sleep 5; done   # never exits once it dies:
+                                                                       # $(...) is empty, so this
+                                                                       # tests /proc, which exists
+until grep -q ALLDONE run.log; do sleep 30; done                        # exits, and says why
+```
+
+Have the job print a sentinel when it is done and wait for that. A run's own output is a fact; a
+process table entry is a race.
+
+**Every waiter needs a ceiling.** `sleep` in a loop with no bound is a leak waiting for a crash
+upstream. Either bound the loop (`for _ in $(seq 60)`) or make the *job* write the sentinel on
+failure as well as success, so the wait ends either way.
+
+**Clean up before you finish.** `ps -eo pid,etime,args | grep shell-snapshots` shows what is still
+parked; anything measured in hours is yours and is not coming back. Kill it. This matters more than
+tidiness: leftover waiters and queued runs from an earlier session will silently corrupt any timing
+measurement taken afterwards, and the numbers look plausible.
 
 ## Gotchas
 

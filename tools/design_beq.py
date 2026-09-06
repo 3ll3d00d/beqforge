@@ -233,6 +233,22 @@ def main() -> int:
         help="skip the run record; charts then need a rerun to redraw",
     )
     parser.add_argument(
+        "--cache",
+        type=Path,
+        metavar="PATH",
+        help="where to keep the stage cache (default: alongside the material)",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="recompute every cached stage and overwrite what is stored",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="neither read nor write the stage cache",
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="report only, no progress log"
     )
     args = parser.parse_args()
@@ -256,7 +272,12 @@ def main() -> int:
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
     )
     material = load(args.material)
-    report = run(material, params)
+    cache_path = (
+        None
+        if args.no_cache
+        else (args.cache or args.material.with_suffix(".cache.json.gz"))
+    )
+    report = run(material, params, cache_path=cache_path, fresh=args.fresh)
 
     relevant = [
         name

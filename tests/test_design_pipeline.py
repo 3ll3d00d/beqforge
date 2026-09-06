@@ -12,6 +12,7 @@ from beqanalyser.design.pipeline import (
     STRATEGIES,
     PipelineParams,
     Proposal,
+    Strategy,
     flatten_targets,
     run,
 )
@@ -38,7 +39,8 @@ def test_every_registered_strategy_has_the_same_signature(walled) -> None:
     envelopes = extract(walled.mono_mix, float(walled.fs))
     params = PipelineParams()
     for name, strategy in STRATEGIES.items():
-        produced = strategy(walled, diagnosis, envelopes, None, params)
+        assert isinstance(strategy, Strategy), name
+        produced = strategy.derive(walled, diagnosis, envelopes, None, params)
         assert isinstance(produced, list), name
         for proposal in produced:
             assert isinstance(proposal, Proposal), name

@@ -32,12 +32,15 @@ import dataclasses
 import logging
 import math
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
 from beqanalyser.design import BiquadSpec
+from beqanalyser.design import cache
 from beqanalyser.design.accept import AcceptParams, Verdict, assess
 from beqanalyser.design.design import DesignParams, design
 from beqanalyser.design.diagnose import (
@@ -409,12 +412,34 @@ def parametric_targets(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class Strategy:
+    """One way of deriving a target, and what deriving it costs to repeat.
+
+    `cache_modules` is what a strategy declares when its *derivation* is expensive enough to be
+    worth keeping — the module set its output depends on, so the cache knows when to drop it.
+    `None` means derive it every time, which is right for a strategy that is a few hundred
+    milliseconds of deterministic numpy.
+    """
+
+    derive: "Callable[..., list[Proposal]]"
+    cache_modules: tuple[str, ...] | None = None
+
+
 STRATEGIES = {
-    "flatten": flatten_targets,
-    "counterfactual": counterfactual_targets,
-    "parametric": parametric_targets,
+    "flatten": Strategy(flatten_targets),
+    "counterfactual": Strategy(counterfactual_targets),
+    "parametric": Strategy(parametric_targets, cache.PARAMETRIC_MODULES),
 }
-"""Every way of deriving a target, by name. All equal citizens of the same pipeline."""
+"""Every way of deriving a target, by name. All equal citizens of the same pipeline.
+
+`parametric` is the one that caches, because it is the one whose target derivation runs an
+optimiser: it calls `design`, which calls the fitter, and across the four titles that is 403 s
+of a 1,586 s run — more than any other single stage. What it contributes is a statement about
+the *material* — does this look like a deliberate rolloff, of what alignment and order — which
+does not change between runs of the same code over the same title. `flatten` and
+`counterfactual` derive a curve directly and are not worth the round trip.
+"""
 
 
 def counterfactual_target(
@@ -473,21 +498,30 @@ def _fit(target: np.ndarray, params: PipelineParams) -> tuple[list[BiquadSpec], 
     )
 
 
-def run(material: Material, params: PipelineParams | None = None) -> Report:
-    """Diagnose, propose, fit, judge."""
+def run(
+    material: Material,
+    params: PipelineParams | None = None,
+    cache_path: Path | None = None,
+    fresh: bool = False,
+) -> Report:
+    """Diagnose, propose, fit, judge.
+
+    `cache_path` is where stages that do not change are kept so they need not be repeated —
+    the analysis, and any strategy that declares `cache_modules`. `fresh` recomputes and
+    overwrites them.
+
+    Reading is on by default, which is safe because of how the key is built rather than
+    because caching is usually fine: a stage is reused only when the material's own samples,
+    the parameters it was given and the sources of every module it can reach all still match.
+    A silently stale hit is not a thing that can happen; a *miss* is, and `cache.load` says
+    which of the three moved.
+    """
     params = params or PipelineParams()
     timings = Timings()
     FIT_STATS.reset()
     logger.info("=" * 80)
     logger.info(f"Material: {material}")
 
-    logger.info("=" * 80)
-    logger.info("Per-channel decomposition")
-    with timings.stage("diagnose"):
-        diagnosis = diagnose(material, params.diagnose)
-
-    with timings.stage("extract"):
-        envelopes = extract(material.mono_mix, float(material.fs), params.extraction)
     identification: Identification | None = None
     # the run's exclusions are the run's, whichever stage reads the spectrum
     identify_params = dataclasses.replace(
@@ -496,11 +530,60 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
             dict.fromkeys((*params.identify.exclude_bands_hz, *params.exclude_bands_hz))
         ),
     )
-    with timings.stage("identify"):
-        try:
-            identification = identify_rolloff(envelopes, identify_params)
-        except ValueError as unusable:
-            logger.warning(f"Sum-based identification unavailable: {unusable}")
+
+    analysis_key = (
+        None
+        if cache_path is None
+        else cache.key_for(
+            "analysis",
+            cache.ANALYSIS_MODULES,
+            material,
+            params.diagnose,
+            params.extraction,
+            identify_params,
+        )
+    )
+    stored = (
+        None
+        if cache_path is None or fresh
+        else cache.load(cache_path, "analysis", analysis_key)
+    )
+
+    logger.info("=" * 80)
+    logger.info("Per-channel decomposition")
+    if stored is not None:
+        with timings.stage("analysis/cached"):
+            analysis = cache.analysis_from_json(stored)
+        diagnosis = analysis.diagnosis
+        envelopes = analysis.envelopes
+        identification = analysis.identification
+        for channel in diagnosis.channels.values():
+            logger.info(f"  {channel}")
+        logger.info(f"Extracted {envelopes}")
+        if identification is not None:
+            logger.info(f"Identified {identification}")
+    else:
+        with timings.stage("diagnose"):
+            diagnosis = diagnose(material, params.diagnose)
+
+        with timings.stage("extract"):
+            envelopes = extract(
+                material.mono_mix, float(material.fs), params.extraction
+            )
+        with timings.stage("identify"):
+            try:
+                identification = identify_rolloff(envelopes, identify_params)
+            except ValueError as unusable:
+                logger.warning(f"Sum-based identification unavailable: {unusable}")
+        if cache_path is not None:
+            cache.store(
+                cache_path,
+                "analysis",
+                analysis_key,
+                cache.analysis_to_json(
+                    cache.Analysis(diagnosis, envelopes, identification)
+                ),
+            )
 
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
@@ -511,8 +594,32 @@ def run(material: Material, params: PipelineParams | None = None) -> Report:
             raise ValueError(
                 f"unknown strategy {name!r}; have {', '.join(sorted(STRATEGIES))}"
             )
-        with timings.stage(f"target/{name}"):
-            produced = strategy(material, diagnosis, envelopes, identification, params)
+        key = (
+            None
+            if cache_path is None or strategy.cache_modules is None
+            else cache.key_for(
+                name,
+                strategy.cache_modules,
+                material,
+                params.diagnose,
+                params.extraction,
+                identify_params,
+                params.realisation,
+                params.max_sections,
+                params.exclude_bands_hz,
+            )
+        )
+        held = None if key is None or fresh else cache.load(cache_path, name, key)
+        if held is not None:
+            with timings.stage(f"target/{name} (cached)"):
+                produced = cache.proposals_from_json(held, Proposal)
+        else:
+            with timings.stage(f"target/{name}"):
+                produced = strategy.derive(
+                    material, diagnosis, envelopes, identification, params
+                )
+            if key is not None:
+                cache.store(cache_path, name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
         proposals.extend(produced)
 
