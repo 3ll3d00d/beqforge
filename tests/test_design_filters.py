@@ -4,6 +4,7 @@ The closed-form claim is the load-bearing one: when the protective filter shares
 alignment and order, the exact inverse *is* a low shelf cascade. These pin that down.
 """
 
+import dataclasses
 import math
 
 import numpy as np
@@ -343,3 +344,98 @@ def test_an_impossible_drift_limit_still_returns_a_cascade() -> None:
         max_drift_db=0.0,
     )
     assert specs
+
+
+def test_memoised_twiddles_do_not_change_the_response() -> None:
+    """The twiddle cache is an optimisation and must be invisible in the answer.
+
+    Bit-identical, not close: `_fit_structure` compares costs, so a last-bit difference in the
+    magnitude can send the optimiser to a different cascade and change what gets published.
+    """
+    grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    sos = F.biquad_sos(
+        [
+            BiquadSpec("low_shelf", 12.0, 14.0, 0.7),
+            BiquadSpec("peaking_eq", 8.0, 4.0, 1.2),
+        ],
+        96000.0,
+    )
+    F._Z_POWERS.clear()
+    cold = F.magnitude_db(sos, grid, 96000.0)
+    warm = F.magnitude_db(sos, grid, 96000.0)
+    assert np.array_equal(cold, warm)
+
+    # and against the arithmetic with nothing memoised at all
+    z1 = np.exp(-2j * np.pi * grid / 96000.0)
+    z2 = z1 * z1
+    b, a = sos[:, :3], sos[:, 3:]
+    num = b[:, 0, None] + b[:, 1, None] * z1 + b[:, 2, None] * z2
+    den = a[:, 0, None] + a[:, 1, None] * z1 + a[:, 2, None] * z2
+    assert np.array_equal(
+        cold, np.sum(20.0 * np.log10(np.abs(num / den) + 1e-300), axis=0)
+    )
+
+
+def test_a_second_grid_is_not_served_the_first_grid_s_twiddles() -> None:
+    """The cache is keyed on identity, so two live grids must not collide."""
+    fine = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    coarse = np.logspace(math.log10(3.0), math.log10(400.0), 64)
+    sos = F.biquad_sos([BiquadSpec("low_shelf", 12.0, 14.0, 0.7)], 96000.0)
+    F._Z_POWERS.clear()
+    assert len(F.magnitude_db(sos, fine, 96000.0)) == 400
+    assert len(F.magnitude_db(sos, coarse, 96000.0)) == 64
+    assert len(F.magnitude_db(sos, fine, 96000.0)) == 400
+    # the same grid at a different rate is a different entry, not the same one
+    at_48k = F.magnitude_db(sos, fine, 48000.0)
+    assert not np.array_equal(at_48k, F.magnitude_db(sos, fine, 96000.0))
+
+
+def test_the_twiddle_cache_stays_bounded() -> None:
+    sos = F.biquad_sos([BiquadSpec("low_shelf", 12.0, 14.0, 0.7)], 96000.0)
+    F._Z_POWERS.clear()
+    for count in range(4, 4 + F._Z_POWERS_LIMIT * 3):
+        F.magnitude_db(sos, np.geomspace(3.0, 400.0, count), 96000.0)
+    assert len(F._Z_POWERS) <= F._Z_POWERS_LIMIT
+
+
+def test_the_drift_term_is_unchanged_when_the_rates_agree() -> None:
+    """`cost` reuses the published cascade as the realised one when the rates match.
+
+    The saving is a `biquad_sos` and a `magnitude_db` per evaluation; the requirement is that
+    the number it produces is the one the two-rate path would have produced.
+    """
+    grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    target = np.clip(12.0 - 12.0 * np.log2(np.maximum(grid, 6.0) / 6.0), 0.0, None)
+    realisation = F.Realisation()
+    assert realisation.fs == 96000.0
+
+    reused, _, _, _ = F._fit_structure(
+        target,
+        grid,
+        96000.0,
+        1,
+        0,
+        (5.0, 200.0),
+        (5.0, 40.0),
+        6.0,
+        20.0,
+        realisation,
+        0,
+    )
+    # the same fit with the realisation one Hz away takes the two-rate branch
+    apart, _, _, _ = F._fit_structure(
+        target,
+        grid,
+        96000.0,
+        1,
+        0,
+        (5.0, 200.0),
+        (5.0, 40.0),
+        6.0,
+        20.0,
+        dataclasses.replace(realisation, fs=96001.0),
+        0,
+    )
+    for got, other in zip(reused, apart, strict=True):
+        assert got.type == other.type
+        assert got.freq_hz == pytest.approx(other.freq_hz, rel=1e-3)

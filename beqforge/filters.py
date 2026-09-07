@@ -127,15 +127,56 @@ def high_pass_sos(hp: HighPass, fs: float) -> np.ndarray:
     )
 
 
+_Z_POWERS: dict[tuple[int, float], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+"""`z**-1` and `z**-2` per grid, since a fit evaluates one grid millions of times.
+
+Keyed on the *identity* of the frequency array rather than its contents, and the array itself
+is kept in the value. That is what makes the key safe: holding a reference stops the array
+being collected, so its `id` cannot be reused by a different array, and the `is` check below
+is then exact rather than probabilistic. Hashing 400 floats per call would cost more than a
+few of the exponentials it saves.
+
+Small and cleared wholesale. A fit works one grid; the entries are 400-point arrays; and a
+cache that needs an eviction policy here would be solving a problem nobody has.
+
+The one thing it assumes is that a grid is not rewritten in place after it has been evaluated
+against. Every grid here is built by `logspace`/`geomspace` and read thereafter, and a
+frequency axis that mutated under a cascade would be a bug on its own terms; but the failure
+would be silent, so it is stated rather than left to be discovered.
+"""
+
+_Z_POWERS_LIMIT = 8
+
+
+def _z_powers(freqs: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
+    key = (id(freqs), fs)
+    held = _Z_POWERS.get(key)
+    if held is not None and held[0] is freqs:
+        return held[1], held[2]
+    z1 = np.exp(-2j * np.pi * np.asarray(freqs, dtype=np.float64) / fs)
+    z2 = z1 * z1
+    if len(_Z_POWERS) >= _Z_POWERS_LIMIT:
+        _Z_POWERS.clear()
+    _Z_POWERS[key] = (freqs, z1, z2)
+    return z1, z2
+
+
 def magnitude_db(sos: np.ndarray, freqs: np.ndarray, fs: float) -> np.ndarray:
     """Magnitude response in dB of a cascade at the given frequencies.
 
     Evaluated directly rather than through `scipy.signal.sosfreqz`, whose per-call overhead
     dominates the fitting loop by an order of magnitude. Same arithmetic, same coefficients.
+
+    The twiddles are memoised because they depend on the grid and not on the cascade, while
+    the fitting loop varies only the cascade: `np.exp` over 400 points was a quarter of this
+    function, recomputed identically some ten million times a run. The arithmetic below is
+    untouched — `abs(num / den)` rather than the ratio of squared magnitudes, which would be
+    a shade faster in principle, measured *slower* in practice, and is not bit-identical
+    (1.07e-14 dB). A stage this hot is exactly where an inexact rewrite is least worth its
+    risk: the optimiser compares costs, so a last-bit difference can pick a different cascade.
     """
     sections = np.atleast_2d(np.asarray(sos, dtype=np.float64))
-    z1 = np.exp(-2j * np.pi * np.asarray(freqs, dtype=np.float64) / fs)
-    z2 = z1 * z1
+    z1, z2 = _z_powers(freqs, fs)
     b = sections[:, :3]
     a = sections[:, 3:]
     num = b[:, 0, None] + b[:, 1, None] * z1 + b[:, 2, None] * z2
@@ -689,8 +730,9 @@ def _fit_structure(
         nonlocal evaluations
         evaluations += 1
         specs = _unpack(p, shelves, peaks)
-        err = magnitude_db(biquad_sos(specs, fs), freqs, fs) - target_db
-        worst = float(np.max(np.abs(err[mask])))
+        sos = biquad_sos(specs, fs)
+        response = magnitude_db(sos, freqs, fs)
+        worst = float(np.max(np.abs((response - target_db)[mask])))
         if realisation is not None:
             # Drift at the exact coefficients, deliberately, though `accept` gates on the p90
             # over publication rounding and the two are therefore not the same statistic.
@@ -706,10 +748,22 @@ def _fit_structure(
             # at twice the cost of a stage that is already ~90% of the run. A sensitivity
             # penalty that helped would have to be smooth — the derivative of the response
             # with respect to the coefficients — not a maximum over jittered evaluations.
-            device = biquad_sos(specs, realisation.fs)
-            drift = magnitude_db(
-                realisation.quantise(device), freqs, realisation.fs
-            ) - magnitude_db(device, freqs, realisation.fs)
+            #
+            # The realised cascade is the published one whenever the two rates agree, which
+            # they do by default — `PUBLISH_FS` and `Realisation.fs` are both 96 kHz. Built
+            # and evaluated again regardless, that was a second `biquad_sos` and a third
+            # `magnitude_db` per evaluation, some ten million times a run, for an answer
+            # already in hand. Branching rather than assuming, so a `Realisation` at another
+            # rate still gets its own.
+            if realisation.fs == fs:
+                device, undrifted = sos, response
+            else:
+                device = biquad_sos(specs, realisation.fs)
+                undrifted = magnitude_db(device, freqs, realisation.fs)
+            drift = (
+                magnitude_db(realisation.quantise(device), freqs, realisation.fs)
+                - undrifted
+            )
             worst = max(worst, float(np.max(np.abs(drift[mask]))))
         return worst
 
