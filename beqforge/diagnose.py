@@ -253,18 +253,28 @@ def steepest_slope(
     return best, at
 
 
-def mix_shares(material: Material) -> dict[str, np.ndarray]:
+def mix_shares(
+    material: Material, spectra: dict[str, np.ndarray] | None = None
+) -> dict[str, np.ndarray]:
     """Fraction of summed-mix power each channel supplies, per bin.
 
     Uses the same gains `tools/extract.py` applied when building the mix, so the shares sum
     to ~1 and can be read directly as "where this frequency's energy comes from".
+
+    `spectra` is each channel's `mean_spectrum` in dB when the caller already has it.
+    `diagnose` does — it takes one per channel for the response — and taking it twice was
+    half the Welch time of a run for two copies of one number.
     """
     from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN
 
     contributions: dict[str, np.ndarray] = {}
     for name, samples in material.channels.items():
         gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
-        _, power_db = mean_spectrum(samples, material.fs)
+        power_db = (
+            spectra[name]
+            if spectra is not None
+            else mean_spectrum(samples, material.fs)[1]
+        )
         contributions[name] = 10.0 ** (power_db / 10.0) * gain * gain
     total = sum(contributions.values())
     return {name: value / total for name, value in contributions.items()}
@@ -309,29 +319,43 @@ def stratified_response(
     return freqs, responses
 
 
+def scene_envelope(
+    samples: np.ndarray,
+    fs: float,
+    band_hz: tuple[float, float],
+    params: DiagnoseParams,
+) -> np.ndarray:
+    """Smoothed level of one band over time, in dB. The unit `band_tracking` correlates."""
+    low, high = band_hz
+    sos = signal.butter(4, [low, high], btype="band", fs=fs, output="sos")
+    filtered = signal.sosfiltfilt(sos, samples)
+    width = int(params.tracking_window_s * fs)
+    smoothed = np.convolve(filtered**2, np.ones(width) / width, mode="valid")
+    return 10.0 * np.log10(smoothed + 1e-30)
+
+
 def band_tracking(
     samples: np.ndarray,
     fs: float,
     band_hz: tuple[float, float],
     params: DiagnoseParams,
     reference_hz: tuple[float, float],
+    reference: np.ndarray | None = None,
 ) -> float:
     """Correlation between a band's scene envelope and the passband's.
 
     Real bass events have simultaneous energy across frequency; a stationary floor does not.
     Restricted to frames where the passband is actually doing something, so the score is not
     manufactured by both bands falling silent together.
+
+    `reference` is the passband's own envelope, which does not depend on `band_hz` and so is
+    the same for every band the caller walks down through. Computed here when not supplied,
+    since a single call should not need the caller to know that; passed in by `diagnose`,
+    which asks about several bands and would otherwise pay for it once per band.
     """
-
-    def envelope(low: float, high: float) -> np.ndarray:
-        sos = signal.butter(4, [low, high], btype="band", fs=fs, output="sos")
-        filtered = signal.sosfiltfilt(sos, samples)
-        width = int(params.tracking_window_s * fs)
-        smoothed = np.convolve(filtered**2, np.ones(width) / width, mode="valid")
-        return 10.0 * np.log10(smoothed + 1e-30)
-
-    reference = envelope(*reference_hz)
-    target = envelope(*band_hz)
+    if reference is None:
+        reference = scene_envelope(samples, fs, reference_hz, params)
+    target = scene_envelope(samples, fs, band_hz, params)
     live = reference > (np.percentile(reference, 99) - 30.0)
     if live.sum() < 100:
         return math.nan
@@ -344,12 +368,15 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
     band = (freqs >= params.band_hz[0]) & (freqs <= params.band_hz[1])
     freqs, mix_db = freqs[band], mix_db[band]
-    shares = mix_shares(material)
+    spectra = {
+        name: mean_spectrum(samples, material.fs)[1]
+        for name, samples in material.channels.items()
+    }
+    shares = mix_shares(material, spectra)
 
     channels: dict[str, ChannelDiagnosis] = {}
-    for name, samples in material.channels.items():
-        _, response = mean_spectrum(samples, material.fs)
-        response = response[band]
+    for name in material.channels:
+        response = spectra[name][band]
         level, plateau = plateau_reference(response, freqs, params)
         response = response - level
         slope, at = steepest_slope(response, freqs, params.band_hz)
@@ -422,9 +449,17 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     )
 
     noise_floor = math.nan
+    # the passband envelope is what every band is compared against, so it is computed once
+    # here rather than again inside each call — it was 4 s a band on a two-hour title
+    tracking_reference = scene_envelope(subject, material.fs, reference_hz, params)
     for low, high in _octave_bands(params.band_hz[0], reference_hz[0]):
         tracking = band_tracking(
-            subject, material.fs, (low, high), params, reference_hz
+            subject,
+            material.fs,
+            (low, high),
+            params,
+            reference_hz,
+            reference=tracking_reference,
         )
         # `not >=` rather than `<`, so a band that could not be measured at all fails the
         # same way one that failed does. NaN is not evidence of content, and reading it as

@@ -210,3 +210,49 @@ def test_the_plateau_reference_clears_the_knee() -> None:
     # and the response it produces is referenced there, so 30 Hz reads as attenuated
     freqs = diagnose(material).freqs
     assert np.interp(30.0, freqs, channel.response_db) < -2.0
+
+
+def test_the_passband_envelope_is_the_same_however_it_is_obtained() -> None:
+    """`diagnose` computes it once and hands it to every band; a lone call computes its own.
+
+    Both have to be the same number, or hoisting it changed the measurement rather than
+    just when it was taken.
+    """
+    from beqanalyser.design.diagnose import band_tracking, scene_envelope
+
+    samples = scened_noise(7, int(FS * 120.0))
+    params = DiagnoseParams()
+    reference_hz = (30.0, 80.0)
+    band_hz = (8.0, 16.0)
+
+    computed_inside = band_tracking(samples, FS, band_hz, params, reference_hz)
+    hoisted = band_tracking(
+        samples,
+        FS,
+        band_hz,
+        params,
+        reference_hz,
+        reference=scene_envelope(samples, FS, reference_hz, params),
+    )
+    assert computed_inside == hoisted
+
+
+def test_shares_are_the_same_whether_or_not_the_spectra_are_supplied() -> None:
+    """`diagnose` already has every channel's spectrum; taking it twice was half its Welch."""
+    from beqanalyser.design.diagnose import mean_spectrum, mix_shares
+
+    material = material_from(
+        {
+            "L": scened_noise(11, int(FS * 60.0)),
+            "LFE": high_passed(scened_noise(12, int(FS * 60.0)), 20.0, order=6),
+        }
+    )
+    spectra = {
+        name: mean_spectrum(samples, material.fs)[1]
+        for name, samples in material.channels.items()
+    }
+    on_its_own = mix_shares(material)
+    supplied = mix_shares(material, spectra)
+    assert set(on_its_own) == set(supplied)
+    for name in on_its_own:
+        assert np.array_equal(on_its_own[name], supplied[name])

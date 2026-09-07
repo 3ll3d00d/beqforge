@@ -370,9 +370,15 @@ def counterfactual_targets(
     """Restore the filtered channels, re-sum, and read the deficit off the mix."""
     if not diagnosis.filtered_channels:
         return []
+    # Everything that does not depend on the cap, computed once. Each channel's spectrum, the
+    # bin axis it sits on and the mix's own reference are the same for every cap, and this
+    # title's sample count factors as 2 * 3 * 47 * 24049 — that 24,049 puts pocketfft on a
+    # Bluestein path, so one forward transform is 1.22 s and one inverse 0.95 s. Three caps
+    # were paying for six of each where two would do.
+    restoration = _Restoration(material, diagnosis)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
-        target = counterfactual_target(material, diagnosis, cap, params)
+        target = counterfactual_target(material, diagnosis, cap, params, restoration)
         if target.max() < 1.0:
             logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
             continue
@@ -443,11 +449,41 @@ does not change between runs of the same code over the same title. `flatten` and
 """
 
 
+@dataclass(frozen=True, slots=True)
+class _Restoration:
+    """What restoring a channel needs that does not depend on how far it is restored.
+
+    The spectrum of each filtered channel, the bin axis, and the mix's own reference curve.
+    A cap changes only the ceiling applied to the boost, so recomputing these per cap was
+    three forward and three inverse transforms of a two-hour signal for one answer.
+    """
+
+    spectra: dict[str, np.ndarray]
+    bins: np.ndarray
+    before_db: np.ndarray
+
+    def __init__(self, material: Material, diagnosis: Diagnosis) -> None:
+        spectra = {
+            name: np.fft.rfft(material.channels[name])
+            for name in diagnosis.filtered_channels
+        }
+        object.__setattr__(self, "spectra", spectra)
+        object.__setattr__(
+            self,
+            "bins",
+            np.fft.rfftfreq(len(material.mono_mix), 1.0 / material.fs),
+        )
+        object.__setattr__(
+            self, "before_db", mean_spectrum(material.mono_mix, material.fs)[1]
+        )
+
+
 def counterfactual_target(
     material: Material,
     diagnosis: Diagnosis,
     restore_cap_db: float,
     params: PipelineParams,
+    restoration: "_Restoration | None" = None,
 ) -> np.ndarray:
     """Mix deficit if the filtered channels had never been filtered.
 
@@ -456,6 +492,7 @@ def counterfactual_target(
     a channel 23 dB under the mains contributes nothing to the sum until it is restored, and
     a target computed on the channel alone would not know that.
     """
+    restoration = restoration or _Restoration(material, diagnosis)
     freqs = diagnosis.freqs
     restored = material.mono_mix.copy()
     for name in diagnosis.filtered_channels:
@@ -467,14 +504,13 @@ def counterfactual_target(
         # while stopping another short of its knee
         knee = freqs > diagnosis.channels[name].plateau_hz[0]
         boost = np.where(knee, 0.0, boost)
-        spectrum = np.fft.rfft(samples)
-        bins = np.fft.rfftfreq(len(samples), 1.0 / material.fs)
-        gain = np.interp(bins, freqs, boost, left=boost[0], right=0.0)
+        spectrum = restoration.spectra[name]
+        gain = np.interp(restoration.bins, freqs, boost, left=boost[0], right=0.0)
         lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=len(samples))
         mix_gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
         restored = restored + mix_gain * (lifted - samples)
 
-    _, before = mean_spectrum(material.mono_mix, material.fs)
+    before = restoration.before_db
     grid, after = mean_spectrum(restored, material.fs)
     deficit = np.maximum(after - before, 0.0)
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)

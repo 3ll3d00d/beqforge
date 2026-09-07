@@ -169,3 +169,23 @@ def test_flatten_does_not_read_the_high_frequency_fall_as_deficit() -> None:
         material, diagnose(material), None, None, PipelineParams()
     )[0].target_db
     assert np.all(target[DESIGN_GRID > 120.0] == 0.0)
+
+
+def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
+    """A cap changes only the ceiling on the boost, so the transforms under it are shared.
+
+    Sharing them must not change any target — this is three forward and three inverse
+    transforms of a two-hour signal collapsing to one each, not a different calculation.
+    """
+    from beqanalyser.design.diagnose import diagnose
+    from beqanalyser.design.pipeline import _Restoration, counterfactual_target
+
+    diagnosis = diagnose(walled)
+    if not diagnosis.filtered_channels:
+        pytest.skip("no channel is filtered, so there is nothing to restore")
+    params = PipelineParams()
+    shared = _Restoration(walled, diagnosis)
+    for cap in params.restore_caps_db:
+        alone = counterfactual_target(walled, diagnosis, cap, params)
+        pooled = counterfactual_target(walled, diagnosis, cap, params, shared)
+        assert np.array_equal(alone, pooled), f"cap {cap}"
