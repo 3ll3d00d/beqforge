@@ -321,10 +321,12 @@ def test_the_fit_selects_on_the_drift_that_will_be_published() -> None:
     limit = 0.5 * (drift_of(fragile) + drift_of(robust))
 
     # the fragile one is the more accurate, so residual alone would take it
-    candidates = [(robust, 0.59), (fragile, 0.43)]
-    kept = F._realisable(candidates, freqs, realisation, limit)
-    assert [specs for specs, _ in kept] == [robust]
-    assert F._realisable(candidates, freqs, realisation, None) == candidates
+    assert F._publishable(robust, 0.59, freqs, realisation, limit)
+    assert not F._publishable(fragile, 0.43, freqs, realisation, limit)
+    # asked per candidate rather than over the whole set, so the escalation can screen a
+    # section count as it arrives and stop without fitting the ones above it
+    assert F._publishable(fragile, 0.43, freqs, realisation, None)
+    assert F._publishable(fragile, 0.43, freqs, None, limit)
 
 
 def test_an_impossible_drift_limit_still_returns_a_cascade() -> None:
@@ -439,3 +441,122 @@ def test_the_drift_term_is_unchanged_when_the_rates_agree() -> None:
     for got, other in zip(reused, apart, strict=True):
         assert got.type == other.type
         assert got.freq_hz == pytest.approx(other.freq_hz, rel=1e-3)
+
+
+def escalation_target() -> tuple[np.ndarray, np.ndarray]:
+    freqs = np.logspace(math.log10(3.0), math.log10(400.0), 200)
+    target = np.clip(
+        12.0 - 12.0 * np.log2(np.maximum(freqs, 6.0) / 6.0) / np.log2(25.0 / 6.0),
+        0.0,
+        None,
+    )
+    target[freqs > 30.0] = 0.0
+    return freqs, target
+
+
+def test_escalating_reaches_what_enumerating_reached() -> None:
+    """The whole claim of the escalation: fewer tiers fitted, same cascade published.
+
+    Enumeration is reconstructed here rather than kept in the code, so the equivalence is
+    asserted against the rule it replaced instead of against itself.
+    """
+    freqs, target = escalation_target()
+    realisation = F.Realisation()
+    kwargs = dict(
+        band_hz=(5.0, 200.0),
+        max_gain_db=20.0,
+        realisation=realisation,
+        seeds=(0, 1),
+        max_drift_db=3.0,
+    )
+    escalated = F.fit_minimal_biquads(target, freqs, 96000.0, 3, 0.5, **kwargs)
+
+    # what the old code did: fit every tier, prune, screen, take the first that clears both
+    screened = []
+    for sections in range(1, 4):
+        tasks = F._structure_tasks(
+            target,
+            freqs,
+            96000.0,
+            sections,
+            (5.0, 200.0),
+            (5.0, 200.0),
+            6.0,
+            20.0,
+            realisation,
+            (0, 1),
+        )
+        best = min(F._run_fits(tasks), key=lambda r: r[1])
+        specs, residual = F._prune(
+            (best[0], best[1]), target, freqs, 96000.0, (5.0, 200.0), 1.0
+        )
+        screened.append(
+            (specs, residual, F._publishable(specs, residual, freqs, realisation, 3.0))
+        )
+    enumerated = next(
+        ((s, r) for s, r, ok in screened if ok and r <= 0.5),
+        min(
+            [(s, r) for s, r, ok in screened if ok] or [(s, r) for s, r, _ in screened],
+            key=lambda x: x[1],
+        ),
+    )
+
+    assert escalated[1] == enumerated[1]
+    assert [(f.type, f.freq_hz, f.gain_db, f.q) for f in escalated[0]] == [
+        (f.type, f.freq_hz, f.gain_db, f.q) for f in enumerated[0]
+    ]
+
+
+def test_batching_targets_does_not_change_any_of_them() -> None:
+    """Fitting several together must decide exactly what fitting each alone decides."""
+    freqs, first = escalation_target()
+    second = first * 0.6
+    kwargs = dict(band_hz=(5.0, 200.0), max_gain_db=20.0, seeds=(0,))
+
+    alone = [
+        F.fit_minimal_biquads(t, freqs, 96000.0, 2, 0.5, **kwargs)
+        for t in (first, second)
+    ]
+    together = F.fit_minimal_biquads_all(
+        [F.FitRequest(first, label="a"), F.FitRequest(second, label="b")],
+        freqs,
+        96000.0,
+        2,
+        0.5,
+        **kwargs,
+    )
+    for one, both in zip(alone, together, strict=True):
+        assert one[1] == both[1]
+        assert [(f.type, f.freq_hz, f.gain_db, f.q) for f in one[0]] == [
+            (f.type, f.freq_hz, f.gain_db, f.q) for f in both[0]
+        ]
+
+
+def test_settling_skips_the_tier_that_is_most_of_the_budget() -> None:
+    """Escalation has to actually escalate, or it is enumeration with extra steps.
+
+    It defers the *top* section count only. That count is 59% of the budget on its own, and
+    deferring the cheaper ones individually costs more in idle workers than it saves in
+    unfitted tiers — see `_tiers`.
+    """
+    freqs, target = escalation_target()
+
+    F.FIT_STATS.reset()
+    F.fit_minimal_biquads(
+        target, freqs, 96000.0, 4, 50.0, band_hz=(5.0, 200.0), seeds=(0,)
+    )
+    # 50 dB is met by one section, so the top tier is never fitted: 1 + 2 + 3 splits
+    assert F.FIT_STATS.calls == 6
+
+    F.FIT_STATS.reset()
+    F.fit_minimal_biquads(
+        target, freqs, 96000.0, 4, 0.0, band_hz=(5.0, 200.0), seeds=(0,)
+    )
+    # unreachable, so the whole budget is spent: 1 + 2 + 3 + 4 splits at one seed
+    assert F.FIT_STATS.calls == 10
+
+
+def test_the_tier_groups_defer_only_the_top_section_count() -> None:
+    assert F._tiers(1) == [(1,)]
+    assert F._tiers(2) == [(1,), (2,)]
+    assert F._tiers(4) == [(1, 2, 3), (4,)]

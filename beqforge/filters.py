@@ -16,8 +16,9 @@ import math
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from multiprocessing import cpu_count
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy import optimize, signal
@@ -328,25 +329,56 @@ def _fit_task(task: "FitTask") -> tuple[list[BiquadSpec], float, float, int]:
     return _fit_structure(*task)
 
 
-def _run_fits(tasks: list["FitTask"]) -> list[tuple[list[BiquadSpec], float]]:
+@contextmanager
+def _fit_pool(tasks_expected: int):
+    """One pool for a whole escalation, rather than one per section tier.
+
+    `_run_fits` used to build and tear down an executor per call, which cost nothing when a
+    call was the entire fitting stage. Escalating the section budget turns that one call into
+    four, and the churn showed up as ~8 s a tier on the title where nothing settles early —
+    enough to make escalation a net loss there while it was a large win elsewhere.
+
+    Yields None when there is nothing to parallelise, so the serial path stays serial and
+    `PARALLEL_FITS = False` still means what it says.
+    """
+    if tasks_expected > 1 and PARALLEL_FITS:
+        workers = max(1, min(tasks_expected, FIT_WORKERS))
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            yield pool
+    else:
+        yield None
+
+
+def _run_fits(
+    tasks: list["FitTask"],
+    pool: "ProcessPoolExecutor | None" = None,
+) -> list[tuple[list[BiquadSpec], float, float]]:
     """Run independent fits, in parallel when there is more than one.
 
     The fits are the entire cost of the design stage and they do not interact, so this is the
     one place parallelism buys anything. Results are returned in submission order and the
     seeds are fixed, so the answer is identical to the serial one — the pool changes how long
     it takes, never what it decides.
+
+    Each result carries its own wall time as well as its cascade, so a caller fitting several
+    targets at once can say what each of them cost. `FIT_STATS` only ever knew the total.
+
+    `pool` lets a caller spanning several submissions keep one executor across all of them;
+    without it, this owns a pool for the duration of the call as it always did.
     """
-    if len(tasks) > 1 and PARALLEL_FITS:
+    if pool is not None:
+        results = list(pool.map(_fit_task, tasks))
+    elif len(tasks) > 1 and PARALLEL_FITS:
         workers = max(1, min(len(tasks), FIT_WORKERS))
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_fit_task, tasks))
+        with ProcessPoolExecutor(max_workers=workers) as owned:
+            results = list(owned.map(_fit_task, tasks))
     else:
         results = [_fit_task(task) for task in tasks]
     for _, _, seconds, evaluations in results:
         FIT_STATS.calls += 1
         FIT_STATS.seconds += seconds
         FIT_STATS.cost_evaluations += evaluations
-    return [(specs, residual) for specs, residual, _, _ in results]
+    return [(specs, residual, seconds) for specs, residual, seconds, _ in results]
 
 
 def _structure_tasks(
@@ -379,6 +411,68 @@ def _structure_tasks(
         for shelves in range(1, sections + 1)
         for seed in seeds
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class FitRequest:
+    """One target to fit, with the placement band that belongs to it.
+
+    Placement is per-target rather than per-run: `design` derives it from the target's own
+    active span, while the pipeline fixes it. Batching targets together therefore has to carry
+    it alongside each one instead of sharing a single value.
+    """
+
+    target_db: np.ndarray
+    placement_band_hz: tuple[float, float] | None = None
+    label: str = ""
+
+
+@dataclass(slots=True, eq=False)
+class _Escalation:
+    """One target's state while the section budget is escalated across all of them."""
+
+    request: FitRequest
+    screened: list[tuple[list[BiquadSpec], float, bool]] = field(default_factory=list)
+    """Per section count, ascending: the pruned cascade, its residual, and whether it
+    survives publication rounding."""
+
+    seconds: float = 0.0
+    answer: tuple[list[BiquadSpec], float] | None = None
+
+    def settle(self, residual_target_db: float, max_sections: int) -> None:
+        """Take the fewest sections that both publish and reach the target, if any yet do.
+
+        Sound to apply before the higher counts have been fitted. The full enumeration returns
+        the *first* entry in ascending order that clears both bars, and fitting more sections
+        only ever appends later entries — drift screening is per candidate, so nothing fitted
+        later can change whether an earlier one passed. If one has already cleared both, it is
+        the answer the whole budget would have produced.
+        """
+        for specs, residual, publishable in self.screened:
+            if publishable and residual <= residual_target_db:
+                logger.info(
+                    f"{self.request.label or 'target'}: {len(specs)} section(s) reach "
+                    f"{residual:.3f} dB; the remaining {max_sections - len(specs)} are "
+                    "not spent"
+                )
+                self.answer = (specs, residual)
+                return
+
+    def finish(self) -> None:
+        """Nothing cleared both bars, so fall back the way the full enumeration does.
+
+        Preferring the cascades that survive rounding, and taking the whole set when none
+        does — returning nothing here would abstain without a reason attached, and §2.5 asks
+        for the opposite of that.
+        """
+        kept = [(s, r) for s, r, publishable in self.screened if publishable]
+        if not kept:
+            logger.warning(
+                "no cascade in the budget survives publication rounding; keeping the most "
+                "accurate so the acceptance model can say so"
+            )
+            kept = [(s, r) for s, r, _ in self.screened]
+        self.answer = min(kept, key=lambda r: r[1])
 
 
 def fit_minimal_biquads(
@@ -414,87 +508,211 @@ def fit_minimal_biquads(
     `_fit_structure`) — a max over sampled roundings is non-smooth and degrades the search.
     Measuring it once per surviving candidate instead costs a few evaluations rather than
     millions, which is where a statistic this expensive belongs.
+
+    One target. `fit_minimal_biquads_all` is the same thing over several, and is what the
+    pipeline uses; alone, a target escalating on its own leaves most of the machine idle.
     """
-    placement = placement_band_hz or band_hz
-    grouped: list[list["FitTask"]] = [
-        _structure_tasks(
-            target_db,
+    return fit_minimal_biquads_all(
+        [FitRequest(target_db, placement_band_hz)],
+        freqs,
+        fs,
+        max_sections,
+        residual_target_db,
+        band_hz=band_hz,
+        max_q=max_q,
+        max_gain_db=max_gain_db,
+        realisation=realisation,
+        seeds=seeds,
+        min_contribution_db=min_contribution_db,
+        max_drift_db=max_drift_db,
+    )[0]
+
+
+def fit_minimal_biquads_all(
+    requests: list[FitRequest],
+    freqs: np.ndarray,
+    fs: float,
+    max_sections: int,
+    residual_target_db: float,
+    band_hz: tuple[float, float] | None = None,
+    max_q: float = 6.0,
+    max_gain_db: float = 30.0,
+    realisation: "Realisation | None" = None,
+    seeds: tuple[int, ...] = (0, 1, 2),
+    min_contribution_db: float = 1.0,
+    max_drift_db: float | None = None,
+) -> list[tuple[list[BiquadSpec], float]]:
+    """Fit every target, escalating the section budget across all of them together.
+
+    Two things at once, and they only work as a pair.
+
+    **Escalate rather than enumerate.** The budget goes as the cube of `max_sections` — the
+    four-section tier alone is 59% of it — and most targets never need it: of eleven fits over
+    the four titles, five settle at two sections and seven at three. Fitting a tier only when
+    the tiers below it have failed to settle spends about half the CPU. `settle` argues why
+    that is the same answer rather than an approximation of it.
+
+    **One tier, every target.** Escalating a single target starves the pool: its first tier is
+    two tasks for seven workers, which is why this was enumerated up front in the first place.
+    Escalating all of them in step puts every undecided target's tier into one submission, so
+    the width comes from the number of targets rather than from spending budget nothing needs.
+    A run fits four targets, so a tier is 8 to 32 tasks instead of 2 to 8.
+
+    Deterministic and order-preserving: `_run_fits` returns in submission order, tasks are
+    seeded, and results are handed back to the target that asked for them.
+    """
+    states = [_Escalation(request) for request in requests]
+    widest = len(requests) * max_sections * len(seeds)
+    with _fit_pool(widest) as pool:
+        _escalate(
+            states,
+            pool,
             freqs,
             fs,
-            sections,
+            max_sections,
+            residual_target_db,
             band_hz,
-            placement,
             max_q,
             max_gain_db,
             realisation,
             seeds,
+            min_contribution_db,
+            max_drift_db,
         )
-        for sections in range(1, max_sections + 1)
-    ]
-    # Every section count is enumerated up front rather than tried in turn. Serially the loop
-    # stopped as soon as one met the target; in parallel that early exit would leave most of
-    # the machine idle waiting for the smallest problem. The selection rule below is the same
-    # one, applied after the fact, so the chosen cascade is unchanged.
-    flat = [task for tasks in grouped for task in tasks]
-    results = _run_fits(flat)
 
-    at = 0
-    per_sections: list[tuple[list[BiquadSpec], float]] = []
-    for tasks in grouped:
-        window = results[at : at + len(tasks)]
-        at += len(tasks)
-        per_sections.append(min(window, key=lambda r: r[1]))
-
-    pruned = [
-        _prune(candidate, target_db, freqs, fs, band_hz, min_contribution_db)
-        for candidate in per_sections
-    ]
-    realisable = _realisable(pruned, freqs, realisation, max_drift_db)
-
-    # `realisable` may be a subset, so the section count is read off the cascade rather than
-    # from its position: after screening, the first survivor is not necessarily the 1-section
-    # fit, and reporting it as one would misdescribe the answer in the run's own log.
-    for specs, residual in realisable:
-        if residual <= residual_target_db:
+    for state in states:
+        if state.answer is None:
+            state.finish()
+        if state.request.label:
             logger.info(
-                f"{len(specs)} section(s) reach {residual:.3f} dB; "
-                f"the remaining {max_sections - len(specs)} are not spent"
+                f"  {state.request.label}: {len(state.answer[0])} section(s) at "
+                f"{state.answer[1]:.3f} dB, {state.seconds:.0f} CPU-s"
             )
-            return specs, residual
-    return min(realisable, key=lambda r: r[1])
+    return [state.answer for state in states]
 
 
-def _realisable(
-    candidates: list[tuple[list[BiquadSpec], float]],
+def _escalate(
+    states: list["_Escalation"],
+    pool: "ProcessPoolExecutor | None",
+    freqs: np.ndarray,
+    fs: float,
+    max_sections: int,
+    residual_target_db: float,
+    band_hz: tuple[float, float] | None,
+    max_q: float,
+    max_gain_db: float,
+    realisation: "Realisation | None",
+    seeds: tuple[int, ...],
+    min_contribution_db: float,
+    max_drift_db: float | None,
+) -> None:
+    """Fit one group of section counts at a time, across every target not yet settled."""
+    for group in _tiers(max_sections):
+        pending = [state for state in states if state.answer is None]
+        if not pending:
+            break
+        tasks: list["FitTask"] = []
+        owners: list[tuple[_Escalation, int]] = []
+        for sections in group:
+            for state in pending:
+                built = _structure_tasks(
+                    state.request.target_db,
+                    freqs,
+                    fs,
+                    sections,
+                    band_hz,
+                    state.request.placement_band_hz or band_hz,
+                    max_q,
+                    max_gain_db,
+                    realisation,
+                    seeds,
+                )
+                tasks.extend(built)
+                owners.extend([(state, sections)] * len(built))
+        results = _run_fits(tasks, pool)
+        # section counts are screened in ascending order whatever order they were submitted
+        # in, because `settle` takes the first entry that clears both bars and "first" has to
+        # mean fewest sections
+        for (state, _), window in sorted(
+            _by_owner(owners, results).items(), key=lambda item: item[0][1]
+        ):
+            best = min(window, key=lambda r: r[1])
+            state.seconds += sum(seconds for _, _, seconds in window)
+            specs, residual = _prune(
+                (best[0], best[1]),
+                state.request.target_db,
+                freqs,
+                fs,
+                band_hz,
+                min_contribution_db,
+            )
+            state.screened.append(
+                (
+                    specs,
+                    residual,
+                    _publishable(specs, residual, freqs, realisation, max_drift_db),
+                )
+            )
+        for state in pending:
+            state.settle(residual_target_db, max_sections)
+
+
+def _tiers(max_sections: int) -> list[tuple[int, ...]]:
+    """Section counts to fit in one submission, and what to defer behind the decision.
+
+    Everything below the top count together, then the top count only if nothing settled.
+
+    Escalating one count at a time was the obvious design and is measurably worse. Two things
+    work against it. The budget is dominated by its top tier — relative cost runs 7, 38, 105,
+    218 across four sections, so 59% of it is the last one and the only decision worth a
+    barrier is whether that one is needed. And a tier is uniform: every task in it has the
+    same section count and so the same duration, which packs into `ceil(n / workers)` rounds
+    with an idle tail, where the mixed durations of a whole budget fill each other's gaps.
+    Measured on the title where nothing settles early, one-at-a-time spent 218 s of fitting
+    against 187 s for the same work submitted together — and holding a single pool across the
+    tiers, tried first on the assumption that the cost was executor churn, changed nothing.
+
+    Grouped this way, a target that settles anywhere below the top still skips the tier that
+    is most of the budget, and a target that does not pays one barrier rather than three.
+    """
+    if max_sections <= 1:
+        return [(1,)]
+    return [tuple(range(1, max_sections)), (max_sections,)]
+
+
+def _by_owner(
+    owners: list[_Escalation], results: list[tuple[list[BiquadSpec], float, float]]
+) -> dict[_Escalation, list[tuple[list[BiquadSpec], float, float]]]:
+    """Results back to the target that asked for them, in submission order."""
+    grouped: dict[_Escalation, list] = {}
+    for owner, result in zip(owners, results, strict=True):
+        grouped.setdefault(owner, []).append(result)
+    return grouped
+
+
+def _publishable(
+    specs: list[BiquadSpec],
+    residual: float,
     freqs: np.ndarray,
     realisation: "Realisation | None",
     max_drift_db: float | None,
-) -> list[tuple[list[BiquadSpec], float]]:
-    """Those that survive the publication rounding, or all of them if none does.
+) -> bool:
+    """Whether this cascade survives the rounding it will be published at.
 
-    Falling back to the whole set rather than to nothing is deliberate: the acceptance model
-    is what declines, and it can say *why*. Returning no candidate here would abstain without
-    a reason attached, which §2.5 asks for the opposite of.
+    Per candidate, so it can be asked as each section count arrives rather than only once the
+    whole budget has been spent. That is what lets the escalation stop early and still reach
+    the answer the full enumeration would.
     """
     if realisation is None or max_drift_db is None:
-        return candidates
-    kept = []
-    for specs, residual in candidates:
-        drift = float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
-        if drift <= max_drift_db:
-            kept.append((specs, residual))
-        else:
-            logger.info(
-                f"{len(specs)} section(s) at {residual:.3f} dB drift {drift:.2f} dB "
-                f"once published, over the {max_drift_db:.1f} dB limit; not selected"
-            )
-    if not kept:
-        logger.warning(
-            "no cascade in the budget survives publication rounding; keeping the most "
-            "accurate so the acceptance model can say so"
-        )
-        return candidates
-    return kept
+        return True
+    drift = float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
+    if drift <= max_drift_db:
+        return True
+    logger.info(
+        f"{len(specs)} section(s) at {residual:.3f} dB drift {drift:.2f} dB "
+        f"once published, over the {max_drift_db:.1f} dB limit; not selected"
+    )
+    return False
 
 
 def _prune(
@@ -606,7 +824,7 @@ def fit_to_biquads(
         f"Fitted {sections} sections to {best[1]:.4f} dB "
         f"({sum(s.type == 'low_shelf' for s in best[0])} shelves)"
     )
-    return best
+    return best[0], best[1]
 
 
 @dataclass(frozen=True, slots=True)

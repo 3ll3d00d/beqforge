@@ -53,10 +53,11 @@ from beqanalyser.design.diagnose import (
 from beqanalyser.design.extraction import ExtractionParams, extract
 from beqanalyser.design.filters import (
     FIT_STATS,
+    FitRequest,
     FitStats,
     Realisation,
     biquad_sos,
-    fit_minimal_biquads,
+    fit_minimal_biquads_all,
     magnitude_db,
 )
 from beqanalyser.design.identify import IdentifyParams, Identification, identify_rolloff
@@ -482,15 +483,22 @@ def counterfactual_target(
     return target
 
 
-def _fit(target: np.ndarray, params: PipelineParams) -> tuple[list[BiquadSpec], float]:
-    return fit_minimal_biquads(
-        target,
+def _fit_all(
+    proposals: list[Proposal], params: PipelineParams
+) -> list[tuple[list[BiquadSpec], float]]:
+    """Fit every proposal that needs fitting, in one escalation.
+
+    One call rather than one per proposal, because the section budget is escalated and a
+    target escalating alone leaves most of the machine idle: its first tier is two tasks for
+    seven workers. Together, a tier is every undecided proposal's tier at once.
+    """
+    return fit_minimal_biquads_all(
+        [FitRequest(p.target_db, (5.0, 40.0), p.label) for p in proposals],
         DESIGN_GRID,
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
         band_hz=(5.0, 200.0),
-        placement_band_hz=(5.0, 40.0),
         max_gain_db=params.max_gain_db,
         realisation=params.realisation,
         seeds=params.fit_seeds,
@@ -623,13 +631,27 @@ def run(
         logger.info(f"  {name}: {len(produced)} proposal(s)")
         proposals.extend(produced)
 
+    # Every proposal that needs a fit goes into one escalation, so a section tier is as wide
+    # as the run rather than as wide as one target. That costs the per-proposal breakdown this
+    # stage used to carry in `Timings`; `fit_minimal_biquads_all` logs each proposal's own
+    # CPU-seconds instead, which is the more useful of the two now that they overlap.
+    needs_fitting = [p for p in proposals if p.filters is None]
+    with timings.stage("fit"):
+        results = _fit_all(needs_fitting, params) if needs_fitting else []
+    fitted = dict(
+        zip(
+            [p.label for p in needs_fitting],
+            results,
+            strict=True,
+        )
+    )
+
     candidates: list[Candidate] = []
     for proposal in proposals:
         if proposal.filters is not None:
             filters, error = proposal.filters, proposal.residual_db
         else:
-            with timings.stage(f"fit/{proposal.label}"):
-                filters, error = _fit(proposal.target_db, params)
+            filters, error = fitted[proposal.label]
         with timings.stage(f"judge/{proposal.label}"):
             candidates.append(
                 _judge(

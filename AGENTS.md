@@ -143,6 +143,21 @@ parked; anything measured in hours is yours and is not coming back. Kill it. Thi
 tidiness: leftover waiters and queued runs from an earlier session will silently corrupt any timing
 measurement taken afterwards, and the numbers look plausible.
 
+**This box suspends, so hold the sleep lock when timing anything.** A run that spans a suspend
+reports hours of wall time for minutes of work — measured here at 34,313 s and 15,790 s for runs
+that did 210 s and ~250 s of work, with correct output both times. Wrap the command:
+
+```bash
+systemd-inhibit --what=sleep:idle --why="beq run" --mode=block uv run python tools/design_beq.py ...
+```
+
+Discarding the outlier afterwards is not good enough. A suspend landing inside the fit also skews
+the per-run CPU figures `FIT_STATS` reports — one contaminated run measured 21.8 s per optimiser
+run against 13.9 s for the same code on the same machine — so a stalled run is unusable for
+timing even though its record is sound. Two cross-checks worth keeping: compare the record's own
+`total_s` against wall clock, and compare `FIT_STATS`' seconds-per-run across titles. If either
+disagrees with its neighbours, the run met a suspend and needs repeating rather than explaining.
+
 ## Gotchas
 
 * **`Points` lives only at API boundaries.** `fit_all_composites_to_peq` / `_to_geq` / `_to_mag` and
