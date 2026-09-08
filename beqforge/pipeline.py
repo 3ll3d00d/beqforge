@@ -155,7 +155,19 @@ class PipelineParams:
     max_sections: int = 4
     residual_target_db: float = 0.5
     max_gain_db: float = 26.0
-    fit_seeds: tuple[int, ...] = (0, 1)
+    fit_seeds: tuple[int, ...] = (0,)
+    """Seeds the fit is repeated from at each section count and split.
+
+    One. `fit_to_biquads` warns that the objective is multimodal and that results "vary by an
+    order of magnitude between seeds" — but that was measured on the *parametric* route's
+    targets, a high-order rolloff terminated by a much lower-order protective filter spanning
+    100 dB. The targets that produce every accepted filter are `flatten`'s, which are gentle
+    curves under 26 dB, and on those a second seed buys little enough to be measurable: see
+    PERFORMANCE.md P13.
+
+    It remains the first thing to put back if a title starts producing a filter that looks
+    wrong, which is why it is a parameter rather than a literal."""
+
     verify_band_hz: tuple[float, float] = (5.0, 45.0)
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored features to drop, still manual (§3.1, §10).
