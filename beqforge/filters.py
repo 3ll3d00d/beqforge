@@ -988,10 +988,16 @@ def _fit_structure(
     coarse = optimize.differential_evolution(
         cost, bounds, seed=seed, maxiter=600, popsize=20, tol=1e-10, polish=True
     )
+    # Bounded, because Nelder-Mead is otherwise free to leave the box differential evolution
+    # searched, and `BiquadSpec` refuses a non-positive frequency or Q. That is not theoretical:
+    # a four-shelf fit of a plain soft-knee target reaches `q must be > 0, got -0.012` and takes
+    # the fit down with it — inside a worker, the run. The bounds are the ones the search was
+    # given, so a point outside them was never a candidate anyway.
     fine = optimize.minimize(
         cost,
         coarse.x,
         method="Nelder-Mead",
+        bounds=bounds,
         options={"maxiter": 60000, "maxfev": 60000, "xatol": 1e-10, "fatol": 1e-12},
     )
     best = fine.x if fine.fun < coarse.fun else coarse.x

@@ -560,3 +560,35 @@ def test_the_tier_groups_defer_only_the_top_section_count() -> None:
     assert F._tiers(1) == [(1,)]
     assert F._tiers(2) == [(1,), (2,)]
     assert F._tiers(4) == [(1, 2, 3), (4,)]
+
+
+def test_the_polish_cannot_leave_the_box_the_search_was_given() -> None:
+    """Nelder-Mead is unbounded by default and `BiquadSpec` refuses what it wanders into.
+
+    Not theoretical: this exact target and split reached `q must be > 0, got -0.012` and raised
+    out of the middle of the fit, which inside a worker process ends the run. A point outside
+    the bounds was never a candidate, so bounding the polish cannot lose a valid answer.
+    """
+    grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    target = np.clip(14.0 * (1 - 1 / (1 + (25.0 / grid) ** 3)), 0, None)
+    target = np.where(grid > 31.0, 0.0, target)
+
+    specs, residual, _, _ = F._fit_structure(
+        target,
+        grid,
+        96000.0,
+        4,
+        0,
+        (5.0, 200.0),
+        (5.0, 40.0),
+        6.0,
+        26.0,
+        F.Realisation(),
+        0,
+    )
+    assert len(specs) == 4
+    for section in specs:
+        assert 5.0 <= section.freq_hz <= 40.0
+        assert 0.1 <= section.q <= 6.0
+        assert abs(section.gain_db) <= 26.0
+    assert math.isfinite(residual)
