@@ -985,8 +985,21 @@ def _fit_structure(
             worst = max(worst, float(np.max(np.abs(drift[mask]))))
         return worst
 
+    # 300 generations, not 600. `tol` never fires — a minimax population's energies do not
+    # collapse, so the run always reaches `maxiter` and `maxiter` is therefore the only lever
+    # on how much of the budget is spent. Measured on a real target, best over every split and
+    # both seeds at three sections:
+    #
+    #   maxiter 600  660,036 evaluations  residual 0.2721
+    #   maxiter 300  337,536 evaluations  residual 0.2879
+    #   maxiter 150  175,227 evaluations  residual 0.5362
+    #   maxiter  80  101,445 evaluations  residual 0.4678
+    #
+    # Half the budget for 0.016 dB, against a `residual_target_db` of 0.5. Below 300 it stops
+    # being a trade: the search is noisy enough there that 80 beats 150, which is a sign the
+    # budget is no longer sufficient rather than a reason to prefer 80.
     coarse = optimize.differential_evolution(
-        cost, bounds, seed=seed, maxiter=600, popsize=20, tol=1e-10, polish=True
+        cost, bounds, seed=seed, maxiter=300, popsize=20, tol=1e-10, polish=True
     )
     # Bounded, because Nelder-Mead is otherwise free to leave the box differential evolution
     # searched, and `BiquadSpec` refuses a non-positive frequency or Q. That is not theoretical:
