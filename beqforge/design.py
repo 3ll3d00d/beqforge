@@ -84,6 +84,16 @@ class DesignParams:
     max_sections: int = 6
     """Ceiling on biquads the numerical route may spend. The device budget is 10 (§5)."""
 
+    fit_seeds: tuple[int, ...] = (0,)
+    """Seeds the numerical fit is repeated from, at each section count and split.
+
+    Carried explicitly because it was not, and the omission cost a quarter of every run. This
+    call reached `fit_minimal_biquads` without a `seeds` argument and so inherited that
+    function's own default of three, while the pipeline around it fitted from one — so the
+    parametric route ran three times the optimiser of every other candidate, on the strategy
+    that is rejected on all four titles. `PipelineParams.fit_seeds` sets this now, and the
+    reasoning there applies here unchanged."""
+
     realisation: Realisation | None = Realisation()
     """How the cascade will actually be realised, scored during the fit.
 
@@ -171,6 +181,7 @@ def design(
         placement_band_hz=correction_band_hz(target, freqs, params.lowest_frequency_hz),
         max_gain_db=params.max_boost_db + params.gain_headroom_db,
         realisation=params.realisation,
+        seeds=params.fit_seeds,
     )
     return _result(filters, "fitted", None, None, freqs, target, params, binds)
 

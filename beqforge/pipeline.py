@@ -421,7 +421,11 @@ def parametric_targets(
     result = design(
         identification,
         envelopes,
-        DesignParams(max_sections=params.max_sections, realisation=params.realisation),
+        DesignParams(
+            max_sections=params.max_sections,
+            realisation=params.realisation,
+            fit_seeds=params.fit_seeds,
+        ),
     )
     if not result.filters:
         logger.info(f"  parametric declined: {result.decline_reason}")

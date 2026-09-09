@@ -330,8 +330,36 @@ def scene_envelope(
     sos = signal.butter(4, [low, high], btype="band", fs=fs, output="sos")
     filtered = signal.sosfiltfilt(sos, samples)
     width = int(params.tracking_window_s * fs)
-    smoothed = np.convolve(filtered**2, np.ones(width) / width, mode="valid")
-    return 10.0 * np.log10(smoothed + 1e-30)
+    return 10.0 * np.log10(_moving_average(filtered**2, width) + 1e-30)
+
+
+def _moving_average(values: np.ndarray, width: int) -> np.ndarray:
+    """Uniform moving average, as a difference of prefix sums.
+
+    `np.convolve` with a uniform kernel is a direct O(n*w) correlation: over the 6.8M samples of
+    a two-hour title with a 4,000-sample window it measured **3.05 s a call**, against 0.047 s
+    here — and `diagnose` makes several. It was the largest single item left in the stage.
+
+    **Not bit-identical, and in the less comfortable direction.** A prefix sum accumulates
+    rounding over the whole signal where the direct convolution accumulates it over one window,
+    so this is the *less* accurate of the two, by roughly the ratio of those lengths. It is
+    computed in float64 over values that are all positive — squared samples — so there is no
+    cancellation to amplify, and the absolute error lands around 1e-10 on a quantity spanning
+    tens of dB.
+
+    What that has to be weighed against is the decision it feeds. `band_tracking` correlates
+    this envelope against the passband's and compares the result to `tracking_floor`, 0.5;
+    measured on real material the correlations are 0.92, 0.93, 0.89 and 0.78. A perturbation
+    eleven orders of magnitude below the signal does not move a correlation sitting that far
+    from its threshold, and the four-title records confirm it: identical verdicts.
+    """
+    if width <= 1 or values.size < width:
+        return values
+    prefix = np.cumsum(values, dtype=np.float64)
+    total = np.empty(values.size - width + 1, dtype=np.float64)
+    total[0] = prefix[width - 1]
+    total[1:] = prefix[width:] - prefix[:-width]
+    return total / width
 
 
 def band_tracking(

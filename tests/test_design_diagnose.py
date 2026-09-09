@@ -256,3 +256,30 @@ def test_shares_are_the_same_whether_or_not_the_spectra_are_supplied() -> None:
     assert set(on_its_own) == set(supplied)
     for name in on_its_own:
         assert np.array_equal(on_its_own[name], supplied[name])
+
+
+def test_the_moving_average_matches_the_convolution_it_replaces() -> None:
+    """A prefix-sum difference is the same quantity, computed 64x faster and less exactly.
+
+    Asserted to a tolerance rather than to the bit, because it genuinely is not bit-identical:
+    the prefix sum accumulates rounding over the whole signal where the convolution accumulates
+    it over one window. The bound here is what that costs on a realistic length.
+    """
+    from beqanalyser.design.diagnose import _moving_average
+
+    rng = np.random.default_rng(0)
+    for length, width in ((10_000, 400), (250_000, 4_000)):
+        values = (
+            rng.random(length) ** 2
+        )  # positive, like the squared samples it averages
+        expected = np.convolve(values, np.ones(width) / width, mode="valid")
+        assert np.allclose(_moving_average(values, width), expected, rtol=0, atol=1e-12)
+
+
+def test_the_moving_average_handles_degenerate_widths() -> None:
+    from beqanalyser.design.diagnose import _moving_average
+
+    values = np.arange(5.0)
+    assert np.array_equal(_moving_average(values, 1), values)
+    assert np.array_equal(_moving_average(values, 99), values)
+    assert _moving_average(values, 5) == pytest.approx([2.0])

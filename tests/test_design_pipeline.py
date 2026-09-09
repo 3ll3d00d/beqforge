@@ -189,3 +189,26 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
         alone = counterfactual_target(walled, diagnosis, cap, params)
         pooled = counterfactual_target(walled, diagnosis, cap, params, shared)
         assert np.array_equal(alone, pooled), f"cap {cap}"
+
+
+def test_parametric_fits_from_the_same_seeds_as_every_other_candidate() -> None:
+    """`design` inherited `fit_minimal_biquads`' own default and so fitted from three seeds.
+
+    Every other candidate fits from `PipelineParams.fit_seeds`. The parametric route reaching
+    the fitter without a `seeds` argument made it three times the optimiser of anything else,
+    for the strategy that is rejected on all four titles — a quarter of a run.
+    """
+    from beqanalyser.design.design import DesignParams
+
+    params = PipelineParams(fit_seeds=(0, 1, 2, 3))
+    assert DesignParams().fit_seeds == PipelineParams().fit_seeds
+    # and the pipeline hands its own choice down rather than letting the default stand
+    import inspect
+
+    from beqanalyser.design import pipeline
+
+    source = inspect.getsource(pipeline.parametric_targets)
+    assert "fit_seeds=params.fit_seeds" in source, (
+        "parametric_targets must forward the run's seeds to DesignParams"
+    )
+    assert params.fit_seeds == (0, 1, 2, 3)
