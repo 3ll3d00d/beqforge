@@ -36,10 +36,18 @@ from scipy import optimize
 
 from beqanalyser.design import BiquadSpec
 from beqanalyser.design.filters import biquad_sos, magnitude_db
-from p14_jacobian import magnitude_jacobian
+from p14_jacobian import coefficient_sensitivity, magnitude_jacobian
 
 LAWSON_ROUNDS = 8
 LS_MAX_NFEV = 1200
+
+SENSITIVITY_TO_P90 = 3.0
+"""Divides the worst-case sensitivity bound to put it on the scale `accept` judges.
+
+The bound assumes every coefficient rounds adversely at once; a real rounding is one draw. Over
+51 cascades the ratio of bound to measured p90 drift runs 1.5 to 6.3 with a median of 3.0, so
+dividing by that makes `bound / 3 <= max_drift_db` approximate the check the acceptance model
+performs. A calibration, not an identity — it is the median of a spread."""
 
 
 def _unpack(params, shelves, peaks):
@@ -128,16 +136,16 @@ def surrogate_structure(
         response = magnitude_db(sos, freqs, fs)
         worst = float(np.max(np.abs((response - target_db)[mask])))
         if realisation is not None:
-            if realisation.fs == fs:
-                device, undrifted = sos, response
-            else:
-                device = biquad_sos(specs, realisation.fs)
-                undrifted = magnitude_db(device, freqs, realisation.fs)
-            drift = (
-                magnitude_db(realisation.quantise(device), freqs, realisation.fs)
-                - undrifted
-            )
-            worst = max(worst, float(np.max(np.abs(drift[mask]))))
+            # The smooth sensitivity bound rather than a rounding of the exact coefficients.
+            # The rounding contains `np.round`, so it is piecewise constant and the smooth
+            # phase cannot see it at all — which is how the first version of this fitter came
+            # to build cascades whose drift then doubled. The bound is `(step/2) * sum of the
+            # per-coefficient sensitivities`, which is differentiable and, measured over 51
+            # cascades, tracks the p90 that `accept` actually gates on far better than the
+            # point rounding does: rank correlation 0.835 against 0.340.
+            step = 2.0 ** (realisation.integer_bits - realisation.coefficient_bits)
+            bound = coefficient_sensitivity(specs, freqs, realisation.fs, step)
+            worst = max(worst, float(np.max(bound[mask])) / SENSITIVITY_TO_P90)
         return worst
 
     rng = np.random.default_rng(seed)

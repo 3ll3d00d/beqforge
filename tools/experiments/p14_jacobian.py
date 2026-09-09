@@ -220,3 +220,65 @@ def magnitude_jacobian(specs, freqs: np.ndarray, fs: float) -> np.ndarray:
                 numerator / n_sq - denominator / d_sq
             )
     return jacobian
+
+
+def coefficient_sensitivity(
+    specs, freqs: np.ndarray, fs: float, step: float
+) -> np.ndarray:
+    """Worst-case dB change per frequency if every coefficient rounds the wrong way.
+
+    The smooth stand-in for `Realisation`'s drift term. That term rounds the coefficients and
+    measures what happened, so it contains `np.round`, is piecewise constant, and has no
+    derivative anywhere — which is why a smooth optimiser cannot see fragility while it fits and
+    only discovers it when the drift screen rejects the result.
+
+    A first-order bound has no such problem. Rounding moves each coefficient by at most
+    `step / 2`, so the response moves by at most `(step / 2) * sum_k |d(dB)/d(c_k)|`, and those
+    per-coefficient derivatives are exactly the intermediates `magnitude_jacobian` already forms
+    on its way to the parameter derivatives. It is an upper bound rather than a sample: it
+    assumes every coefficient rounds adversely at once, where a real rounding is one draw.
+
+    `a0` is excluded because `Realisation.quantise` forces it back to 1 rather than rounding it.
+    """
+    freqs = np.asarray(freqs, dtype=np.float64)
+    w = 2.0 * math.pi * freqs / fs
+    cos1, sin1 = np.cos(w), np.sin(w)
+    cos2, sin2 = np.cos(2.0 * w), np.sin(2.0 * w)
+    total = np.zeros(freqs.size, dtype=np.float64)
+
+    for spec in specs:
+        b, a, _, _, _, _, _ = _coefficients(
+            spec.type, spec.freq_hz, spec.q, spec.gain_db, fs
+        )
+        # the published cascade is normalised, and that is what gets rounded
+        b, a = b / a[0], a / a[0]
+        nr = b[0] + b[1] * cos1 + b[2] * cos2
+        ni = -(b[1] * sin1 + b[2] * sin2)
+        dr = a[0] + a[1] * cos1 + a[2] * cos2
+        di = -(a[1] * sin1 + a[2] * sin2)
+        scale = 10.0 / LN10
+        by_b = (
+            scale
+            * 2.0
+            * np.stack(
+                [
+                    nr,
+                    nr * cos1 - ni * sin1,
+                    nr * cos2 - ni * sin2,
+                ]
+            )
+            / (nr * nr + ni * ni)
+        )
+        by_a = (
+            scale
+            * 2.0
+            * np.stack(
+                [
+                    dr * cos1 - di * sin1,
+                    dr * cos2 - di * sin2,
+                ]
+            )
+            / (dr * dr + di * di)
+        )
+        total += np.sum(np.abs(by_b), axis=0) + np.sum(np.abs(by_a), axis=0)
+    return total * (step / 2.0)
