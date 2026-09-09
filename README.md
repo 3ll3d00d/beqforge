@@ -17,8 +17,10 @@ uv run python tools/design_beq.py data/FILM.npz         # a filter, and why
 
 It derives a target three ways, fits each, and judges them against an acceptance model — printing the
 evidence beside the answer, and abstaining when nothing measures up. See
-[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got (three real
-titles) and what is still unevidenced.
+[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got (four real
+titles) and what is still unevidenced. [PERFORMANCE.md](PERFORMANCE.md) covers where its runtime goes
+and what has been done about it — a run is ~42-70 s a title, down 7.18x, with every accepted filter
+unchanged.
 
 ---
 
@@ -330,7 +332,7 @@ One instance per discovery pass; the list length sets the number of passes.
 * **`BEQComposite.rejected_mappings_for_reason(reason, best_only=False)`** filters on
   `m.is_best == best_only`, so the default returns *non*-best mappings. It has no callers.
 * **`plot_distance_by_composite` is a stub** (`pass`), and there is no rejected-curve plotting.
-* **The clustering pipeline has no tests.** `tests/` covers `beqanalyser/design/` only (101 tests,
+* **The clustering pipeline has no tests.** `tests/` covers `beqanalyser/design/` only (194 tests,
   `uv run pytest`); nothing exercises the clustering path, so there is no fast feedback loop there.
 
 ---

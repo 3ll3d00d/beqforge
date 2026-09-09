@@ -27,7 +27,7 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
 | `beqanalyser/design/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link; see §10.** |
 | `beqanalyser/design/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
-| `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. |
+| `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is ~75% of a run; `_sos_from_parameters` is a third copy of the RBJ formulae, kept honest by a test. |
 | `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
 | `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
 | `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
@@ -41,6 +41,7 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
+| `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, and the two record comparison tools. See PERFORMANCE.md §4-5. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
 
 [AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md) is a plan for a separate, not-yet-built capability —
@@ -210,15 +211,20 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   real titles. See AUTOMATED_DESIGN.md §3.4a and §11.
 * **Start with `uv run python tools/design_beq.py data/NAME.npz`.** It runs the whole process and
   prints the evidence beside the answer; exit status is 0 when a candidate was accepted, 1 when the
-  correct output was to abstain. Add `--exclude LOW HIGH` for an authored feature. Fits are slow —
-  a few minutes per title — so run it in the background.
+  correct output was to abstain. Add `--exclude LOW HIGH` for an authored feature. The stage cache
+  is on by default and skips `diagnose`/`extract`/`identify` and the parametric fit when the
+  material, their parameters and their modules are all unchanged; `--fresh` recomputes and
+  overwrites them, `--no-cache` neither reads nor writes, `--cache PATH` moves the file.
 * Acceptance rules must be **comparative wherever possible** — corrected curve against input curve.
   Every absolute threshold tried so far has been wrong on some title: a fixed 6 dB flatness limit sat on
   the floor of what any smooth cascade can achieve, and a fixed ±3 dB envelope rejected a correct filter
   on one 0.24 Hz bin. Aggregates over the whole band are the recurring failure — a step, a turnover and
   a cliff are all invisible to a mean. Measure over the segment that matters.
 * The fit pool leaves a core free (`FIT_WORKERS`); `PARALLEL_FITS = False` forces serial for profiling.
-  Fitting is ~90% of a run.
+  Fitting is ~75% of a run. [PERFORMANCE.md](PERFORMANCE.md) is where the time goes and what has
+  already been tried — including several things that look obviously worth doing and are not
+  (replacing the optimiser, greedy placement, a coarser fit grid, sharing one pool across tiers).
+  Read it before optimising here; it exists so the measurements are not repeated.
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by writing
   another one-off script. The point of the driver is that two titles become comparable; twenty
   scratchpad scripts are how the first two were done and none of them survived.
@@ -244,7 +250,7 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   was right. Four separate outputs measured well and were wrong on sight — a +15 dB peak at 378 Hz, a
   no-op section at 105 Hz, a +45 dB gain, a shelf placed at 3.22 Hz. Run `verify` and look at the
   corrected curve.
-* Fits are slow (tens of seconds to minutes). Run them in the background; the test suite is ~2 minutes.
+* A run is ~42-70 s a title and the test suite ~3 minutes. Both were several times that before the work in PERFORMANCE.md; run them in the background regardless.
   [PERFORMANCE.md](PERFORMANCE.md) is the profile and the plan — where the time goes, which changes
   cannot alter an output and which trade accuracy for it. Read it before optimising anything here;
   it records what was already measured and ruled out (`tol` is not a lever, `verify` is 0.3 s).
