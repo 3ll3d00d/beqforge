@@ -592,3 +592,29 @@ def test_the_polish_cannot_leave_the_box_the_search_was_given() -> None:
         assert 0.1 <= section.q <= 6.0
         assert abs(section.gain_db) <= 26.0
     assert math.isfinite(residual)
+
+
+def test_the_fitting_loop_builds_the_same_coefficients_as_the_public_route() -> None:
+    """`_sos_from_parameters` is a third copy of the RBJ formulae, so pin it to the others.
+
+    AGENTS.md warns that they exist twice and must be fixed together; this makes three. The
+    justification is that the public route builds a BiquadSpec, looks a class up in a dict,
+    constructs an RBJ object and collects lists before making an array, which is a fifth of the
+    cost function when it runs ten million times a run — and the justification only holds while
+    the two agree exactly.
+    """
+    rng = np.random.default_rng(0)
+    for _ in range(300):
+        sections = int(rng.integers(1, 5))
+        shelves = int(rng.integers(0, sections + 1))
+        peaks = sections - shelves
+        params = np.empty(3 * sections)
+        for i in range(sections):
+            params[3 * i : 3 * i + 3] = (
+                rng.uniform(3.0, 400.0),
+                rng.uniform(0.1, 6.0),
+                rng.uniform(-30.0, 30.0),
+            )
+        public = F.biquad_sos(F._unpack(params, shelves, peaks), 96000.0)
+        direct = F._sos_from_parameters(params, shelves, peaks, 96000.0)
+        assert np.array_equal(public, direct), "the two RBJ paths have diverged"
