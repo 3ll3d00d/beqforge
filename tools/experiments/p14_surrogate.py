@@ -1,11 +1,13 @@
 """P14 prototype: multi-start smooth-surrogate fitting in place of differential evolution.
 
-**Rejected on measurement. Kept so the next person does not rebuild it to find out.**
-4.6x faster over the thirteen real targets, and worse on ten of them, six of which cross
-`residual_target_db` and so change the published cascade. PERFORMANCE.md section 4 has the
-table and what would have to change to make it worth another attempt (an analytic Jacobian —
-two-point differencing spends `dim + 1` evaluations an iteration, which is where both the
-budget and the residual gap go).
+**Second attempt, with the analytic Jacobian P19 provides.**
+
+The first was rejected on measurement: 4.6x faster and worse on ten of thirteen targets, six of
+them crossing `residual_target_db` and so changing the published cascade. The diagnosis was that
+two-point differencing spends `dim + 1` evaluations an iteration, so the budget went on
+derivatives rather than on convergence — the solver was not short of starts, it was short of the
+budget to finish them. `p14_jacobian.magnitude_jacobian` removes that factor, measured at 2.5-4x,
+and the freed budget goes into Lawson rounds and iterations instead.
 
 
 Drop-in for `_fit_structure`, so the tier escalation, pruning and drift screening around it are
@@ -34,9 +36,10 @@ from scipy import optimize
 
 from beqanalyser.design import BiquadSpec
 from beqanalyser.design.filters import biquad_sos, magnitude_db
+from p14_jacobian import magnitude_jacobian
 
-LAWSON_ROUNDS = 4
-LS_MAX_NFEV = 400
+LAWSON_ROUNDS = 8
+LS_MAX_NFEV = 1200
 
 
 def _unpack(params, shelves, peaks):
@@ -154,8 +157,20 @@ def surrogate_structure(
             def weighted(p, root=root):
                 return root * error(p)
 
+            def weighted_jac(p, root=root):
+                # the residual is masked, so the Jacobian is too; the weights are constant
+                # within a Lawson round and so pass straight through the derivative
+                return (
+                    root[:, None]
+                    * magnitude_jacobian(_unpack(p, shelves, peaks), freqs, fs)[mask]
+                )
+
             found = optimize.least_squares(
-                weighted, x, bounds=(lower, upper), max_nfev=LS_MAX_NFEV
+                weighted,
+                x,
+                jac=weighted_jac,
+                bounds=(lower, upper),
+                max_nfev=LS_MAX_NFEV,
             )
             x = found.x
             if round_index < LAWSON_ROUNDS - 1:
