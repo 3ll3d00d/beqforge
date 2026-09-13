@@ -8,19 +8,59 @@ then fits realisable IIR filters to those composites.
 
 **A second, separate capability lives in `beqanalyser/design/`**: deriving a BEQ filter from a film's
 audio rather than summarising existing ones. It shares nothing with the clustering pipeline below except
-the biquad classes. One command takes an extracted track and produces a filter with its reasoning:
+the biquad classes. It derives a target three ways, fits each, and judges them against an acceptance
+model — printing the evidence beside the answer, and abstaining when nothing measures up. See
+[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got and what is
+still unevidenced. [PERFORMANCE.md](PERFORMANCE.md) covers where its runtime goes and what has been done
+about it — a run is ~40-80 s a title, down 7.18x, with every accepted filter unchanged.
 
-```bash
-uv run python tools/extract.py FILM.mkv --out data/     # ffmpeg -> 1 kHz per-channel .npz
-uv run python tools/design_beq.py data/FILM.npz         # a filter, and why
-```
+### Running the design pipeline manually
 
-It derives a target three ways, fits each, and judges them against an acceptance model — printing the
-evidence beside the answer, and abstaining when nothing measures up. See
-[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got (four real
-titles) and what is still unevidenced. [PERFORMANCE.md](PERFORMANCE.md) covers where its runtime goes
-and what has been done about it — a run is ~42-70 s a title, down 7.18x, with every accepted filter
-unchanged.
+Five scripts under `tools/`, each runnable on its own — a full pass is the first three in order;
+the last two redraw pictures from what `design_beq.py` already wrote, so they cost no rerun.
+Every one takes `--help` for its full flag list; this covers what you'd reach for day to day.
+
+| step | command | produces |
+| --- | --- | --- |
+| 1. extract | `uv run python tools/extract.py FILM.mkv --out data/` | `data/FILM.npz` — a 1 kHz mono mix plus per-channel decomposition, from one ffmpeg pass |
+| 2. sanity-check *(optional)* | `uv run python tools/summarise.py data/FILM.npz` | structural facts and an average spectrum — enough to tell a good extraction from a broken one before spending a run on it |
+| 3. design | `uv run python tools/design_beq.py data/FILM.npz` | a filter and its reasoning, printed; `data/FILM.run.json.gz` written alongside the material unless `--no-record` |
+| 4. redraw charts *(optional, no rerun)* | `uv run python tools/replay.py data/FILM.run.json.gz --charts charts/` | peak/average PNGs per candidate, drawn from the record — no extraction, no rerun |
+| 5. build the ledger *(optional, no rerun)* | `uv run python tools/render_ledger.py` | one HTML report across every `data/*.run.json.gz`; open `out/ledger/index.html` directly in a browser |
+
+**`tools/extract.py FILM.mkv --out data/`** — `--stream N` picks a non-default audio stream
+(default 0); `--name` overrides the output basename (default: the source filename's stem);
+`--excerpt` records the material as less than the complete programme (folded into the stage
+cache's key so an excerpt and the full programme never share a cached analysis, but nothing in
+`design_beq.py` branches on it yet — that's `designer-interface.md`'s contract, not yet built
+here); `--mono-only` drops the per-channel arrays and roughly halves the file, which is fine for
+the `flatten` strategy alone but starves `counterfactual` and the per-channel diagnosis of the
+channels they need.
+
+**`tools/design_beq.py data/FILM.npz`** — the entry point. Exit status is 0 when a candidate was
+accepted, 1 when abstaining was the correct output — neither is an error. Key flags:
+
+| flag | effect |
+| --- | --- |
+| `--strategy NAME` (repeatable) | run only the named strategies (`flatten`, `counterfactual`, `parametric`); default `all` |
+| `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual (AUTOMATED_DESIGN.md §3.1) |
+| `--charts DIR` | write peak/average charts per candidate into `DIR/<name>/` |
+| `--record PATH` / `--no-record` | where to write the run record (default: `<material>.run.json.gz` alongside it), or skip writing one |
+| `--cache PATH` / `--fresh` / `--no-cache` | the stage cache: where to keep it (default: `<material>.cache.json.gz`), force a recompute and overwrite it, or use neither |
+| `--quiet` | report only, no progress log |
+
+**`tools/replay.py data/FILM.run.json.gz`** — redraws from the record alone, without touching
+the extraction. `--charts DIR` for the pictures, `--beq PATH` to export a beqdesigner project.
+Refuses on a record the current code no longer matches — different parameters, or the working
+tree has moved on — and says why; `--force` draws it anyway.
+
+**`tools/render_ledger.py [RECORDS...]`** — every `data/*.run.json.gz` by default, or specific
+ones named on the command line. `--charts-dir DIR` (default `out/ledger`) is where charts are
+redrawn and, unless `--out` says otherwise, where the page (`index.html`) is written alongside
+them; `--files-manifest PATH` (default `<charts-dir>/files.json`) writes `{published filename:
+path under --charts-dir}`, needed only when publishing the page somewhere other than opening it
+straight off disk. A stale record is skipped with a warning rather than failing the whole page;
+`--force` draws it anyway.
 
 ---
 

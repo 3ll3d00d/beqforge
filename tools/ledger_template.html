@@ -1,0 +1,404 @@
+<title>Correction Ledger</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #eef1f3;
+    --surface: #ffffff;
+    --surface-2: #e5e9ec;
+    --border: #d3d9de;
+    --ink: #1b222a;
+    --ink-muted: #5c6770;
+    --accent: #a85f19;
+    --accent-soft: #f3e2cd;
+    --accent-ink: #ffffff;
+    --good: #1c7a63;
+    --good-soft: #d9ede7;
+    --warn: #a23f2e;
+    --warn-soft: #f3ddd6;
+    --shadow: 0 1px 2px rgba(20, 24, 28, 0.06), 0 6px 20px -8px rgba(20, 24, 28, 0.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a;
+      --surface: #1a1f26;
+      --surface-2: #20262e;
+      --border: #2c333c;
+      --ink: #e7ebee;
+      --ink-muted: #93a0aa;
+      --accent: #e2a35c;
+      --accent-soft: #3a2c17;
+      --accent-ink: #221604;
+      --good: #5cc9ae;
+      --good-soft: #163329;
+      --warn: #e2876f;
+      --warn-soft: #38201a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -10px rgba(0, 0, 0, 0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a;
+    --surface: #1a1f26;
+    --surface-2: #20262e;
+    --border: #2c333c;
+    --ink: #e7ebee;
+    --ink-muted: #93a0aa;
+    --accent: #e2a35c;
+    --accent-soft: #3a2c17;
+    --accent-ink: #221604;
+    --good: #5cc9ae;
+    --good-soft: #163329;
+    --warn: #e2876f;
+    --warn-soft: #38201a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -10px rgba(0, 0, 0, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    padding-inline: max(16px, calc((100vw - 1040px) / 2));
+    padding-block: 40px 80px;
+    line-height: 1.55;
+  }
+  h1, h2, h3 {
+    font-family: 'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--ink);
+  }
+  a { color: var(--accent); }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* ---- header ---- */
+  header { max-width: 720px; margin-bottom: 28px; }
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 10px;
+  }
+  h1 { font-size: clamp(2rem, 4vw, 2.65rem); letter-spacing: -0.01em; }
+  .dek { margin-top: 12px; color: var(--ink-muted); font-size: 1.02rem; max-width: 62ch; }
+  .dek code { font-family: 'IBM Plex Mono', monospace; font-size: 0.92em; }
+
+  .runbar {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .runbar b { color: var(--ink); font-weight: 600; }
+
+  /* ---- how-to-read box ---- */
+  .primer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 32px;
+    box-shadow: var(--shadow);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 18px 28px;
+  }
+  .primer h3 { font-size: 0.95rem; margin-bottom: 6px; }
+  .primer p { margin: 0; color: var(--ink-muted); font-size: 0.88rem; }
+  .primer .formula {
+    display: block;
+    margin-top: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--ink);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+
+  /* ---- summary grid ---- */
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 36px 0 12px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    text-decoration: none;
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .card-title { font-weight: 600; font-size: 0.98rem; }
+  .card-label { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--ink-muted); }
+  .bar-row { display: grid; grid-template-columns: 62px 1fr 40px; align-items: center; gap: 8px; }
+  .bar-row .lbl { font-size: 0.7rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .bar-track { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+  .bar-row .val { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; text-align: right; }
+  .status-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* ---- detail sections ---- */
+  .title-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px clamp(16px, 3vw, 28px);
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    scroll-margin-top: 16px;
+  }
+  .title-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px; margin-bottom: 4px; }
+  .title-head h2 { font-size: 1.4rem; }
+  .pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .material-path { color: var(--ink-muted); font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; }
+
+  .metric-row { display: flex; flex-wrap: wrap; gap: 22px; margin: 16px 0 18px; }
+  .metric { min-width: 140px; }
+  .metric .lbl { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); margin-bottom: 3px; }
+  .metric .big { font-family: 'IBM Plex Mono', monospace; font-size: 1.3rem; font-weight: 600; }
+  .metric .sub { font-size: 0.76rem; color: var(--ink-muted); }
+
+  .charts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 18px; }
+  .charts figure { margin: 0; }
+  .charts img { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+  .charts figcaption { font-size: 0.76rem; color: var(--ink-muted); margin-top: 6px; text-align: center; }
+  @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
+
+  .cascade { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 0.82rem; margin-bottom: 16px; }
+  .cascade caption {
+    text-align: left;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-muted);
+    margin-bottom: 6px;
+  }
+  .cascade th, .cascade td { padding: 5px 10px; border-bottom: 1px solid var(--border); text-align: right; }
+  .cascade th:first-child, .cascade td:first-child { text-align: left; }
+  .cascade th {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    letter-spacing: 0.03em;
+  }
+
+  .notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .notes li { font-size: 0.85rem; padding: 7px 10px 7px 12px; border-left: 3px solid var(--border); background: var(--surface-2); border-radius: 0 6px 6px 0; }
+  .notes li.shaping { border-left-color: var(--warn); }
+  .notes li.construction { border-left-color: var(--accent); }
+  .notes li.failure { border-left-color: var(--warn); background: var(--warn-soft); }
+
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--ink-muted); font-size: 0.82rem; }
+  footer a { color: var(--ink-muted); text-decoration-color: var(--border); }
+</style>
+
+<header>
+  <div class="eyebrow">beqanalyser · design/ · AUTOMATED_DESIGN.md §14</div>
+  <h1>Correction Ledger</h1>
+  <p class="dek">
+    Every title's featured candidate, redrawn from its <code>.run.json.gz</code> record via
+    <code>tools/render_ledger.py</code> — no rerun. Recovered fraction and confidence are
+    explained below the fold before the numbers, not after.
+  </p>
+  <div class="runbar" id="runbar"><!-- filled by script --></div>
+</header>
+
+<div class="primer">
+  <div>
+    <h3>Recovered fraction</h3>
+    <p>How much of the mix's own measured shortfall the evidence licensed the fitter to
+      attempt — not how well the cascade hit its target (it hits it within ~1 dB regardless).
+      A ratio of the priced target to the raw deficit, summed over the band where there's a
+      real deficit to speak of.</p>
+    <span class="formula">Σ priced target ÷ Σ max(&minus;before_db, 0)</span>
+  </div>
+  <div>
+    <h3>Confidence</h3>
+    <p>P(a real rolloff was applied here), fit quality excluded — an <b>ordinal</b>, not a
+      calibrated probability. There's no labelled corpus to calibrate against, so it's only
+      meaningful for ranking candidates within one run, not as a percentage chance.</p>
+    <span class="formula">recovered × (1 &minus; shaping)</span>
+  </div>
+  <div>
+    <h3>Shaping fraction</h3>
+    <p>Share of the cascade's peak gain sitting below <code>filter_floor_hz</code> — the point
+      below which the attenuation being inverted was never confirmed to behave like a fixed
+      filter. Below it, correcting is a guess dressed as identification.</p>
+  </div>
+</div>
+
+<div class="section-label">All titles, ranked by confidence</div>
+<div class="grid" id="summary-grid"></div>
+
+<div class="section-label" style="margin-top:44px">Per-title detail</div>
+<div id="detail-sections"></div>
+
+<footer id="footer-note">
+  Generated by <code>tools/render_ledger.py</code> from <code>data/*.run.json.gz</code>. Charts
+  are the peak/average programme-level views <code>beqanalyser/design/charts.py</code> draws for
+  every candidate; the pair shown here is the featured one for each title.
+</footer>
+
+<script type="application/json" id="ledger-data">__LEDGER_DATA__</script>
+<script>
+(function () {
+  const TITLES = JSON.parse(document.getElementById("ledger-data").textContent);
+
+  function pct(x) { return (x * 100).toFixed(0) + "%"; }
+  function confColor(c) {
+    if (c === null) return "var(--ink-muted)";
+    if (c >= 0.5) return "var(--good)";
+    if (c >= 0.2) return "var(--accent)";
+    return "var(--warn)";
+  }
+  function fmtFrac(x) { return x === null ? "n/a" : pct(x); }
+  function fmtNum(x, d) { return x === null ? "n/a" : x.toFixed(d); }
+
+  const grid = document.getElementById("summary-grid");
+  const detail = document.getElementById("detail-sections");
+  const ranked = [...TITLES].sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+
+  for (const t of ranked) {
+    const card = document.createElement("a");
+    card.className = "card";
+    card.href = "#" + t.key;
+    const statusColor = t.status === "accepted" ? "var(--good)" : "var(--warn)";
+    const statusBg = t.status === "accepted" ? "var(--good-soft)" : "var(--warn-soft)";
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-title">${t.name}</span>
+        <span class="status-pill" style="color:${statusColor};background:${statusBg}">${t.status}</span>
+      </div>
+      <div class="card-label">${t.label} · ${t.sections} section${t.sections === 1 ? "" : "s"}</div>
+      <div class="bar-row">
+        <span class="lbl">recover</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${(t.recovered ?? 0) * 100}%"></span></span>
+        <span class="val tnum">${fmtFrac(t.recovered)}</span>
+      </div>
+      <div class="bar-row">
+        <span class="lbl">confid.</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${(t.confidence ?? 0) * 100}%;background:${confColor(t.confidence)}"></span></span>
+        <span class="val tnum">${fmtNum(t.confidence, 2)}</span>
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+
+  for (const t of TITLES) {
+    const section = document.createElement("section");
+    section.className = "title-section";
+    section.id = t.key;
+
+    const rows = t.filters.map(f => `
+      <tr>
+        <td>${f.type}</td>
+        <td class="tnum">${f.freq_hz.toFixed(2)} Hz</td>
+        <td class="tnum">${f.gain_db >= 0 ? "+" : ""}${f.gain_db.toFixed(2)} dB</td>
+        <td class="tnum">${f.q.toFixed(3)}</td>
+      </tr>`).join("");
+
+    const noteItems = t.notes.map(n => `<li class="${n.kind}">${n.text}</li>`).join("");
+    const failureItems = t.failures.map(f => `<li class="failure">${f}</li>`).join("");
+
+    const statusColor = t.status === "accepted" ? "var(--good)" : "var(--warn)";
+    section.innerHTML = `
+      <div class="title-head">
+        <h2>${t.name}</h2>
+        <span class="pill">${t.label}</span>
+        <span class="material-path">${t.material_path} · ${(t.duration_s / 60).toFixed(0)} min · ${t.candidate_count} candidate(s) tried</span>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric">
+          <div class="lbl">status</div>
+          <div class="big" style="color:${statusColor}">${t.status}</div>
+        </div>
+        <div class="metric">
+          <div class="lbl">recovered fraction</div>
+          <div class="big tnum">${fmtFrac(t.recovered)}</div>
+          <div class="sub">over ${t.band[0].toFixed(1)}&ndash;${t.band[1].toFixed(1)} Hz</div>
+        </div>
+        <div class="metric">
+          <div class="lbl">confidence</div>
+          <div class="big tnum" style="color:${confColor(t.confidence)}">${fmtNum(t.confidence, 2)}</div>
+          <div class="sub">shaping ${fmtFrac(t.shaping)}</div>
+        </div>
+        <div class="metric">
+          <div class="lbl">peak boost / headroom</div>
+          <div class="big tnum">+${t.mv_adjust_db.toFixed(1)} dB</div>
+          <div class="sub">${t.offset_db >= 0 ? "no gain reduction needed" : (-t.offset_db).toFixed(1) + " dB reduction needed"}</div>
+        </div>
+      </div>
+
+      <div class="charts" style="${t.has_channels ? "" : "grid-template-columns:1fr"}">
+        <figure>
+          <img src="${t.key}_mono.png" alt="${t.name} — summed mono mix, peak and average, before/after ${t.label}" loading="lazy">
+          <figcaption>summed mono mix — peak &amp; average</figcaption>
+        </figure>
+        ${t.has_channels ? `
+        <figure>
+          <img src="${t.key}_channels.png" alt="${t.name} — contributing channels, peak and average, before/after ${t.label}" loading="lazy">
+          <figcaption>contributing channels — peak &amp; average</figcaption>
+        </figure>` : ""}
+      </div>
+
+      <table class="cascade">
+        <caption>published cascade — ${t.label}</caption>
+        <thead><tr><th>type</th><th>freq</th><th>gain</th><th>Q</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      ${failureItems ? `<ul class="notes">${failureItems}</ul>` : ""}
+      ${noteItems ? `<ul class="notes">${noteItems}</ul>` : ""}
+    `;
+    detail.appendChild(section);
+  }
+
+  const accepted = TITLES.filter(t => t.status === "accepted").length;
+  document.getElementById("runbar").innerHTML = `
+    <span><b>${accepted}/${TITLES.length}</b> titles accept</span>
+    <span>regenerated ${new Date().toISOString().slice(0, 10)} from ${TITLES.length} record(s)</span>
+  `;
+})();
+</script>
