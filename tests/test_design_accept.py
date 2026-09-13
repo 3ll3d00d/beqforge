@@ -209,24 +209,29 @@ def test_a_turnover_is_rejected_though_the_overall_tilt_looks_fine() -> None:
     The third title's design measured -0.72 dB/octave over 5-45 Hz, which reads as mildly
     rising, while falling at +4.11 below its peak at 18 Hz. A single fit across the band
     averages the rise above the peak against the fall below it and sees neither.
+
+    The clause is comparative, so the same corrected curve is asked twice: against material
+    that is flat below the peak, where the fall is the filter's doing and is rejected, and
+    against material already falling faster than that over the same segment, where it is not.
+    The second case is what the fixture used to assert the opposite of — its material rises
+    14 dB across the band, which *is* a fall of 4.41 dB/octave toward the bottom, and the
+    candidate leaving 4.19 there was being rejected for very slightly improving on it.
     """
     from beqanalyser.design.accept import turnover_db_per_octave
 
-    # peaks near 18 Hz, falls away below it, rises toward the reference above
+    # peaks near 18 Hz, falls away below it, and falls again above it steeply enough that a
+    # single fit across the whole band nets out to almost nothing
     def after(f):
-        # a V in log-frequency: falls away below 18 Hz, and rises above it steeply enough
-        # that a single fit across the whole band nets out to almost nothing
         return (
             6.0 - 4.2 * abs(np.log2(f / 18.0))
             if f < 18.0
             else 6.0 - 3.4 * np.log2(f / 18.0)
         )
 
-    turning = correction(
-        lambda f: -20.0 + 14.0 * np.log2(f / 5.0) / np.log2(9.0), after
-    )
-    slope, peak = turnover_db_per_octave(turning, AcceptParams())
+    turning = correction(lambda f: -13.0, after)
+    slope, material, peak = turnover_db_per_octave(turning, AcceptParams())
     assert slope > 2.0
+    assert abs(material) < 0.5, "flat material gives the absolute limit back"
     assert 14.0 < peak < 24.0
     assert abs(turning.tilt_db_per_octave) < 2.0  # the overall fit does not see it
 
@@ -238,12 +243,26 @@ def test_a_turnover_is_rejected_though_the_overall_tilt_looks_fine() -> None:
     assert not verdict.passed
     assert any("too much too soon" in f for f in verdict.failures)
 
+    # the same correction, over material that already falls faster than it does
+    steep = correction(lambda f: -20.0 + 14.0 * np.log2(f / 5.0) / np.log2(9.0), after)
+    steep_slope, steep_material, _ = turnover_db_per_octave(steep, AcceptParams())
+    assert steep_slope == pytest.approx(slope), "the corrected curve is unchanged"
+    assert steep_material > steep_slope, "the material falls faster over that segment"
+    assert not any(
+        "too much too soon" in f
+        for f in assess(
+            [BiquadSpec("low_shelf", 20.0, 19.0, 0.86)],
+            steep,
+            noise_floor_hz=float("nan"),
+        ).failures
+    )
+
 
 def test_a_monotone_correction_has_no_turnover() -> None:
     from beqanalyser.design.accept import turnover_db_per_octave
 
     flat = correction(lambda f: -13.0, lambda f: -1.0 - 0.4 * np.log2(f / 5.0))
-    slope, _ = turnover_db_per_octave(flat, AcceptParams())
+    slope, _, _ = turnover_db_per_octave(flat, AcceptParams())
     assert slope <= 0.0
 
 
@@ -252,13 +271,13 @@ def test_under_correction_is_not_reported_as_a_turnover() -> None:
     from beqanalyser.design.accept import turnover_db_per_octave
 
     sagging = correction(lambda f: -16.0, lambda f: 2.0 - 2.5 * np.log2(45.0 / f))
-    slope, _ = turnover_db_per_octave(sagging, AcceptParams())
+    slope, _, _ = turnover_db_per_octave(sagging, AcceptParams())
     assert slope == 0.0
     verdict = assess(
         [BiquadSpec("low_shelf", 20.0, 8.0, 0.7)], sagging, noise_floor_hz=float("nan")
     )
     assert not any("too much too soon" in f for f in verdict.failures)
-    assert any("under-corrected" in f for f in verdict.failures)
+    assert any("tilts" in f and "was intended" in f for f in verdict.failures)
 
 
 def test_bin_noise_does_not_terminate_the_extent() -> None:
@@ -364,8 +383,8 @@ def test_the_turnover_peak_is_located_on_a_smoothed_curve() -> None:
         band_hz=BAND,
     )
 
-    slope, peak = turnover_db_per_octave(clean, AcceptParams())
-    spiked_slope, spiked_peak = turnover_db_per_octave(speckled, AcceptParams())
+    slope, _, peak = turnover_db_per_octave(clean, AcceptParams())
+    spiked_slope, _, spiked_peak = turnover_db_per_octave(speckled, AcceptParams())
     assert slope > 2.0, "the turnover is real and should be caught"
     assert spiked_slope > 2.0, "one bin must not hide it"
     assert abs(np.log2(spiked_peak / peak)) < 0.5, (
@@ -406,3 +425,149 @@ def test_a_turnover_the_correction_creates_is_still_rejected() -> None:
     assert verdict.turnover_before < 1.0
     assert verdict.turnover_after > 2.0
     assert any("too much too soon" in f for f in verdict.failures)
+
+
+def test_the_material_baseline_survives_a_peak_at_the_band_s_top_edge() -> None:
+    """A mix rising to its plateau must still supply a baseline, not a silent 0.0.
+
+    The regression this pins: the baseline used to be the slope below the *material's own*
+    peak, and a mix rises toward its plateau, so that peak sits within half an octave of the
+    band's top edge — on seven of the eight titles measured. The interior guard then returned
+    0.0 and the clause became the absolute 2.0 dB/octave test it was written to replace.
+    Nocturnal Animals' restored candidate was rejected on that reading, at 2.31 against a
+    material that falls 5.27 dB/octave over the same segment.
+    """
+    from beqanalyser.design.accept import turnover_db_per_octave
+
+    # material rising monotonically to the top of the band: its own argmax is the last bin
+    rising = correction(
+        lambda f: -16.0 + 5.2 * np.log2(f / 5.0),
+        # corrected: flat above 18 Hz, falling away below it at ~2.3 dB/octave
+        lambda f: -1.0 if f >= 18.0 else -1.0 - 2.3 * np.log2(18.0 / f),
+    )
+    slope, material, peak = turnover_db_per_octave(rising, AcceptParams())
+    assert 14.0 < peak < 24.0, "the segment comes from the corrected curve"
+    assert slope > 2.0, "the corrected curve does fall away below its peak"
+    assert material > 4.0, (
+        f"the material falls faster over that same segment, measured {material:.2f}; a "
+        "baseline of 0.0 here is the bug"
+    )
+
+    verdict = assess(
+        [BiquadSpec("low_shelf", 18.0, 6.0, 0.7)], rising, noise_floor_hz=float("nan")
+    )
+    assert not any("too much too soon" in f for f in verdict.failures), verdict.failures
+
+
+def test_headroom_is_the_clipping_it_causes_not_the_gain_it_asks_for() -> None:
+    """§4.2's headroom is reported, never gated — §14.3: headroom is output-only.
+
+    A BEQ runs post bass management on the sub channel only, so a boost costs no master volume —
+    what it can cost is clipping the sub feed. The caller measures that and passes it in, because
+    only the caller has the signal. The cascade's peak *magnitude* is not a substitute: measured
+    against the real quantity it is close to inverted, with +45.7 dB filters needing 0.00 dB of
+    reduction and +18.2 dB ones needing 4.4.
+
+    §14.3: whether a given gain reduction is acceptable depends on the playback chain, which is
+    a choice for the caller, not the designer — the contract's §2 is explicit that headroom is
+    output-only. So this is carried through to `Verdict.required_offset_db` and reported, and
+    never fails a candidate on its own, however large.
+    """
+    flat = correction(lambda f: -12.0, lambda f: 0.0)
+    big = [BiquadSpec("low_shelf", 20.0, 24.0, 0.7)]
+
+    # a large boost that happens to clip nothing is fine, however large
+    free = assess(big, flat, noise_floor_hz=float("nan"), required_offset_db=0.0)
+    assert not any("clipping" in f for f in free.failures), free.failures
+    assert free.required_offset_db == 0.0
+
+    # one that needs a large gain reduction is reported, not rejected for it
+    clipping = assess(big, flat, noise_floor_hz=float("nan"), required_offset_db=-4.4)
+    assert not any("clipping" in f for f in clipping.failures), clipping.failures
+    assert clipping.passed, clipping.failures
+    assert clipping.required_offset_db == -4.4
+
+
+def test_a_band_too_short_to_carry_a_slope_is_said_so_once() -> None:
+    """Blazing Saddles leaves 0.42 octaves above its own noise floor.
+
+    Over that span its candidate reads -7.32 dB/octave to 45 Hz and -0.02 to 80 Hz, so every
+    clause downstream of tilt is reporting where the band stopped. One stated reason beats five
+    numbers measured on nothing.
+    """
+    narrow = correction(lambda f: -12.0, lambda f: 0.0, band=(33.7, 45.0))
+    verdict = assess(
+        [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)], narrow, noise_floor_hz=33.7
+    )
+    assert not verdict.passed
+    assert len(verdict.failures) == 1, verdict.failures
+    assert "octaves left to judge" in verdict.failures[0]
+
+    wide = correction(lambda f: -12.0, lambda f: 0.0, band=(5.0, 45.0))
+    assert not any(
+        "octaves left to judge" in f
+        for f in assess(
+            [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)],
+            wide,
+            noise_floor_hz=float("nan"),
+        ).failures
+    )
+
+
+def test_a_section_must_earn_its_slot_inside_the_judged_band() -> None:
+    """A bass correction's correction is in the bass.
+
+    Measured across the whole 3-400 Hz design grid, a cascade can spend sections on the midrange
+    and be credited for it: Nocturnal Animals' `flatten` candidate passed with peaking sections
+    at 214 and 341 Hz, Q 6.0, worth 1.94 and 1.72 dB over the grid and 0.00 dB over the band the
+    result is judged on. That became reachable when the placement ceiling opened to
+    `WIDEN_OCTAVES`, so the two checks belong together.
+    """
+    flat = correction(lambda f: -13.0, lambda f: -1.5)
+    useful = [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)]
+    assert assess(useful, flat, noise_floor_hz=float("nan")).passed
+
+    parked = useful + [BiquadSpec("peaking_eq", 341.0, -1.7, 6.0)]
+    verdict = assess(parked, flat, noise_floor_hz=float("nan"))
+    assert not verdict.passed
+    earned = [f for f in verdict.failures if "earned its slot" in f]
+    assert earned, verdict.failures
+    assert "341" in earned[0] and "5-45 Hz" in earned[0], earned[0]
+
+
+def test_boosting_below_the_noise_floor_is_caught() -> None:
+    """The one clause that looks below where the judged band starts.
+
+    The band starts at `noise_floor_hz` because a correction is not expected to have achieved
+    anything underneath it — but a low shelf acts there regardless, and nothing else was looking.
+    Blazing Saddles has no programme content below 33.7 Hz and a candidate that lifted 5-20 Hz by
+    +5 to +11 dB passed every other clause for exactly that reason.
+    """
+    # flat material from 20 Hz up, a deep hole below it, and a filter that fills the hole in
+    lifted = Correction(
+        freqs=FREQS,
+        before_db=curve(lambda f: -1.0 if f >= 20.0 else -21.0),
+        after_db=curve(lambda f: -1.0 if f >= 20.0 else 11.0),
+        band_hz=(20.0, 60.0),
+    )
+    verdict = assess(
+        [BiquadSpec("low_shelf", 24.0, 24.0, 0.7)], lifted, noise_floor_hz=20.0
+    )
+    assert not verdict.passed
+    assert any("not content" in f for f in verdict.failures), verdict.failures
+
+
+def test_an_authored_hump_is_not_an_overshoot() -> None:
+    """The bar is the material's own level where that is higher than the request.
+
+    Title 1's mix is +5.8 dB at 20 Hz — an authored feature — and its filter leaves +5.0 there.
+    The filter did not put it there and must not be charged for it.
+    """
+    humped = correction(
+        lambda f: 5.8 if 17.0 <= f <= 24.0 else -13.0,
+        lambda f: 5.0 if 17.0 <= f <= 24.0 else -1.5,
+    )
+    verdict = assess(
+        [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)], humped, noise_floor_hz=float("nan")
+    )
+    assert not any("not content" in f for f in verdict.failures), verdict.failures

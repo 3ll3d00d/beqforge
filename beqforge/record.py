@@ -210,11 +210,16 @@ def _verdict(verdict) -> dict[str, Any]:
         "extent_hz": _num(verdict.extent_hz),
         "worst_gradient_before": _num(verdict.worst_gradient_before),
         "worst_gradient_after": _num(verdict.worst_gradient_after),
+        "required_offset_db": _num(verdict.required_offset_db),
+        "device_error_db": _num(verdict.device_error_db),
+        "dc_margin_steps": _num(verdict.dc_margin_steps),
         "turnover_before": _num(verdict.turnover_before),
         "turnover_after": _num(verdict.turnover_after),
         "roughness_db": _num(verdict.roughness_db),
         "wobble_db": _num(verdict.wobble_db),
         "drift_db": _num(verdict.drift_db),
+        "recovered_fraction": _num(verdict.recovered_fraction),
+        "shaping_fraction": _num(verdict.shaping_fraction),
     }
 
 
@@ -225,8 +230,10 @@ def _candidate(candidate) -> dict[str, Any]:
         "filters": [_spec(f) for f in candidate.filters],
         "fit_error_db": _num(candidate.fit_error_db),
         "target_db": _arr(candidate.target_db),
+        "unpriced_target_db": _arr(candidate.unpriced_target_db),
         "target_notes": list(candidate.target_notes),
         "mv_adjust_db": _num(candidate.mv_adjust_db),
+        "confidence": _num(candidate.confidence),
         "correction": {
             "freqs": _arr(correction.freqs),
             "before_db": _arr(correction.before_db),

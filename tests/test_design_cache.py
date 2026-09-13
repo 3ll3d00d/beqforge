@@ -68,6 +68,7 @@ def analysis() -> C.Analysis:
         loud_frames=593,
         quiet_frames=2461,
         total_frames=13247,
+        margin_se_db=np.where(rng.random(64) > 0.5, rng.random(64), np.inf),
     )
     identification = Identification(
         fit=RolloffFit(18.4, 15.4, 64.0, 1.96),
@@ -117,7 +118,14 @@ def test_analysis_round_trip_is_bit_identical(tmp_path) -> None:
         b.plateau_hz,
         b.is_filtered,
     )
-    for name in ("freqs", "mean_db", "peak_db", "quiet_db", "coherence"):
+    for name in (
+        "freqs",
+        "mean_db",
+        "peak_db",
+        "quiet_db",
+        "coherence",
+        "margin_se_db",
+    ):
         assert np.array_equal(
             getattr(before.envelopes, name), getattr(after.envelopes, name)
         )

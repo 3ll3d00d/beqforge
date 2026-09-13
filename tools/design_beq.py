@@ -149,7 +149,20 @@ def show_candidates(report: Report) -> None:
             f"      cliff: {v.worst_gradient_before:.1f} -> {v.worst_gradient_after:.1f} "
             f"dB/oct   turnover: {v.turnover_before:.1f} -> {v.turnover_after:.1f} dB/oct"
             f"   wobble {v.wobble_db:.2f} vs {v.roughness_db:.2f}"
-            f"   drift {v.drift_db:.3f} dB"
+        )
+        print(
+            f"      device: {v.device_error_db:.2f} dB of rounding error, tightest section has "
+            f"{v.dc_margin_steps:.1f} steps of DC headroom (drift p90 {v.drift_db:.2f} dB)"
+            f"   clipping: {v.required_offset_db:+.2f} dB"
+        )
+        recovered = (
+            "n/a"
+            if math.isnan(v.recovered_fraction)
+            else f"{v.recovered_fraction * 100:.0f}%"
+        )
+        print(
+            f"      recovered {recovered} of the measured deficit "
+            f"(§14.1)   confidence {candidate.confidence:.2f} (§14.3)"
         )
         print(f"      {v}")
         for note in (*candidate.target_notes, *v.notes):
@@ -164,7 +177,21 @@ def show_result(report: Report) -> None:
         print("\n  No candidate passed. Abstaining is the correct output here (§2.5);")
         print("  the failures above say what would have to change.\n")
         return
-    print(f"\n  {accepted.label}    master volume {accepted.mv_adjust_db:+.1f} dB\n")
+    offset = accepted.verdict.required_offset_db
+    recovered_fraction = accepted.verdict.recovered_fraction
+    recovered = (
+        "n/a" if math.isnan(recovered_fraction) else f"{recovered_fraction * 100:.0f}%"
+    )
+    print(
+        f"\n  {accepted.label}    peak boost {accepted.mv_adjust_db:+.1f} dB, "
+        + (
+            "no gain reduction needed"
+            if offset >= 0.0
+            else f"needs {-offset:.1f} dB of gain reduction"
+        )
+        + f"\n  recovered {recovered} of the measured deficit, "
+        f"confidence {accepted.confidence:.2f}\n"
+    )
     for section in accepted.filters:
         print(
             f"      {section.type:<11s} {section.freq_hz:7.2f} Hz "

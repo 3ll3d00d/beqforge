@@ -16,14 +16,44 @@ own output, so a systematic error inverted into the correction is invisible here
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import signal
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import biquad_sos
+from beqanalyser.design import DESIGN_GRID, BiquadSpec
+from beqanalyser.design.diagnose import DiagnoseParams, plateau_reference
+from beqanalyser.design.filters import Realisation, biquad_sos, magnitude_db
 
 logger = logging.getLogger(__name__)
+
+if (
+    TYPE_CHECKING
+):  # `accept` imports `Correction` from here, so this stays one-directional
+    from beqanalyser.design.accept import AcceptParams
+
+
+def device_error_db(
+    filters: list[BiquadSpec], freqs: np.ndarray, realisation: Realisation
+) -> np.ndarray:
+    """dB the device's own coefficient rounding adds, on `freqs`.
+
+    The device takes coefficients and stores them in its own format, so the response it realises
+    is not the one the optimiser produced. Measured at the device's rate, where the rounding
+    happens, then resampled onto the analysis axis.
+
+    Measured across the eight titles this runs 0.08 to 1.41 dB. Two things worth knowing about
+    its size: a 32-bit float device is no better than 5.23 fixed point here, because the
+    coefficients that matter sit near |a1| = 2 where both formats have the same 1.19e-7 absolute
+    step; and the mechanism is not pole radius — one step moves that by 0.03% of its margin —
+    but cancellation in `1+a1+a2`, the denominator at DC, which scales as (2*pi*f/fs)^2 and
+    measures under five quantisation steps on every section below ~15 Hz at 96 kHz. That is why
+    halving the rate helps fourfold and why pushing a section lower makes it worse.
+    """
+    sos = biquad_sos(filters, realisation.fs)
+    exact = magnitude_db(sos, DESIGN_GRID, realisation.fs)
+    rounded = magnitude_db(realisation.quantise(sos), DESIGN_GRID, realisation.fs)
+    return np.interp(freqs, DESIGN_GRID, rounded - exact)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +89,116 @@ class Correction:
         """
         return float(np.mean(self._in_band(self.after_db)))
 
+    def requested_db(self, target_tilt_db_per_octave: float = 0.0) -> np.ndarray:
+        """The shape asked for, over the full frequency axis, in dB re the plateau.
+
+        A house curve rising at `target_tilt_db_per_octave` toward the bottom, anchored at 0 dB
+        at the *top* of the judged band — the top is where the mix already reaches its plateau,
+        so that is the one point a correction should leave alone. Positive tilt rises toward the
+        bottom, the audio convention; see `AcceptParams.target_tilt_db_per_octave`.
+
+        Zero tilt gives a flat request, which is what every clause compared against before this
+        existed, so `requested_db(0.0)` is identically zero and nothing changes.
+        """
+        top = self.band_hz[1]
+        rise = target_tilt_db_per_octave * np.log2(top / np.maximum(self.freqs, 1e-9))
+        return np.where(self.freqs < top, rise, 0.0)
+
+    def requested_level_db(self, target_tilt_db_per_octave: float = 0.0) -> float:
+        """Mean of the requested shape over the judged band — what `level_db` is compared to.
+
+        `target_tilt * octaves / 2` analytically, but taken over the same log-spaced bins the
+        measurement uses so the two are commensurate rather than nearly so.
+        """
+        return float(
+            np.mean(self._in_band(self.requested_db(target_tilt_db_per_octave)))
+        )
+
+    def intent_db(
+        self,
+        priced_target_db: np.ndarray | None,
+        target_tilt_db_per_octave: float = 0.0,
+    ) -> np.ndarray:
+        """What the correction was actually asked to achieve — AUTOMATED_DESIGN.md §14.2.
+
+        `before_db + priced_target_db`, plus the house curve on top of it (inert while
+        nothing builds a house curve into a target — `target_tilt_db_per_octave` defaults to
+        0.0 and `priced_by_evidence` never adds one — but stated once here rather than left to
+        be got right twice when §14.4 wires it in). `priced_target_db` is on `DESIGN_GRID` and
+        is interpolated onto `self.freqs`.
+
+        `priced_target_db is None` means no strategy built a target for this candidate — the
+        parametric route fits directly against an identified rolloff and passes none — and the
+        intent then falls back to the house curve alone, exactly what every clause compared
+        against before this existed. Treating an absent target as an all-zero one would be
+        wrong: zero added to `before_db` is not "no intent", it is "intent to leave the input
+        exactly as it was", which is not what a candidate with no target is claiming.
+        """
+        house = self.requested_db(target_tilt_db_per_octave)
+        if priced_target_db is None:
+            return house
+        return (
+            self.before_db
+            + np.interp(self.freqs, DESIGN_GRID, priced_target_db)
+            + house
+        )
+
+    def intent_level_db(
+        self,
+        priced_target_db: np.ndarray | None,
+        target_tilt_db_per_octave: float = 0.0,
+    ) -> float:
+        """Mean of `intent_db` over the judged band — what `level_db` is compared to."""
+        return float(
+            np.mean(
+                self._in_band(
+                    self.intent_db(priced_target_db, target_tilt_db_per_octave)
+                )
+            )
+        )
+
+    def intent_tilt_db_per_octave(
+        self,
+        priced_target_db: np.ndarray | None,
+        target_tilt_db_per_octave: float = 0.0,
+    ) -> float:
+        """Slope of `intent_db` over the judged band, same convention as `tilt_db_per_octave`.
+
+        `wanted` used to be the bare dial value; a target that only partially recovers the
+        deficit is not flat itself, so its slope has to be measured the same way the corrected
+        curve's is (a fit over the band, not a constant) or the two are not comparable.
+        """
+        freqs = self._in_band(self.freqs)
+        intent = self._in_band(
+            self.intent_db(priced_target_db, target_tilt_db_per_octave)
+        )
+        return float(np.polyfit(np.log2(freqs / freqs[0]), intent, 1)[0])
+
+    def departure_db(self, target_tilt_db_per_octave: float = 0.0) -> float:
+        """RMS departure of the corrected curve from the shape asked for, over the band.
+
+        For *ranking* accepted candidates, not for judging them — `accept` decides, and a
+        scalar that could overrule it would reintroduce the aggregate-blindness R1 exists to
+        defeat. Among candidates the model has already passed, the question left is which is
+        closest to the shape the pipeline was asked for — `AcceptParams.target_tilt_db_per_octave`,
+        which defaults to flat for the reason §3.4a gives: the three human-validated filters track
+        `flatten` within 2-4 dB, "flat is the shape; how far past flat to go is the preference dial
+        of §4.3".
+
+        One physical quantity in dB rather than a weighted combination of the clauses'
+        statistics, which is what makes it comparable without a constant to argue about: level,
+        tilt and wobble are all departures from this same line, and this measures all three at
+        once in the unit they are already in. Ranking on `wobble_db` alone decided on 0.08-0.23
+        dB of a quantity whose own scatter is 3-14 dB, and was blind to level — on title 3 it
+        preferred a candidate sitting +3.70 dB above plateau to one at -0.36 because its wobble
+        was 0.09 dB lower. The same two score 4.27 and 1.54 here.
+
+        Measured against the request rather than against flat, so the ranking cannot quietly
+        reimpose flat on a run that asked for a house curve. At 0.0 the two are identical.
+        """
+        want = self._in_band(self.requested_db(target_tilt_db_per_octave))
+        return float(np.sqrt(np.mean((self._in_band(self.after_db) - want) ** 2)))
+
     @property
     def improvement_db(self) -> float:
         return float(np.ptp(self._in_band(self.before_db))) - self.spread_db
@@ -83,14 +223,10 @@ class Correction:
 
     def concerns(
         self,
-        spread_margin_db: float = 2.0,
-        max_tilt_db: float = 2.0,
-        level_range_db: tuple[float, float] = (-3.0, 8.0),
+        params: "AcceptParams | None" = None,
+        priced_target_db: np.ndarray | None = None,
     ) -> list[str]:
         """Everything about the corrected result a person would object to on sight.
-
-        `level_range_db` encodes "flat, or mildly rising at the bottom": the corrected low end
-        should sit near the reference, a little above it at most.
 
         A smoke test logged during `verify`, not the acceptance model — `accept` is what
         decides. It nonetheless has to agree with `accept` about what flat means, or it warns
@@ -98,17 +234,38 @@ class Correction:
         §6.4 records as sitting exactly on the floor of what a smooth cascade can achieve, and
         the third title's own accepted shape trips it at 6.4 dB. Judged as wobble against the
         material's own, as `accept` does.
+
+        **The thresholds come from `AcceptParams`, not from defaults of its own.** Agreeing
+        with a model by keeping a private copy of three of its numbers is agreement that lasts
+        until one of them is edited; the previous signature restated `spread_margin_db` 2.0,
+        `max_tilt_db` 2.0 and `level_range_db` (-3, 8) as its own parameters, so tuning the
+        model would have left this warning on shapes the model accepts — which is the exact
+        failure the paragraph above describes, reintroduced by a different route. Imported
+        under `TYPE_CHECKING` because `accept` imports `Correction` from here; the default is
+        constructed lazily to keep that one-directional.
+
+        **Level and tilt are judged against intent (§14.2), same as `assess`.**
+        `priced_target_db` defaults to `None`, which falls back to the house curve exactly as
+        this did before intent existed — passing it through is what keeps this agreeing with
+        `accept` on a candidate whose target was clipped to less than the full deficit, rather
+        than warning on a correction that did exactly what the evidence licensed.
         """
+        from beqanalyser.design.accept import AcceptParams
+
+        params = params or AcceptParams()
+        spread_margin_db = params.spread_margin_db
+        wanted = params.target_tilt_db_per_octave
+        intent_level = self.intent_level_db(priced_target_db, wanted)
         found: list[str] = []
-        if self.level_db > level_range_db[1]:
+        if self.level_db > intent_level + params.level_tolerance_db:
             found.append(
-                f"corrected low end sits {self.level_db:.1f} dB above the reference — "
-                "over-corrected"
+                f"corrected low end sits {self.level_db - intent_level:.1f} dB above the "
+                "shape asked for — over-corrected"
             )
-        if self.level_db < level_range_db[0]:
+        if self.level_db < intent_level - params.level_tolerance_db:
             found.append(
-                f"corrected low end sits {-self.level_db:.1f} dB below the reference — "
-                "under-corrected"
+                f"corrected low end sits {intent_level - self.level_db:.1f} dB below the "
+                "shape asked for — under-corrected"
             )
         wobble = self.wobble_db(self.after_db)
         roughness = self.wobble_db(self.before_db)
@@ -118,15 +275,12 @@ class Correction:
                 f"{self.band_hz[0]:.0f}-{self.band_hz[1]:.0f} Hz against {roughness:.1f} dB "
                 "in the material; expected flat"
             )
-        if self.tilt_db_per_octave > max_tilt_db:
+        achieved = -self.tilt_db_per_octave
+        intent_tilt = -self.intent_tilt_db_per_octave(priced_target_db, wanted)
+        if abs(achieved - intent_tilt) > params.tilt_tolerance_db_per_octave:
             found.append(
-                f"corrected low end still falls at {self.tilt_db_per_octave:.1f} dB/oct "
-                "toward the bottom — under-corrected"
-            )
-        if self.tilt_db_per_octave < -max_tilt_db:
-            found.append(
-                f"corrected low end rises at {-self.tilt_db_per_octave:.1f} dB/oct "
-                "toward the bottom — over-corrected"
+                f"corrected low end {'rises' if achieved > intent_tilt else 'falls'} at "
+                f"{achieved:+.1f} dB/oct against the {intent_tilt:+.1f} intended"
             )
         if self.improvement_db < 0:
             found.append("the correction made the low end less flat than it was")
@@ -145,8 +299,11 @@ def verify(
     samples: np.ndarray,
     fs: float,
     band_hz: tuple[float, float] = (5.0, 45.0),
-    reference_hz: float = 40.0,
+    diagnose_params: DiagnoseParams | None = None,
     exclude_bands_hz: tuple[tuple[float, float], ...] = (),
+    accept_params: "AcceptParams | None" = None,
+    realisation: "Realisation | None" = None,
+    priced_target_db: np.ndarray | None = None,
 ) -> Correction:
     """Apply `filters` to `samples` and measure the corrected low end.
 
@@ -157,23 +314,51 @@ def verify(
 
     `exclude_bands_hz` drops authored emphasis, which is content: correcting a hump at 20 Hz is
     not the job and including it would penalise a correct filter.
+
+    The reference used to be a single fixed point, `before`/`after` each anchored to their own
+    value at 40 Hz — AUTOMATED_DESIGN.md §6.2 already named this "should be derived, not
+    defaulted" and it stayed defaulted regardless. On Predator that single point sits on the
+    shoulder of a local bump 1.7-2.3 dB above the mix's own plateau, which read as `level_db`
+    running 4 dB under reference when the corrected curve was in fact flat within 2 dB of it —
+    a shape that passed R1 everywhere else and failed only because the ruler had a bump in it.
+    `plateau_reference` is the fix already used for exactly this on `flatten`'s own target and
+    on every per-channel reference in `diagnose`; verification judging the result by a
+    different rule than construction judged the target was the gap, not two separate bugs.
+    One reference, from `before` alone so a filter cannot move its own goalposts, applied to
+    both curves so what's compared is how far `after` closed on where `before` already stood.
+
+    **`after_db` is what the device will play, not what the optimiser designed.** `realisation`
+    describes the device — it takes coefficients, so it rounds them to its own format — and the
+    magnitude error that rounding causes is added here. It has to be added rather than filtered
+    in: quantisation happens at the device's rate, and `samples` are at the analysis rate, so
+    filtering with coefficients rounded at 96 kHz would measure neither device. Judging the
+    realised curve is what lets the acceptance model drop a calibrated drift threshold and ask
+    the only question that matters — does the shape survive the device — which is comparative
+    and needs no constant.
+
+    `priced_target_db` is the evidence-priced target the fitter was handed, if any (§14.2) — on
+    `DESIGN_GRID`, `None` for a candidate with no target (the parametric route). Only reaches
+    `Correction.concerns`'s smoke test here; `assess` takes it directly.
     """
     corrected = signal.sosfilt(biquad_sos(filters, fs), samples)
     freqs, before = _mean_db(samples, fs)
     _, after = _mean_db(corrected, fs)
-    anchor = int(np.argmin(np.abs(freqs - reference_hz)))
+    after = after + device_error_db(filters, freqs, realisation or Realisation())
+    reference_db, _ = plateau_reference(
+        before, freqs, diagnose_params or DiagnoseParams()
+    )
 
     keep = np.ones_like(freqs, dtype=bool)
     for low, high in exclude_bands_hz:
         keep &= ~((freqs >= low) & (freqs <= high))
     correction = Correction(
         freqs=freqs[keep],
-        before_db=(before - before[anchor])[keep],
-        after_db=(after - after[anchor])[keep],
+        before_db=(before - reference_db)[keep],
+        after_db=(after - reference_db)[keep],
         band_hz=band_hz,
     )
     logger.info(f"Applied correction: {correction}")
-    for concern in correction.concerns():
+    for concern in correction.concerns(accept_params, priced_target_db):
         logger.warning(f"Correction concern: {concern}")
     return correction
 

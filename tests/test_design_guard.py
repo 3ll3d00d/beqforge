@@ -21,6 +21,7 @@ from beqanalyser.design.diagnose import (
     band_tracking,
     diagnose,
 )
+from beqanalyser.design.extraction import extract
 from beqanalyser.design.pipeline import DESIGN_GRID, PipelineParams, flatten_targets
 from tests.test_design_diagnose import FS, high_passed, material_from, scened_noise
 
@@ -81,7 +82,8 @@ def test_flatten_does_not_chase_the_floor_below_it() -> None:
         }
     )
     diagnosis = diagnose(material)
-    proposals = flatten_targets(material, diagnosis, None, None, PipelineParams())
+    envelopes = extract(material.mono_mix, float(material.fs))
+    proposals = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
     if not proposals:
         pytest.skip("no correction proposed at all, which is also a safe outcome")
     target = proposals[0].target_db
@@ -207,7 +209,10 @@ def test_the_floor_binds_before_the_boost_cap() -> None:
         {"C": sloped_floor(-26.0, 1), "LFE": sloped_floor(-26.0, 1, seed=60)}
     )
     diagnosis = diagnose(material)
-    proposal = flatten_targets(material, diagnosis, None, None, PipelineParams())[0]
+    envelopes = extract(material.mono_mix, float(material.fs))
+    proposal = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())[
+        0
+    ]
     assert any("noise floor binds" in note for note in proposal.notes), proposal.notes
 
 
@@ -229,7 +234,10 @@ def test_a_white_floor_needs_no_holding_and_says_so() -> None:
         }
     )
     diagnosis = diagnose(material)
-    proposal = flatten_targets(material, diagnosis, None, None, PipelineParams())[0]
+    envelopes = extract(material.mono_mix, float(material.fs))
+    proposal = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())[
+        0
+    ]
     assert not [n for n in proposal.notes if "noise floor binds" in n], proposal.notes
 
 
@@ -244,5 +252,6 @@ def test_an_unbound_target_says_nothing() -> None:
         }
     )
     diagnosis = diagnose(material)
-    proposals = flatten_targets(material, diagnosis, None, None, PipelineParams())
+    envelopes = extract(material.mono_mix, float(material.fs))
+    proposals = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
     assert proposals and not proposals[0].notes

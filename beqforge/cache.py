@@ -237,6 +237,7 @@ def analysis_to_json(analysis: Analysis) -> dict[str, Any]:
             "loud_frames": int(envelopes.loud_frames),
             "quiet_frames": int(envelopes.quiet_frames),
             "total_frames": int(envelopes.total_frames),
+            "margin_se_db": _pack(envelopes.margin_se_db),
         },
         "identification": None
         if found is None
@@ -284,6 +285,7 @@ def analysis_from_json(raw: dict[str, Any]) -> Analysis:
         loud_frames=int(e["loud_frames"]),
         quiet_frames=int(e["quiet_frames"]),
         total_frames=int(e["total_frames"]),
+        margin_se_db=_unpack(e["margin_se_db"]),
     )
     found = raw["identification"]
     identification = None
@@ -324,6 +326,7 @@ def proposals_to_json(proposals: list) -> list[dict[str, Any]]:
         {
             "label": p.label,
             "target_db": _pack(p.target_db),
+            "unpriced_target_db": _pack(p.unpriced_target_db),
             "filters": None if p.filters is None else [_spec(f) for f in p.filters],
             "residual_db": float(p.residual_db),
             "notes": list(p.notes),
@@ -338,6 +341,7 @@ def proposals_from_json(raw: list[dict[str, Any]], factory) -> list:
         factory(
             label=str(p["label"]),
             target_db=_unpack(p["target_db"]),
+            unpriced_target_db=_unpack(p.get("unpriced_target_db")),
             filters=None
             if p["filters"] is None
             else [

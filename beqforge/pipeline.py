@@ -38,10 +38,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from scipy import signal
 
-from beqanalyser.design import BiquadSpec
+from beqanalyser.design import DESIGN_GRID, BiquadSpec
 from beqanalyser.design import cache
-from beqanalyser.design.accept import AcceptParams, Verdict, assess
+from beqanalyser.design.accept import (
+    AcceptParams,
+    Verdict,
+    assess,
+    confidence_from_evidence,
+)
 from beqanalyser.design.design import DesignParams, design
 from beqanalyser.design.diagnose import (
     Diagnosis,
@@ -57,11 +63,17 @@ from beqanalyser.design.filters import (
     FitStats,
     Realisation,
     biquad_sos,
+    correction_band_hz,
     fit_minimal_biquads_all,
     magnitude_db,
 )
 from beqanalyser.design.identify import IdentifyParams, Identification, identify_rolloff
-from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN, Material
+from beqanalyser.design.material import (
+    LFE_GAIN,
+    MAIN_GAIN,
+    Material,
+    bass_managed_sum,
+)
 from beqanalyser.design.verify import Correction, verify
 
 logger = logging.getLogger(__name__)
@@ -91,7 +103,6 @@ class Timings:
 
 
 PUBLISH_FS = 96000.0
-DESIGN_GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
 _GRID_OCTAVES = math.log2(400.0 / 3.0)
 """Span of `DESIGN_GRID`, so a width in octaves becomes a count of points."""
 
@@ -145,28 +156,116 @@ class PipelineParams:
     A quarter of an octave. Wide enough that the transition is smooth against a 400-point
     log grid, narrow enough that it does not reach down into the correction."""
 
-    restore_caps_db: tuple[float, ...] = (25.0, 35.0, 45.0)
+    restore_caps_db: tuple[float, ...] = (25.0, 35.0, 45.0, 50.0)
     """Ceilings on the counterfactual restoration, one candidate each.
 
     A sweep rather than a choice: how far a channel's attenuation can be inverted before it
     is inverting something that is not a filter is exactly what is not known in advance, and
-    the acceptance model is better placed to reject the wrong ones than a prior is."""
+    the acceptance model is better placed to reject the wrong ones than a prior is.
+
+    50 added on Predator, the title the original three could not close: 45 dB still fell at
+    2.8 dB/oct (`max_tilt_db_per_octave` is 2.0), 50 dB reached the plateau and passed outright
+    — and 55/60/70 dB all produced the *identical* target, so 50 is not an arbitrary stop, it
+    is where this channel's own measured attenuation runs out. Cheap to try even where it does
+    nothing: a cap whose target matches an earlier one is deduplicated before fitting."""
 
     max_sections: int = 4
+    """Ceiling on biquads a fit may spend, escalated from 1 up to this (`_tiers`).
+
+    Tried at `BIQUAD_BUDGET` (10, designer-interface.md v1.0 §5) on the theory that a title
+    exhausting 4 sections without settling was budget-starved rather than shape-limited.
+    Measured on Predator, the one real title that both exhausts the budget and has the most
+    to gain: `counterfactual/25dB` spent the extra room, settling at 5 sections instead of 4,
+    and failed on the *same* comparative checks anyway — "still falls at 11.7 dB/oct —
+    under-corrected; corrected level -9.6 dB is outside -3..+8" is not a section-count
+    problem. Every other candidate hit its identical wall at whatever section count it tried.
+    Cost was not proportionate to that answer: 997 s against 70 s, 265 optimiser runs against
+    40, for the same abstention — PERFORMANCE.md §1.1's "`max_sections=5` would roughly
+    double a run" was, if anything, optimistic about 10.
+
+    Reverted rather than left at 10 and merely undocumented: a search-cost ceiling that costs
+    14x on exactly the titles it was meant to help, for no change in outcome, is not a free
+    knob to leave turned up on the chance some other title differs. The actual gap this
+    exposed is in what `flatten`/`counterfactual` construct as targets — a corrected level
+    the acceptance window can hold and a slope it can defend at once — not in how many
+    sections are on offer to fit whatever target they hand the optimiser."""
+
     residual_target_db: float = 0.5
     max_gain_db: float = 26.0
+    """The fitter's per-*section* gain bound (§5.1), not a bound on any target.
+
+    Realisability, not evidence: no BEQ should publish a section gain like this regardless of
+    what a target asks for — `gain_headroom_db`'s note on `DesignParams` is the precedent,
+    "a fit allowed 45 dB used it, expressing a correction under 5 dB above 10 Hz as a 3 Hz
+    shelf". It used to also clip `flatten`'s target directly, standing in for evidence the
+    target-construction step didn't have. Now that it does (`confidence_z`, below), the two
+    roles were separated rather than left doubled up under one name: this dial no longer
+    limits how much correction `flatten` may propose, only how much gain any single realised
+    section may carry once fitting is done."""
+
+    confidence_z: float = 1.645
+    """How many bootstrap standard errors of margin a bin must clear before `flatten` trusts
+    it (§4.1) — one-sided ~95% at the default.
+
+    Replaces a flat `noise_margin_db`. That constant could not distinguish 1,300 loud frames
+    drawn from hundreds of separate scenes from 11 that are each their own isolated instant —
+    both got the same 12 dB haircut. `Envelopes.margin_se_db` is a block bootstrap over
+    exactly that evidence (contiguous runs, not raw frames, because a 50%-overlapping frame
+    pair is not two independent observations), so the ceiling now tightens where the estimate
+    itself is shaky and relaxes where it is not, per bin per title, instead of asserting one
+    number for every extraction. Checked against all eight titles on hand: the derived
+    ceiling came out looser than the old flat one everywhere the evidence was solid, and did
+    what the flat one could not on the one title with almost none of it (Nocturnal Animals,
+    10 independent loud events) — SE there ran 4-8x every other title's, and the ceiling
+    tightened accordingly without being told to.
+
+    `Envelopes.measurable` still governs where this applies at all: a bin with no peak/quiet
+    separation is left to the other guards (the noise-floor hold, the fitter's own
+    `max_gain_db`, and ultimately acceptance) rather than read as zero-confidence, for the
+    reason that property's own docstring gives."""
+
     fit_seeds: tuple[int, ...] = (0,)
     """Seeds the fit is repeated from at each section count and split.
 
     One. `fit_to_biquads` warns that the objective is multimodal and that results "vary by an
     order of magnitude between seeds" — but that was measured on the *parametric* route's
     targets, a high-order rolloff terminated by a much lower-order protective filter spanning
-    100 dB. The targets that produce every accepted filter are `flatten`'s, which are gentle
-    curves under 26 dB, and on those a second seed buys little enough to be measurable: see
-    PERFORMANCE.md P13.
+    100 dB. The targets that produce every accepted filter are `flatten`'s, and on those a
+    second seed bought little enough to be measurable: see PERFORMANCE.md P13. That was
+    measured when `flatten`'s targets were held under 26 dB by a fixed dial; `confidence_z`
+    lets a well-supported title's target run past that, and single-seed fitting has not been
+    re-measured against the larger, less "gentle" targets that implies — worth checking
+    before trusting it on a title whose confidence-derived ceiling sits well above 26 dB.
 
     It remains the first thing to put back if a title starts producing a filter that looks
     wrong, which is why it is a parameter rather than a literal."""
+
+    lowest_frequency_hz: float = 5.0
+    """Lowest frequency a section may be *placed* at — the evidence floor of `_fit_all`.
+
+    Not a band: one edge, and the only one `correction_band_hz` does not derive. Its own
+    docstring gives the reason it cannot be — a section below the lowest measured frequency has
+    its corner and Q fitted against nothing, and unbounded the fit does exactly that, once
+    returning a 3.22 Hz shelf at +45 dB to express a correction under 5 dB above 10 Hz.
+
+    5.0 to match `DesignParams.lowest_frequency_hz`, which is the same quantity on the
+    parametric path and was the only place it was named. Unifying them is the improvement here;
+    the value itself is still a prior, and a loose one in both directions. The analysis stages
+    measure from 4.0 Hz (`DiagnoseParams.band_hz`, `ExtractionParams.band_hz`), so 5.0 is
+    *tighter* than the evidence and forgoes a band that was observed. `noise_floor_hz` would be
+    tighter still and is title-derived, which is what §2.1 asks for — but `flatten` deliberately
+    holds its target flat below that floor, so clamping placement there too would change what
+    the fitter is allowed to realise and not merely where it may look. That belongs with the
+    noise-floor work, not here."""
+
+    residual_band_hz: tuple[float, float] = (5.0, 200.0)
+    """Band the fit's residual is scored over — wider than any placement, on purpose.
+
+    `_fit_structure` states the rule: evaluate wide, place narrow. A fit scored only where the
+    correction is lets a section drift upward to where nothing penalises it, which once put a
+    +15.2 dB peak at 378 Hz into a bass correction. Named here rather than left a literal
+    because `_fit_all` now has to guarantee it contains every derived placement band, and a
+    constant it cannot see is one it cannot check."""
 
     verify_band_hz: tuple[float, float] = (5.0, 45.0)
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
@@ -198,6 +297,15 @@ class Candidate:
     flattened out looked identical in the output.
     """
 
+    unpriced_target_db: np.ndarray | None = None
+    """The target before `priced_by_evidence` clipped it, if any (§14.1).
+
+    `None` for a candidate with no target at all (the parametric route) — the same convention
+    as `Proposal.unpriced_target_db`, which this is carried through from unchanged. Exists so a
+    reader can see how much the evidence ceiling removed, which `verdict.recovered_fraction`
+    states as a ratio but this states as the curve itself.
+    """
+
     @property
     def mv_adjust_db(self) -> float:
         """Master-volume reduction the cascade requires; positive means turn down.
@@ -208,6 +316,17 @@ class Candidate:
         """
         sos = biquad_sos(self.filters, PUBLISH_FS)
         return float(np.max(magnitude_db(sos, DESIGN_GRID, PUBLISH_FS)))
+
+    @property
+    def confidence(self) -> float:
+        """P(a real rolloff was applied), fit quality excluded — designer-interface.md §3.
+
+        `confidence_from_evidence` on this candidate's own `verdict.recovered_fraction` and
+        `verdict.shaping_fraction` (§14.3). An ordinal within this run, not a calibrated
+        probability — see that function's docstring."""
+        return confidence_from_evidence(
+            self.verdict.recovered_fraction, self.verdict.shaping_fraction
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,21 +339,50 @@ class Report:
     candidates: list[Candidate]
     timings: Timings
     fit_stats: FitStats
+    accept: AcceptParams = field(default_factory=AcceptParams)
+    """The model the candidates were judged by — `accepted` needs the shape that was asked for."""
+
+    ranking_tie_db: float = 0.25
+    """Flatness difference below which two candidates are the same answer (`accepted`).
+
+    Inside it, the one with fewer sections wins — R3's parsimony, applied where it belongs.
+    Two of the three titles with more than one passing candidate are genuine ties by this
+    measure: Nocturnal Animals at 2.47 against 2.49 dB and Tron at 1.32 against 1.34, where
+    preferring the lower number is preferring noise. Title 3's pair sit 1.54 against 4.27 and
+    are not a tie at all."""
 
     @property
     def accepted(self) -> Candidate | None:
         """The best of the candidates the acceptance model let through.
 
-        Ranked on the statistic the model actually judged — wobble against the material's own
-        roughness — rather than on `spread_db`, which includes a tilt the tilt clause has
-        already ruled on. Deliberately shallow either way: the acceptance model does the work,
-        and a scalar score that could overrule it would reintroduce exactly the
-        aggregate-blindness R1 exists to defeat.
+        Deliberately shallow: the acceptance model does the work, and a scalar score that
+        could overrule it would reintroduce exactly the aggregate-blindness R1 exists to
+        defeat. This only orders candidates already through it.
+
+        Ranked on `Correction.departure_db` against the shape that was *requested* — so a run
+        asking for a house curve is not handed the flattest candidate — then on section count
+        within `ranking_tie_db`. It was ranked on `wobble_db`, which is the statistic the
+        flatness clause judges but the wrong one to choose *between* passing candidates: it is
+        blind to level and tilt, which acceptance admits across an 11 dB and 4.5 dB/octave
+        range respectively, and the margins it decided on were 0.08-0.23 dB of a quantity
+        whose own scatter is 3-14 dB. On title 3 that preferred a candidate 3.70 dB above
+        plateau to one 0.36 dB below it, for 0.09 dB of wobble and one fewer section.
         """
         passing = [c for c in self.candidates if c.verdict.passed]
         if not passing:
             return None
-        return min(passing, key=lambda c: (c.verdict.wobble_db, len(c.filters)))
+        wanted = self.accept.target_tilt_db_per_octave
+        flattest = min(c.correction.departure_db(wanted) for c in passing)
+        # every candidate indistinguishable from the flattest, then the cheapest of those.
+        # Flatness breaks the remaining tie so the result does not depend on candidate order.
+        tied = [
+            c
+            for c in passing
+            if c.correction.departure_db(wanted) <= flattest + self.ranking_tie_db
+        ]
+        return min(
+            tied, key=lambda c: (len(c.filters), c.correction.departure_db(wanted))
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +395,13 @@ class Proposal:
     residual_db: float = 0.0
     notes: tuple[str, ...] = ()
     """What bound this target, if anything. Carried through to the `Candidate`."""
+
+    unpriced_target_db: np.ndarray | None = None
+    """`target_db` before `priced_by_evidence` clipped it to the measured margin (§14.1).
+
+    `None` whenever `target_db` is — a strategy that builds no target has nothing to have
+    clipped. Carried through so `recovered_fraction` and a reader can both see how much the
+    evidence ceiling removed, which `target_db` alone cannot show once it has been clipped."""
 
 
 def _deficit_anchor(
@@ -296,6 +451,63 @@ def _taper(freqs: np.ndarray, reference_hz: float, ratio: float) -> np.ndarray:
     """
     position = np.log2(np.asarray(freqs) / reference_hz) / math.log2(ratio)
     return 0.5 * (1.0 + np.cos(math.pi * np.clip(position, 0.0, 1.0)))
+
+
+def priced_by_evidence(
+    target: np.ndarray,
+    envelopes,
+    diagnosis: Diagnosis,
+    params: "PipelineParams",
+) -> tuple[np.ndarray, list[str]]:
+    """Clip a target to the boost each bin's own measured margin supports.
+
+    Per-bin, at `confidence_z` standard errors, independent of what any other bin or title needs.
+    A bin that is unmeasurable (`Envelopes.measurable` false) or has no bootstrap SE to derive a
+    ceiling from is left unrestricted rather than held to 0 dB — both properties' docstrings are
+    explicit that missing evidence must be weighted away, not read as proof of a deep rolloff.
+    What stands under an unrestricted bin is the fitter's own per-section `max_gain_db` and the
+    acceptance model, not nothing.
+
+    **Shared by every strategy that builds a target.** It used to be inline in `flatten` and so
+    applied only there, which meant `counterfactual` handed the fitter a target no evidence had
+    priced. That is not a small gap: on Alien the ceiling held `flatten` to 27 dB where it wanted
+    40, while `counterfactual` went on to claim 30 dB below the 42.5 Hz level-independence floor
+    and was accepted for it.
+    """
+    floor = diagnosis.noise_floor_hz
+    has_evidence = envelopes.measurable & np.isfinite(envelopes.margin_se_db)
+    native_ceiling = np.where(
+        has_evidence,
+        envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
+        np.inf,
+    )
+    ceiling = np.interp(DESIGN_GRID, envelopes.freqs, native_ceiling)
+    if not math.isnan(floor):
+        # Held flat below the noise floor, as the target is and for the same reason: down there
+        # nothing tracks the passband, so a ceiling that keeps falling toward DC is shaping a
+        # second time rather than adding evidence — measured on title 4, stacking the two left a
+        # ceiling still falling at 5 Hz and the fitter spent a section chasing the knee.
+        ceiling = np.where(
+            DESIGN_GRID < floor,
+            float(np.interp(floor, DESIGN_GRID, ceiling)),
+            ceiling,
+        )
+    # Per-bin, not global: a target whose *peak* sits under the ceiling's peak can still be
+    # clipped somewhere else entirely. Measured on Alien — target.max() (35 dB, near 22 Hz)
+    # never exceeded noise_ceiling.max() (42 dB, near 30 Hz), so this note was silent while
+    # 5-17 Hz was being held 10-12 dB below its raw deficit the whole time. The bin with the
+    # worst clip is the one worth naming, not the target's own unrelated peak.
+    notes: list[str] = []
+    clipped = target - ceiling
+    worst_bin = int(np.argmax(clipped))
+    if clipped[worst_bin] > 0.5:
+        notes.append(
+            f"boost cap binds: the target claims {target[worst_bin]:.1f} dB at "
+            f"{DESIGN_GRID[worst_bin]:.1f} Hz; the measured margin supports "
+            f"{ceiling[worst_bin]:.1f} dB there at {params.confidence_z:.2g} standard "
+            "errors of confidence"
+        )
+    return np.clip(target, 0.0, ceiling), notes
 
 
 def flatten_targets(
@@ -354,22 +566,39 @@ def flatten_targets(
         # continuing to chase a curve that is describing noise
         held = float(np.interp(floor, DESIGN_GRID, target))
         below = DESIGN_GRID < floor
-        withheld = float(np.max(target[below])) - held if below.any() else 0.0
-        target = np.where(below, held, target)
+        local_deficit = target
+        withheld = float(np.max(local_deficit[below])) - held if below.any() else 0.0
+        # Capped at the local measured deficit, not held flat unconditionally (§14, step 4).
+        # The flat hold asks for `held` at every frequency below the floor, but `held` is read
+        # off the target just *above* the floor and nothing guarantees the deficit below it
+        # never dips under that value — on Blazing Saddles it does, and the flat hold asked
+        # for 32.2 dB at 5 Hz where the mix is only 20.9 dB short, 154% of the measured deficit.
+        # Capping rather than tapering to zero: a taper below the floor would ask a shelf
+        # cascade for a band-pass shape and invite a cancelling pair, where a cap just stops
+        # asking for more than was measured.
+        over_by = float(np.max(held - local_deficit[below])) if below.any() else 0.0
+        target = np.where(below, np.minimum(held, local_deficit), target)
         if withheld >= 0.5:
             notes.append(
                 f"noise floor binds: the mix asks for a further {withheld:.1f} dB below "
                 f"{floor:.1f} Hz, held flat because nothing down there tracks the passband"
             )
-    if target.max() > params.max_gain_db:
-        notes.append(
-            f"boost cap binds: the target reaches {target.max():.1f} dB and is held at "
-            f"{params.max_gain_db:.1f} dB"
-        )
-    target = np.clip(target, 0.0, params.max_gain_db)
+        if over_by >= 0.5:
+            notes.append(
+                f"noise-floor hold capped at the local measured deficit below {floor:.1f} Hz: "
+                f"the flat hold at {held:.1f} dB would have exceeded it by up to "
+                f"{over_by:.1f} dB"
+            )
+    unpriced = target
+    target, capped = priced_by_evidence(target, envelopes, diagnosis, params)
+    notes.extend(capped)
     if target.max() < 1.0:
         return []
-    return [Proposal("flatten", target_db=target, notes=tuple(notes))]
+    return [
+        Proposal(
+            "flatten", target_db=target, unpriced_target_db=unpriced, notes=tuple(notes)
+        )
+    ]
 
 
 def counterfactual_targets(
@@ -390,7 +619,11 @@ def counterfactual_targets(
     restoration = _Restoration(material, diagnosis)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
-        target = counterfactual_target(material, diagnosis, cap, params, restoration)
+        unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
+        # Priced by the same evidence as `flatten`'s. A restored deficit is still only a claim
+        # about what the mix would have been, and a claim about a bin with no measurable margin
+        # is not evidence about that bin — see `priced_by_evidence`.
+        target, capped = priced_by_evidence(unpriced, envelopes, diagnosis, params)
         if target.max() < 1.0:
             logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
             continue
@@ -404,7 +637,14 @@ def counterfactual_targets(
                 )
                 break
         else:
-            proposals.append(Proposal(f"counterfactual/{cap:.0f}dB", target_db=target))
+            proposals.append(
+                Proposal(
+                    f"counterfactual/{cap:.0f}dB",
+                    target_db=target,
+                    unpriced_target_db=unpriced,
+                    notes=tuple(capped),
+                )
+            )
     return proposals
 
 
@@ -531,8 +771,20 @@ def counterfactual_target(
     deficit = np.maximum(after - before, 0.0)
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
     target = np.maximum(np.convolve(target, np.ones(9) / 9, mode="same"), 0.0)
-    target[DESIGN_GRID > params.diagnose.share_band_hz[1]] = 0.0
-    return target
+    # Terminated where this title's own restored deficit closes, and tapered, exactly as
+    # `flatten` is — `_deficit_anchor` and `_taper` carry the reasoning for both halves of that.
+    #
+    # It used to be `target[DESIGN_GRID > share_band_hz[1]] = 0.0`, a hard zero at 35 Hz.
+    # `DiagnoseParams.share_band_hz`'s own docstring says "Only the shares use this", and §13.5
+    # keeps it as a survivor precisely because a *cross-channel comparison* needs one yardstick;
+    # nothing licensed it to decide where a correction ends. The cost was not theoretical: it
+    # made this whole strategy incapable on any title whose knee sits above 35 Hz, which is
+    # Blazing Saddles at 44.4 Hz and Alien at 34.4-48.1 Hz — two of the three titles that
+    # abstain. Their counterfactual candidates are not marginal but wrecked, a -39.7 dB hole at
+    # 40 Hz and cliffs relocated to 23-37 Hz, because the deficit was cut off mid-knee.
+    _, plateau_hz = plateau_reference(before, grid, params.diagnose)
+    anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
+    return target * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
 def _fit_all(
@@ -543,14 +795,41 @@ def _fit_all(
     One call rather than one per proposal, because the section budget is escalated and a
     target escalating alone leaves most of the machine idle: its first tier is two tasks for
     seven workers. Together, a tier is every undecided proposal's tier at once.
+
+    **Placement is discovered per target, not asserted.** This used to hand every proposal of
+    every title the literal `(5.0, 40.0)`, which hard-bounds each section's centre frequency —
+    while `correction_band_hz`, written for exactly this and already used by `design.py`,
+    derives the span from where the target actually asks for something. The 40 Hz ceiling was
+    §2.1's move in the place it costs most: measured across the eight titles on hand, every
+    title whose `flatten` target fits under it accepts a filter, and every title whose target
+    reaches past it has its sections pinned against it — 38.8, 39.8, 37.6 and 37.2 Hz on
+    Alien, Blazing Saddles, Nocturnal Animals and Tron — and none of those four accepts
+    `flatten`. Blazing Saddles is the clearest: its target peaks at 33.6 dB at 38.9 Hz and
+    still asks 23 dB at 50 Hz, all of it above the ceiling, so four sections piled into
+    29-40 Hz including a -14.7 dB cancelling term and the residual landed at 2.27 dB. The
+    derived band is 22-50 Hz on the five titles that already work, inside the old bound, so
+    this is inert where the pipeline succeeds.
     """
+    placements = [
+        correction_band_hz(p.target_db, DESIGN_GRID, params.lowest_frequency_hz)
+        for p in proposals
+    ]
+    # "Evaluate wide, place narrow" is the rule `_fit_structure` states, so the band the
+    # residual is scored over must contain every band a section may be placed in. With a
+    # placement ceiling fixed at 40 Hz that was true by inspection; with a derived one it has
+    # to be arranged, and Alien's target already reaches 199 Hz against this 200. Inert on all
+    # eight titles measured — it prevents a section being placed where nothing scores it.
+    score_high = max(params.residual_band_hz[1], *(high for _, high in placements))
     return fit_minimal_biquads_all(
-        [FitRequest(p.target_db, (5.0, 40.0), p.label) for p in proposals],
+        [
+            FitRequest(p.target_db, placement, p.label)
+            for p, placement in zip(proposals, placements, strict=True)
+        ],
         DESIGN_GRID,
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
-        band_hz=(5.0, 200.0),
+        band_hz=(params.residual_band_hz[0], score_high),
         max_gain_db=params.max_gain_db,
         realisation=params.realisation,
         seeds=params.fit_seeds,
@@ -709,14 +988,13 @@ def run(
                 _judge(
                     proposal.label,
                     filters,
-                    proposal.target_db
-                    if proposal.target_db is not None
-                    else np.zeros_like(DESIGN_GRID),
+                    proposal.target_db,
                     error,
                     material,
                     diagnosis,
                     params,
                     proposal.notes,
+                    unpriced_target=proposal.unpriced_target_db,
                 )
             )
 
@@ -728,25 +1006,102 @@ def run(
         candidates=candidates,
         timings=timings,
         fit_stats=FIT_STATS,
+        accept=params.accept,
+    )
+
+
+def required_gain_reduction_db(
+    material: Material, filters: list[BiquadSpec], params: PipelineParams
+) -> float:
+    """Gain reduction this filter needs to avoid clipping the sub feed. 0.0 when none.
+
+    beqdesigner's own quantity — `min(20*log10(1/peak), 0)` on the filtered signal — measured on
+    the bass-managed sum a BEQ actually operates on, because that is the only signal where the
+    question means anything. See `AcceptParams.max_gain_reduction_db` for why the cascade's peak
+    *magnitude* is not a substitute: against this it is close to inverted.
+    """
+    sub = bass_managed_sum(material)
+    filtered = signal.sosfilt(biquad_sos(filters, float(material.fs)), sub)
+    peak = float(np.max(np.abs(filtered)))
+    if peak <= 0.0:
+        return 0.0
+    return min(20.0 * math.log10(1.0 / peak), 0.0)
+
+
+def judged_band_hz(
+    material: Material, diagnosis: Diagnosis, params: PipelineParams
+) -> tuple[float, float]:
+    """The band R1 is measured over, with its bottom taken from the evidence.
+
+    §6.2 has said since it was written that `verify_band_hz` "should be derived, not defaulted",
+    and the bottom edge is the half that can be: `diagnose` measures where programme-correlated
+    content stops, and below that there is nothing a correction could have got right. Leaving it
+    at 5.0 Hz set `flatten` against itself — the target is deliberately held flat below the noise
+    floor, on evidence, and acceptance then failed the candidate for not having corrected there.
+    Nocturnal Animals is the case: its `flatten` candidate reads +2.84 dB/oct and -3.4 dB over
+    5-45 Hz against limits of 2.0 and -3.0, and +0.97 and -1.9 over its own 19.8-45 Hz, which is
+    the same filter judged where its material exists.
+
+    **The top edge extends to cover the correction, and never contracts.** Replacing it with the
+    mix plateau's lower edge was tried and breaks title 1: its plateau begins at 13.9 Hz, the band
+    becomes 5-20.8 Hz and its accepted filter fails, because a correction acts above where the
+    deficit closes as well as below it. Taking the *wider* of the nominal edge and where the mix's
+    own deficit closes has neither problem — it leaves every title whose correction is contained
+    in 5-45 Hz exactly as it was, and it rescues the one where the nominal band excluded most of
+    where the filter works. Blazing Saddles is that title: content only above 33.7 Hz and a
+    deficit reaching to ~99 Hz, so the nominal band left 0.42 of an octave to read a slope over
+    and its tilt measured -7.32 dB/oct to 45 Hz against -0.02 to 80. Extended, it has 1.6 octaves
+    and a verdict that means something.
+
+    Per-title, from the mix, rather than per-candidate from the cascade — candidates have to be
+    judged over one band or their statistics are not comparable.
+    """
+    low, high = params.verify_band_hz
+    floor = diagnosis.noise_floor_hz
+    if not math.isnan(floor):
+        low = max(low, floor)
+    # The mix's own deficit, exactly as `flatten` measures it, and terminated the same way.
+    # Taking the *highest* frequency still short of the plateau is wrong and was tried: a deficit
+    # measured against a plateau level necessarily returns above the plateau's top, so it put the
+    # band's edge at 340-400 Hz and every title read as uncorrected. `_deficit_anchor` scans
+    # upward from the bottom and stops where the deficit first stays shut, which is the question.
+    freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    _, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    held = (freqs >= plateau_hz[0]) & (freqs <= plateau_hz[1])
+    levelled = response - float(np.median(response[held]))
+    deficit = np.convolve(np.maximum(-levelled, 0.0), np.ones(15) / 15, mode="same")
+    on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+    return low, min(
+        max(high, _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)),
+        float(DESIGN_GRID[-1]),
     )
 
 
 def _judge(
     label: str,
     filters: list[BiquadSpec],
-    target: np.ndarray,
+    target: np.ndarray | None,
     error: float,
     material: Material,
     diagnosis: Diagnosis,
     params: PipelineParams,
     target_notes: tuple[str, ...] = (),
+    unpriced_target: np.ndarray | None = None,
 ) -> Candidate:
+    """`target` is the priced target the fitter was handed, or `None` for a candidate with
+    none (the parametric route) — passed through to `verify`/`assess` so intent (§14.2) can
+    fall back to the house curve rather than to an all-zero target, which is a different claim.
+    """
     correction = verify(
         filters,
         material.mono_mix,
         float(material.fs),
-        band_hz=params.verify_band_hz,
+        band_hz=judged_band_hz(material, diagnosis, params),
+        diagnose_params=params.diagnose,
         exclude_bands_hz=params.exclude_bands_hz,
+        accept_params=params.accept,
+        realisation=params.realisation,
+        priced_target_db=target,
     )
     verdict = assess(
         filters,
@@ -755,6 +1110,8 @@ def _judge(
         params.accept,
         params.realisation,
         filter_floor_hz=diagnosis.filter_floor_hz,
+        required_offset_db=required_gain_reduction_db(material, filters, params),
+        target_db=target,
     )
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:
@@ -762,7 +1119,8 @@ def _judge(
     return Candidate(
         label=label,
         filters=filters,
-        target_db=target,
+        target_db=target if target is not None else np.zeros_like(DESIGN_GRID),
+        unpriced_target_db=unpriced_target,
         fit_error_db=error,
         correction=correction,
         verdict=verdict,
