@@ -713,6 +713,22 @@ def assess(
     samples = drift_distribution(filters, grid, realisation)
     drift = float(np.percentile(samples, 90))
     sos = biquad_sos(filters, realisation.fs)
+    # The strict Jury conditions put both poles of each real biquad inside the
+    # unit circle. Check the device coefficients: finite-band magnitude samples
+    # cannot detect an uncancelled pole at DC, and no tolerance licenses one.
+    for index, section in enumerate(realisation.quantise(sos)):
+        a0, a1, a2 = section[3:]
+        stable = (
+            np.all(np.isfinite(section))
+            and a0 > 0.0
+            and a0 + a1 + a2 > 0.0
+            and a0 - a1 + a2 > 0.0
+            and a0 - a2 > 0.0
+        )
+        if not stable:
+            failures.append(
+                f"section {index + 1} is not stable after device coefficient quantisation"
+            )
 
     full = magnitude_db(sos, grid, realisation.fs)
     # §4.2's headroom, measured on the waveform rather than on the magnitude. Reported on

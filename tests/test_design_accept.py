@@ -571,3 +571,35 @@ def test_an_authored_hump_is_not_an_overshoot() -> None:
         [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)], humped, noise_floor_hz=float("nan")
     )
     assert not any("not content" in f for f in verdict.failures), verdict.failures
+
+
+@pytest.mark.parametrize("corner_hz, stable", [(5.0, False), (15.0, True)])
+def test_device_stability_is_required_even_when_the_corrected_shape_passes(
+    corner_hz, stable
+) -> None:
+    from scipy import signal
+
+    from beqanalyser.design.filters import Realisation, biquad_sos
+    from beqanalyser.design.verify import verify
+
+    filters = [BiquadSpec("low_shelf", corner_hz, 20.0, 0.7)]
+    device = Realisation()
+    sos = biquad_sos(filters, 1000)
+    inverse = sos[:, [3, 4, 5, 0, 1, 2]].copy()
+    inverse[:, :3] /= inverse[:, 3:4]
+    inverse[:, 4:] /= inverse[:, 3:4]
+    inverse[:, 3] = 1.0
+    samples = signal.sosfilt(
+        inverse, np.random.default_rng(42).normal(size=300000)
+    )
+    corrected = verify(filters, samples, 1000, realisation=device)
+    verdict = assess(filters, corrected, float("nan"), realisation=device)
+    rounded = device.quantise(biquad_sos(filters, device.fs))
+    if not stable:
+        assert rounded[0, 3:].sum() == 0.0
+        assert rounded[0, :3].sum() != 0.0
+        assert not verdict.passed
+        assert any("not stable" in failure for failure in verdict.failures)
+        assert all("not stable" in failure for failure in verdict.failures)
+    else:
+        assert verdict.passed, verdict.failures
