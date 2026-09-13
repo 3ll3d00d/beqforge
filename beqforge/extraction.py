@@ -90,6 +90,122 @@ class ExtractionParams:
     where corners live. That reasoning was wrong in effect: at that separation there is no
     coherence left to measure. See §10 — the lower edge remains an unresolved prior."""
 
+    confidence_bins: int | None = None
+    """Cap on how many bins `margin_se_db` is computed for. `None` prices every one.
+
+    There used to be a band here, `(4.0, 60.0)`, asserted as "every knee measured so far sits
+    inside it" — §2.1's move stated outright, since it makes a title whose knee is higher
+    unrepresentable rather than unusual. Above the band `margin_se_db` is `inf`, which by its own
+    documented convention means *no restriction*, so the one mechanism that prices boost against
+    evidence was silent exactly where the titles that abstain ask for it: measured, three ask for
+    boost above 60 Hz, by 6.7, 3.9 and 1.5 dB.
+
+    Deriving the edge was tried before removing it, from the mix's own plateau, on the argument
+    that above where the programme reaches level no strategy asks for boost. **That argument is
+    false and Alien says so**: its plateau begins at 49.7 Hz and `flatten` asks for up to 14.6 dB
+    above 40 Hz, out to 132 Hz. A derived edge resting on a premise the material contradicts is
+    no better than the constant it replaced.
+
+    So every bin is priced, and the question of where to stop does not arise. It is affordable
+    because the stage is not where the time is: pricing all 477 bins of the largest title on hand
+    costs 2.7 s against 0.6 s for the 57 the old band covered, inside a 60 s run whose fitter is
+    82% of it. `_block_bootstrap_se` chunks the one large allocation rather than sizing it by the
+    bin count, which keeps the memory flat as the bin count grows. This cap remains only so a
+    profiling run can pin the cost; nothing in the pipeline sets it."""
+
+    confidence_bootstraps: int = 200
+    """Block-bootstrap replicates behind `margin_se_db`. See that field for why a block."""
+
+
+_BOOTSTRAP_ELEMENTS = 4_000_000
+"""Peak elements in the bootstrap's resampling gather — about 32 MB of float64 per chunk.
+
+Bounds memory without changing a single returned value: the replicate indices are shared across
+bins, so chunking the gather is arithmetically identical to doing it in one array, and a test
+pins that by forcing one bin per chunk.
+
+Sized below what the gather alone needs because `np.percentile` sorts along the frame axis and
+takes its own copy, so the real peak is roughly twice the figure above. Measured on the largest
+title on hand, pricing all 477 bins costs 3.5 s against 0.7 s for the 57 the old fixed band
+covered, and about 0.4 GB of peak resident set — affordable against a 60 s run, but the run was
+once killed for memory pressure with this at 20 million, so it is deliberately conservative.
+Chunking more finely costs only loop overhead."""
+
+
+def _runs(mask: np.ndarray) -> list[np.ndarray]:
+    """Contiguous runs of `True` in `mask`, as arrays of frame indices.
+
+    The unit a block bootstrap resamples. Frames within a run overlap (`overlap` shares half
+    of each with its neighbour) and so are not independent draws; frames in different runs
+    came from different moments of the programme and are what independence there is."""
+    idx = np.flatnonzero(mask)
+    if idx.size == 0:
+        return []
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    return list(np.split(idx, breaks + 1))
+
+
+def _block_bootstrap_se(
+    power: np.ndarray,
+    bins: np.ndarray,
+    mask: np.ndarray,
+    percentile: float,
+    n_boot: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Bootstrap standard error, in dB, of the `percentile` envelope over `mask`'s frames.
+
+    Resampling individual frames would treat a 50%-overlapping pair as two independent
+    observations when they are almost one; resampling whole runs (§`_runs`) instead is the
+    standard fix for autocorrelated series and is what actually distinguishes 1,300 loud
+    frames drawn from hundreds of separate scenes (tight) from 11 loud frames that are each
+    their own isolated instant (wide) — a flat constant cannot see that difference.
+
+    Vectorised across every bin in `bins` at once: the resampled *frame indices* are the same
+    for every bin in a given replicate, so one `(n_boot, n_frames)` index matrix drives one
+    gather and one `percentile` call rather than one per bin.
+    """
+    runs = _runs(mask)
+    if len(runs) < 2:
+        return np.full(bins.shape[0], np.inf)
+    n_frames = int(mask.sum())
+    run_lengths = np.array([r.size for r in runs])
+    replicate_idx = np.empty((n_boot, n_frames), dtype=np.int64)
+    for b in range(n_boot):
+        # Drawn with replacement until the concatenation covers n_frames, not a fixed
+        # `len(runs)` draws — that many draws covers n_frames *on average*, not always:
+        # a batch that happens to land on short runs falls short of it.
+        filled = 0
+        batch = max(len(runs), 8)
+        while filled < n_frames:
+            chosen = rng.integers(0, len(runs), size=batch)
+            covered = np.cumsum(run_lengths[chosen])
+            stop = int(np.searchsorted(covered, n_frames - filled)) + 1
+            for run_i in chosen[:stop]:
+                run = runs[run_i]
+                take = min(run.size, n_frames - filled)
+                replicate_idx[b, filled : filled + take] = run[:take]
+                filled += take
+                if filled >= n_frames:
+                    break
+            batch *= 2
+    # Chunked over bins, because the gather below is the one large allocation here and it is
+    # proportional to bins x replicates x frames: every bin of a two-hour title at 200
+    # replicates is some 400 MB in one array. The arithmetic is identical either way — the
+    # replicate indices are shared across bins by construction — so this only bounds peak
+    # memory, and it is what lets the caller price every bin rather than a band of them.
+    flat_idx = replicate_idx.reshape(-1)
+    chunk = max(1, _BOOTSTRAP_ELEMENTS // max(n_boot * n_frames, 1))
+    out = np.empty(bins.shape[0])
+    for start in range(0, bins.shape[0], chunk):
+        taken = bins[start : start + chunk]
+        resampled = power[taken][:, flat_idx].reshape(taken.size, n_boot, n_frames)
+        percentiles_db = 10.0 * np.log10(
+            np.percentile(resampled, percentile, axis=2) + 1e-300
+        )
+        out[start : start + chunk] = np.std(percentiles_db, axis=1)
+    return out
+
 
 @dataclass(frozen=True, slots=True)
 class Envelopes:
@@ -114,6 +230,20 @@ class Envelopes:
     loud_frames: int
     quiet_frames: int
     total_frames: int
+    margin_se_db: np.ndarray
+    """Bootstrap standard error of `margin_db`, per bin — see `_block_bootstrap_se`.
+
+    How much to trust the margin at each frequency, derived from how many independent loud
+    and quiet events actually support it there, rather than assumed as one number for every
+    title. `inf` outside `ExtractionParams.confidence_band_hz`, or wherever fewer than two
+    independent runs exist to estimate a spread from at all.
+
+    `inf` here must read as "this mechanism has nothing to say", the same convention
+    `measurable` uses for a missing peak/quiet separation — a caller deriving a ceiling from
+    `margin_db - z * margin_se_db` must treat an infinite result as *no restriction*, not as
+    zero boost. The alternative reading would make declining to spend the bootstrap outside
+    the confidence band indistinguishable from a genuine absence of evidence inside it, and
+    silently zero every target that reaches past 60 Hz."""
 
     @property
     def margin_db(self) -> np.ndarray:
@@ -182,6 +312,29 @@ def extract(
     reference = params.reference_band_hz
     coherence = _coherence(freqs, power, reference)
 
+    margin_se_db = np.full(freqs.shape[0], np.inf)
+    # every analysed bin, unless a profiling run has pinned the count — see `confidence_bins`
+    confidence_bins = np.arange(freqs.shape[0])[: params.confidence_bins]
+    if confidence_bins.size and loud.any() and quiet.any():
+        rng = np.random.default_rng(0)
+        se_peak = _block_bootstrap_se(
+            power,
+            confidence_bins,
+            loud,
+            params.envelope_percentile,
+            params.confidence_bootstraps,
+            rng,
+        )
+        se_quiet = _block_bootstrap_se(
+            power,
+            confidence_bins,
+            quiet,
+            params.envelope_percentile,
+            params.confidence_bootstraps,
+            rng,
+        )
+        margin_se_db[confidence_bins] = np.hypot(se_peak, se_quiet)
+
     envelopes = Envelopes(
         freqs=freqs,
         mean_db=mean_db,
@@ -192,6 +345,7 @@ def extract(
         loud_frames=int(loud.sum()),
         quiet_frames=int(quiet.sum()),
         total_frames=len(band_energy_db),
+        margin_se_db=margin_se_db,
     )
     if not envelopes.loud_frames:
         logger.warning(

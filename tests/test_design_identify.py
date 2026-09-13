@@ -30,6 +30,7 @@ def envelopes(mean_db: np.ndarray) -> Envelopes:
         loud_frames=100,
         quiet_frames=100,
         total_frames=1000,
+        margin_se_db=np.full_like(FREQS, np.inf),
     )
 
 

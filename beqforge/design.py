@@ -13,13 +13,13 @@ Two routes, matching the contract's `method`:
 """
 
 import logging
-import math
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 
 from beqanalyser.design import (
+    DESIGN_GRID,
     Alignment,
     BiquadSpec,
     ExactInversionUnavailable,
@@ -43,6 +43,15 @@ from beqanalyser.design.rolloff import attenuation_db
 logger = logging.getLogger(__name__)
 
 DesignMethod = Literal["exact", "fitted", "non_parametric"]
+RESIDUAL_BAND_HZ = (5.0, 200.0)
+"""Band the fitted cascade's residual is scored over, and reported against.
+
+One name because it was two literals — the `fit_minimal_biquads` call and `_result`'s own `band`
+— which is two places to change and one of them to forget. Wider than any placement band on
+purpose: `_fit_structure` states the rule, evaluate wide and place narrow, or a section drifts up
+to where nothing penalises it.
+"""
+
 PUBLISH_FS = 96000.0
 """Rate the cascade is realised at for measuring its own residual. Not published (§5).
 
@@ -65,8 +74,12 @@ class DesignParams:
     Sections are spent until this is met, then no more. Under-spending shows up here as a
     residual that misses; over-spending would otherwise show up nowhere at all."""
 
-    noise_margin_db: float = 12.0
-    """How far boosted noise must stay below the content that masks it (§4.1)."""
+    confidence_z: float = 1.645
+    """Bootstrap standard errors of margin a bin must clear before its boost is trusted (§4.1).
+
+    The same dial as `PipelineParams.confidence_z`, and the same default, because it is the same
+    question — see `_noise_ceiling`. It replaces `noise_margin_db`, a flat 12 dB haircut that
+    could not tell 1,300 loud frames drawn from hundreds of scenes from 11 isolated instants."""
 
     lowest_frequency_hz: float = 5.0
     """Lowest frequency worth restoring — and the floor on where a section may be placed.
@@ -152,7 +165,7 @@ def design(
         )
         try:
             filters = invert_to_shelves(identification.rolloff, protect)
-            freqs = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+            freqs = DESIGN_GRID
             target = inversion_target_db(
                 identification.rolloff, protect, freqs, PUBLISH_FS
             )
@@ -169,7 +182,7 @@ def design(
         except ExactInversionUnavailable as unavailable:
             logger.info(f"Closed form unavailable ({unavailable}); fitting instead")
 
-    freqs = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    freqs = DESIGN_GRID
     target = _fitted_target(freqs, fit, protect_corner, params, ceiling_db, envelopes)
     filters, _ = fit_minimal_biquads(
         target,
@@ -177,7 +190,7 @@ def design(
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
-        band_hz=(5.0, 200.0),
+        band_hz=RESIDUAL_BAND_HZ,
         placement_band_hz=correction_band_hz(target, freqs, params.lowest_frequency_hz),
         max_gain_db=params.max_boost_db + params.gain_headroom_db,
         realisation=params.realisation,
@@ -241,9 +254,26 @@ def _noise_ceiling(
     Computed and applied unconditionally. If it binds that is a signal, not merely a limit:
     a filter whose shape is set by the noise ceiling says the title is in the marginal regime
     and confidence should fall accordingly.
+
+    **One ceiling, derived the same way on both paths.** This was `margin_db - 12.0`, a flat
+    haircut, while `flatten` moved to `margin_db - confidence_z * margin_se_db` — per bin, from
+    a block bootstrap over the evidence each bin actually has. §13.7 recorded the two as "two
+    boost caps, differently applied"; keeping the flat one here would have left the parametric
+    route asserting a number the rest of the system had stopped asserting.
+
+    **And `inf` means no restriction, not zero boost.** The previous line was
+    `np.where(np.isfinite(ceiling), ceiling, 0.0)`, which read a bin with no measurable
+    peak/quiet separation as permitting no boost at all. `Envelopes.measurable` and
+    `margin_se_db` both have docstrings saying the opposite in as many words — missing evidence
+    must be weighted away, not read as proof of a deep rolloff — and `flatten` follows that.
+    Two paths disagreeing about what an unmeasurable bin means is worse than either answer.
     """
-    ceiling = envelopes.margin_db - params.noise_margin_db
-    ceiling = np.where(np.isfinite(ceiling), ceiling, 0.0)
+    has_evidence = envelopes.measurable & np.isfinite(envelopes.margin_se_db)
+    ceiling = np.where(
+        has_evidence,
+        envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
+        np.inf,
+    )
     wanted = -attenuation_db(
         envelopes.freqs, fit.corner_hz, fit.slope_db_per_octave, fit.knee
     )
@@ -261,7 +291,7 @@ def _result(
     params: DesignParams,
     binds: bool,
 ) -> Design:
-    band = (5.0, 200.0)
+    band = RESIDUAL_BAND_HZ
     boost = magnitude_db(biquad_sos(filters, PUBLISH_FS), freqs, PUBLISH_FS)
     return Design(
         filters=filters,

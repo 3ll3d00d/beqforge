@@ -13,6 +13,8 @@ discriminates at all. Its behaviour on the band that matters is a measurement on
 material, recorded in §3.4.
 """
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -136,3 +138,46 @@ def test_reference_band_does_not_move_with_the_signal(source: np.ndarray) -> Non
         params,
     )
     assert plain.reference_band_hz == filtered.reference_band_hz == (60.0, 120.0)
+
+
+def test_every_analysed_bin_is_priced_against_its_own_evidence() -> None:
+    """The confidence band is gone, not widened.
+
+    It was (4, 60) — "every knee measured so far sits inside it", §2.1's move — and above it
+    `margin_se_db` is `inf`, which by convention means *no restriction*. Three titles ask for
+    boost above 60 Hz, so the one mechanism that prices boost was silent where they needed it.
+    Deriving the edge from the mix plateau was tried first and Alien disproves its premise: its
+    plateau begins at 49.7 Hz and `flatten` asks for 14.6 dB above 40 Hz.
+    """
+    samples = synthesise(
+        SyntheticProfile(duration_s=600.0, event_rate_hz=0.08), FS, seed=7
+    )
+    envelopes = extract(samples, FS)
+
+    priced = np.isfinite(envelopes.margin_se_db)
+    assert priced.all(), (
+        f"{(~priced).sum()} of {priced.size} bins carry no standard error; every analysed bin "
+        "should be priced"
+    )
+    # and the cap still works, for a profiling run that wants to pin the cost
+    pinned = extract(
+        samples, FS, dataclasses.replace(ExtractionParams(), confidence_bins=10)
+    )
+    assert np.isfinite(pinned.margin_se_db).sum() == 10
+
+
+def test_chunking_the_bootstrap_cannot_change_what_it_returns() -> None:
+    """Memory bound only: the replicate indices are shared across bins by construction."""
+    from beqanalyser.design import extraction
+
+    samples = synthesise(
+        SyntheticProfile(duration_s=300.0, event_rate_hz=0.08), FS, seed=11
+    )
+    whole = extract(samples, FS)
+    original = extraction._BOOTSTRAP_ELEMENTS
+    try:
+        extraction._BOOTSTRAP_ELEMENTS = 1  # forces one bin per chunk
+        chunked = extract(samples, FS)
+    finally:
+        extraction._BOOTSTRAP_ELEMENTS = original
+    assert np.array_equal(whole.margin_se_db, chunked.margin_se_db)
