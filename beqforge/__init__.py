@@ -9,8 +9,21 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+import numpy as np
+
 BIQUAD_BUDGET = 10
 """Maximum biquad sections a published filter may contain (designer-interface.md v1.0 §5)."""
+
+DESIGN_GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+"""The frequency axis every target, cascade and judgement is evaluated on.
+
+Here because it was written out twice — `pipeline` defined it and `accept` rebuilt the same
+`logspace(3, 400, 400)` inline for the drift and contribution checks — and two copies of a grid
+are two grids that can disagree. §13.5 calls its extent benign, which it is; a second copy of it
+is not, because a cascade judged on a grid the target was never sampled on is judged somewhere
+else. `material.py` makes the same argument about the mix gains: anything that has to agree
+about a number should read it from one place.
+"""
 
 BiquadType = Literal["peaking_eq", "low_shelf", "high_shelf"]
 
