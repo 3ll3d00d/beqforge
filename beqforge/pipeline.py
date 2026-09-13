@@ -1015,14 +1015,16 @@ def run(
 def required_gain_reduction_db(
     material: Material, filters: list[BiquadSpec], params: PipelineParams
 ) -> float:
-    """Gain reduction this filter needs to avoid clipping the sub feed. 0.0 when none.
+    """Gain reduction needed on the sub feed: 0.0 when none, NaN when unavailable.
 
     beqdesigner's own quantity — `min(20*log10(1/peak), 0)` on the filtered signal — measured on
     the bass-managed sum a BEQ actually operates on, because that is the only signal where the
-    question means anything. See `AcceptParams.max_gain_reduction_db` for why the cascade's peak
-    *magnitude* is not a substitute: against this it is close to inverted.
+    question means anything. The cascade's peak magnitude is not a substitute, and a mono
+    mix without channel decomposition cannot establish the sub feed's headroom.
     """
     sub = bass_managed_sum(material)
+    if sub is None:
+        return math.nan
     filtered = signal.sosfilt(biquad_sos(filters, float(material.fs)), sub)
     peak = float(np.max(np.abs(filtered)))
     if peak <= 0.0:

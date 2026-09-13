@@ -35,7 +35,7 @@ cache's key so an excerpt and the full programme never share a cached analysis, 
 `design_beq.py` branches on it yet — that's `designer-interface.md`'s contract, not yet built
 here); `--mono-only` drops the per-channel arrays and roughly halves the file, which is fine for
 the `flatten` strategy alone but starves `counterfactual` and the per-channel diagnosis of the
-channels they need.
+channels they need. Without those channels, sub-feed headroom is reported as unavailable.
 
 **`tools/design_beq.py data/FILM.npz`** — the entry point. Exit status is 0 when a candidate was
 accepted, 1 when abstaining was the correct output — neither is an error. Key flags:

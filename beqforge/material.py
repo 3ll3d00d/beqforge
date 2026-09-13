@@ -58,8 +58,10 @@ BM_CROSSOVER_HZ = 80.0
 
 def bass_managed_sum(
     material: "Material", crossover_hz: float = BM_CROSSOVER_HZ
-) -> np.ndarray:
+) -> np.ndarray | None:
     """The sub feed a BEQ actually operates on, at the scale a device would see it.
+
+    Returns None when channel decomposition is unavailable.
 
     A BEQ is applied **post bass management, to the sub channel only** — which is why the
     headroom a filter costs is not a master-volume figure and usually is not a cost at all. To
@@ -74,6 +76,10 @@ def bass_managed_sum(
     content does not sum coherently, the measured sub feed peaks 9 to 46 dB below full scale,
     and a correction of tens of dB at frequencies with no content in them costs nothing.
     """
+    # A mono mix cannot reconstruct the separately low-passed channel contributions.
+    if not material.channels:
+        return None
+
     from scipy import signal as _signal
 
     section = _signal.butter(

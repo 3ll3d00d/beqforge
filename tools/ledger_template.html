@@ -367,7 +367,7 @@
         <div class="metric">
           <div class="lbl">peak boost / headroom</div>
           <div class="big tnum">+${t.mv_adjust_db.toFixed(1)} dB</div>
-          <div class="sub">${t.offset_db >= 0 ? "no gain reduction needed" : (-t.offset_db).toFixed(1) + " dB reduction needed"}</div>
+          <div class="sub">${t.offset_db == null ? "gain reduction unavailable" : t.offset_db >= 0 ? "no gain reduction needed" : (-t.offset_db).toFixed(1) + " dB reduction needed"}</div>
         </div>
       </div>
 

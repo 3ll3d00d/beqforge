@@ -225,7 +225,7 @@ class Verdict:
     """The same segment on the corrected curve. The turnover clause compares these two."""
 
     required_offset_db: float = 0.0
-    """Gain reduction the filter needs to avoid clipping the sub feed. 0.0 means none.
+    """Gain reduction needed on the sub feed. 0.0 means none; NaN means unavailable.
 
     **Reported, not gated (§14.3).** Headroom is output-only per the contract's §2 — "you do
     not receive a headroom constraint as an input" — so this used to fail a candidate against

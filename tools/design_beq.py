@@ -123,6 +123,14 @@ def show_identification(report: Report) -> None:
         )
 
 
+def _headroom(offset_db: float) -> str:
+    if math.isnan(offset_db):
+        return "gain reduction unavailable (no channel decomposition)"
+    if offset_db >= 0.0:
+        return "no gain reduction needed"
+    return f"needs {-offset_db:.1f} dB of gain reduction"
+
+
 def show_candidates(report: Report) -> None:
     print(RULE)
     print("CANDIDATES  (one per target strategy; all judged the same way)")
@@ -153,7 +161,7 @@ def show_candidates(report: Report) -> None:
         print(
             f"      device: {v.device_error_db:.2f} dB of rounding error, tightest section has "
             f"{v.dc_margin_steps:.1f} steps of DC headroom (drift p90 {v.drift_db:.2f} dB)"
-            f"   clipping: {v.required_offset_db:+.2f} dB"
+            f"   clipping: {_headroom(v.required_offset_db)}"
         )
         recovered = (
             "n/a"
@@ -184,11 +192,7 @@ def show_result(report: Report) -> None:
     )
     print(
         f"\n  {accepted.label}    peak boost {accepted.mv_adjust_db:+.1f} dB, "
-        + (
-            "no gain reduction needed"
-            if offset >= 0.0
-            else f"needs {-offset:.1f} dB of gain reduction"
-        )
+        + _headroom(offset)
         + f"\n  recovered {recovered} of the measured deficit, "
         f"confidence {accepted.confidence:.2f}\n"
     )

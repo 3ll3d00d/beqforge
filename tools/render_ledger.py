@@ -98,7 +98,7 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
         "shaping": verdict["shaping_fraction"],
         "confidence": candidate.get("confidence"),
         "mv_adjust_db": candidate["mv_adjust_db"],
-        "offset_db": verdict["required_offset_db"] or 0.0,
+        "offset_db": verdict["required_offset_db"],
         "band": list(candidate["correction"]["band_hz"]),
         "filters": candidate["filters"],
         "notes": notes,

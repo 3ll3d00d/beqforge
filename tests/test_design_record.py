@@ -228,3 +228,16 @@ def test_a_dirty_tree_is_distinguishable_from_itself() -> None:
     digest = revision.split("+src:")[1]
     assert len(digest) == 12 and all(c in "0123456789abcdef" for c in digest)
     assert record._source_digest() == digest, "the digest must be stable within a run"
+
+
+def test_ledger_preserves_unavailable_headroom(a_record):
+    from tools.render_ledger import title_entry
+
+    a_record["fingerprint"] = {"material_path": "data/demo.npz"}
+    a_record["material"]["duration_s"] = 60.0
+    candidate = a_record["candidates"][0]
+    candidate["correction"] = {"band_hz": (5.0, 45.0)}
+    candidate["verdict"].update(
+        required_offset_db=None, recovered_fraction=None, shaping_fraction=None
+    )
+    assert title_entry(a_record)["offset_db"] is None
