@@ -22,16 +22,16 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/__main__.py` | The one hard-coded run configuration. |
 | `beqanalyser/beq.ipynb` | Same pipeline, stage by stage. **Partially stale — see gotchas.** |
 | `beqanalyser/design/` | Automated filter design — a **separate capability**, not part of the clustering pipeline above. See `AUTOMATED_DESIGN.md`; the pipeline runs material → extraction → identify → design → verify. |
-| `beqanalyser/design/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names. |
-| `beqanalyser/design/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence. |
+| `beqanalyser/design/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
+| `beqanalyser/design/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
 | `beqanalyser/design/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
 | `beqanalyser/design/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link; see §10.** |
 | `beqanalyser/design/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
 | `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is ~75% of a run; `_sos_from_parameters` is a third copy of the RBJ formulae, kept honest by a test. |
 | `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
-| `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end. **The only check that can say a filter is wrong rather than merely inaccurate.** |
+| `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
 | `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
-| `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff test is comparative, so it needs no calibrated threshold. |
+| `beqanalyser/design/accept.py` | R1 and R3 of §6.4 as checks. The cliff, flatness, turnover and overshoot tests are comparative and so need no calibrated threshold; the shape request (`target_tilt_db_per_octave` and its tolerances) is a stated preference; realisability is judged on the curve the device will play rather than against a drift constant. Tilt, level and extent judge against *intent* (`before_db` + the evidence-priced target), not flat, so a partial correction is judged on whether it achieved what it was licensed to (§14.2). `recovered_fraction` and `confidence_from_evidence` (§14.1, §14.3) report how much of the deficit was licensed and how much of the correction is shaping rather than identification; headroom (`required_offset_db`) is reported, never gated (§14.3). |
 | `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
 | `beqanalyser/design/cache.py` | Stage cache — the analysis, and any strategy declaring `cache_modules`. On by default; keyed per stage so work on the fitter does not drop the analysis. |
 | `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
@@ -202,9 +202,12 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   response), `counterfactual` (restore filtered channels, re-sum, read the deficit) and `parametric`
   (fit and invert a rolloff) all produce a target, all go through the same fitter and the same
   acceptance model, and all run by default. Adding one is a function plus an entry in `STRATEGIES`.
-  Select with `--strategy NAME` (repeatable, or `all`). `flatten` is the one that produces an accepted
-  filter on three of the four titles; it also has no opinion of its own and will invert a noise floor as
-  happily as a rolloff, which is what `diagnose`'s guard is for.
+  Select with `--strategy NAME` (repeatable, or `all`). All eight titles on hand now accept — `flatten`
+  wins three, `counterfactual` five — and `parametric` has never produced the selected filter.
+  No strategy has an opinion of its own: each will invert a noise floor as happily as a rolloff, which is
+  what `priced_by_evidence` and `diagnose`'s guard are for. **Every strategy that builds a target must
+  price it through `priced_by_evidence`**; `counterfactual` did not for a long time, and handed the
+  fitter +35 to +46 dB of boost that no measurement supported.
 * **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but the
   outcome is a flat-to-rising response, and inverting the measured response reaches it directly. Do not
   reach for `identify_rolloff` to build a target — it returned "no representable alignment" on all three
@@ -250,7 +253,30 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   was right. Four separate outputs measured well and were wrong on sight — a +15 dB peak at 378 Hz, a
   no-op section at 105 Hz, a +45 dB gain, a shelf placed at 3.22 Hz. Run `verify` and look at the
   corrected curve.
-* A run is ~42-70 s a title and the test suite ~3 minutes. Both were several times that before the work in PERFORMANCE.md; run them in the background regardless.
+* **Headroom is a clipping question on the sub feed, not a master-volume figure.** A BEQ runs post bass
+  management on the sub channel only, so a large boost usually costs the listener nothing. Judge it with
+  `required_gain_reduction_db` on `material.bass_managed_sum`, never by the cascade's peak magnitude —
+  measured against the real quantity, peak magnitude is close to *inverted* (+45.7 dB filters needing
+  0.00 dB of reduction, +18.2 dB ones needing 4.4). AUTOMATED_DESIGN.md §13.4 has the table. What this
+  does not see is excursion, which is reported as a diagnostic and is a property of a system rather than
+  of a filter.
+* **The tilt dial reads in the audio sense; the measurement does not.**
+  `AcceptParams.target_tilt_db_per_octave` is positive for a low end *rising* toward the bottom, which is
+  the opposite of `Correction.tilt_db_per_octave`. `assess` negates once, at the comparison. Do not add a
+  second negation somewhere else.
+* **Tilt, level and extent are judged against intent, not flat — don't move the others onto it
+  too.** `Correction.intent_db` is `before_db` + the evidence-priced target (+ the house curve),
+  and it exists so a target `priced_by_evidence` clipped is judged on whether the fit achieved
+  what the evidence licensed rather than on whether it happened to be flat (§14.2) — without it,
+  a filter that did exactly what it was asked failed anyway. Overshoot, cliff, wobble-against-
+  material, turnover, section contribution and drift/realisability must stay judged against the
+  house curve or the material: they ask *is this filter wrong*, and judging them against a target
+  that could itself be wrong collapses into trusting the residual (§6.2). `recovered_fraction` and
+  `confidence` (§14.1, §14.3) report how much of the deficit was licensed and how much rests on
+  shaping rather than identification — a low confidence is a signal, not a reason to reject on its
+  own. Headroom (`required_offset_db`) is reported, never gated: there is no `max_gain_reduction_db`
+  in `AcceptParams` any more (§2 of the contract — headroom is output-only).
+* A run is ~40-80 s a title and the test suite ~2 minutes. Both were several times that before the work in PERFORMANCE.md; run them in the background regardless.
   [PERFORMANCE.md](PERFORMANCE.md) is the profile and the plan — where the time goes, which changes
   cannot alter an output and which trade accuracy for it. Read it before optimising anything here;
   it records what was already measured and ruled out (`tol` is not a lever, `verify` is 0.3 s).
