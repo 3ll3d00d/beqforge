@@ -618,3 +618,34 @@ def test_the_fitting_loop_builds_the_same_coefficients_as_the_public_route() -> 
         public = F.biquad_sos(F._unpack(params, shelves, peaks), 96000.0)
         direct = F._sos_from_parameters(params, shelves, peaks, 96000.0)
         assert np.array_equal(public, direct), "the two RBJ paths have diverged"
+
+
+def test_placement_reaches_far_up_and_not_at_all_down() -> None:
+    """The asymmetry of `correction_band_hz`, with the magnitudes it was measured at.
+
+    Reaching up is cheap and twice useful — a higher corner is better conditioned at 96 kHz, and
+    it is what blends the correction into the programme above it. Reaching down puts a section's
+    corner and Q where nothing was observed. Half an octave up cost title 1 its accepted filter
+    once placement stopped being a fixed literal: its sections fell to 7.7 Hz and drifted 5.04 dB
+    under publication rounding against a 3.0 limit.
+    """
+    from beqanalyser.design.filters import WIDEN_OCTAVES, correction_band_hz
+
+    # a correction living over 8-15 Hz, with an evidence floor at 5
+    target = np.where((FREQS >= 8.0) & (FREQS <= 15.0), 10.0, 0.0)
+    low, high = correction_band_hz(target, FREQS, 5.0)
+
+    active_low = float(FREQS[np.abs(target) >= 0.5].min())
+    active_high = float(FREQS[np.abs(target) >= 0.5].max())
+    assert low >= 5.0, "placement must never reach below the evidence floor"
+    assert low == pytest.approx(active_low, rel=0.02), (
+        "and it must not be widened downward either: the floor is a clamp, not a margin"
+    )
+    assert high == pytest.approx(active_high * 2.0**WIDEN_OCTAVES, rel=0.02)
+    assert WIDEN_OCTAVES >= 2.0, (
+        "measured: 1.5 octaves and below abstains on title 1, 2.0-2.5 accepts"
+    )
+
+    # the evidence floor wins when the correction reaches under it
+    deep = np.where(FREQS <= 15.0, 10.0, 0.0)
+    assert correction_band_hz(deep, FREQS, 9.0)[0] == 9.0

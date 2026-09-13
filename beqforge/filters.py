@@ -292,11 +292,50 @@ def invert_to_shelves(rolloff: HighPass, protect: HighPass) -> list[BiquadSpec]:
     ]
 
 
+WIDEN_OCTAVES = 2.0
+"""How far above a target's own span a section may still be placed. Measured, not assumed.
+
+**The asymmetry is the point, and it is not symmetric in magnitude either.** Reaching up is
+cheap and useful; reaching down is not allowed at all (see `correction_band_hz`). Two
+independent reasons to be generous upward, and they agree:
+
+* *Conditioning.* A shelf realising a low-frequency correction is better conditioned the higher
+  its corner sits — `Realisation.fs`'s note, "higher is worse: the poles sit nearer z=1", read
+  the other way. Squeeze the ceiling and the optimiser answers by pushing corners **down**,
+  which is the direction that makes publication rounding bite.
+* *Blending.* A correction that stops at F still has to meet the rest of the programme above F,
+  and the section that does that sits above F by construction.
+
+This was `high * 1.5`, half an octave, and that cost title 1 its accepted filter once placement
+stopped being the fixed `(5, 40)` literal. Measured on that title, where the target ends at
+14.8 Hz:
+
+| upward room | outcome | worst drift | sections |
+| --- | --- | --- | --- |
+| 0.58 oct (the old 1.5x) | abstains | 5.04 dB | 8.3, 7.7 Hz |
+| 1.0 oct | abstains | 4.07 dB | 9.0, 10.6, 13.6 Hz |
+| 1.5 oct | abstains | 4.36 dB | 8.4, 9.6 Hz |
+| **2.0 oct** | **accepts** | **1.98 dB** | 8.7, 9.5 Hz |
+| 2.5 oct | accepts | 2.28 dB | 10.3, 9.2, 31.0 Hz |
+| to the scored band's top (3.75 oct) | abstains | 5.22 dB | — |
+
+Both ends fail, so this is a plateau and not a threshold: too tight drives corners toward DC,
+too loose lets the fit park budget in the midrange again, which is the failure the whole
+function exists to prevent. 2.0 is the low end of the measured plateau and a round number of
+octaves, which is the unit §13.5 prefers for a width. The 2.5 oct row is also where the
+blending argument shows up directly — a section at 31.0 Hz serving a correction that ends at
+14.8.
+
+Titles whose correction is already wide are insensitive to it: titles 2 and 3 return the
+identical cascade at every width tried."""
+
+
 def correction_band_hz(
     target_db: np.ndarray,
     freqs: np.ndarray,
     evidence_floor_hz: float,
     threshold_db: float = 0.5,
+    widen_octaves: float = WIDEN_OCTAVES,
 ) -> tuple[float, float]:
     """The span over which a target actually asks for something.
 
@@ -304,9 +343,10 @@ def correction_band_hz(
     over. A bass correction that is flat above 25 Hz has no business placing a section at
     105 Hz, and one that does is spending budget to achieve nothing.
 
-    Widened upward by half an octave but **never downward below `evidence_floor_hz`**. The
+    Widened upward by `widen_octaves` but **never downward below `evidence_floor_hz`**. The
     asymmetry is the point. A section reaching up is harmless — its skirt still does its work
-    lower down. A section placed below the lowest measured frequency has its defining
+    lower down, it is better conditioned there, and it is what blends the correction into the
+    rest of the programme. A section placed below the lowest measured frequency has its defining
     parameters in a region where nothing was observed: only its skirt is fitted, and its corner
     and Q rest on no evidence at all. Unbounded, the fit does exactly that — it once returned a
     low shelf at 3.22 Hz with +45 dB of gain to express a correction that is under 5 dB
@@ -317,7 +357,8 @@ def correction_band_hz(
     if not active.any():
         return evidence_floor_hz, float(freqs[-1])
     low, high = float(freqs[active].min()), float(freqs[active].max())
-    return max(evidence_floor_hz, low), min(float(freqs[-1]), high * 1.5)
+    widened = high * 2.0**widen_octaves
+    return max(evidence_floor_hz, low), min(float(freqs[-1]), widened)
 
 
 FitTask = tuple
