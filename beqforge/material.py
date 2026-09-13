@@ -52,6 +52,43 @@ class Material:
         )
 
 
+BM_CROSSOVER_HZ = 80.0
+"""Bass-management crossover the sub feed is modelled at — beqdesigner's own LR4, at 80 Hz."""
+
+
+def bass_managed_sum(
+    material: "Material", crossover_hz: float = BM_CROSSOVER_HZ
+) -> np.ndarray:
+    """The sub feed a BEQ actually operates on, at the scale a device would see it.
+
+    A BEQ is applied **post bass management, to the sub channel only** — which is why the
+    headroom a filter costs is not a master-volume figure and usually is not a cost at all. To
+    measure that cost honestly the signal has to be the sub feed, not the mono mix: mains
+    low-passed into the sub bus, LFE 10 dB hotter, and the summed bus low-passed again on the
+    way out. Both filters are Linkwitz-Riley 4th order, as `model/signal.py` in beqdesigner
+    uses, there applied before and/or after the sum; here both, which is what a receiver does.
+
+    `MAIN_GAIN`/`LFE_GAIN` are the attenuation that keeps the sum inside full scale, and they
+    are beqdesigner's worst-case coherent-summation figure — `20*log10(n_mains) + LFE at +10 dB`
+    — which for 7 mains is the 20.2 dB they encode. Because that is a *worst* case and real
+    content does not sum coherently, the measured sub feed peaks 9 to 46 dB below full scale,
+    and a correction of tens of dB at frequencies with no content in them costs nothing.
+    """
+    from scipy import signal as _signal
+
+    section = _signal.butter(
+        2, crossover_hz, btype="low", fs=float(material.fs), output="sos"
+    )
+    lr4 = np.vstack([section, section])
+    total = np.zeros_like(material.mono_mix)
+    for name, samples in material.channels.items():
+        if name == "LFE":
+            total = total + samples * LFE_GAIN
+        else:
+            total = total + _signal.sosfilt(lr4, samples) * MAIN_GAIN
+    return _signal.sosfilt(lr4, total)
+
+
 def load(path: Path | str) -> Material:
     """Read one `.npz` written by `tools/extract.py`."""
     path = Path(path)
