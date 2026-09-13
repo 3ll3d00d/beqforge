@@ -157,6 +157,8 @@ def design(
     protect_corner = max(protect_corner, params.lowest_frequency_hz)
     binds, ceiling_db = _noise_ceiling(envelopes, fit, params)
 
+    target = None
+    freqs = DESIGN_GRID
     if identification.rolloff is not None:
         protect = HighPass(
             identification.rolloff.alignment,
@@ -165,25 +167,31 @@ def design(
         )
         try:
             filters = invert_to_shelves(identification.rolloff, protect)
-            freqs = DESIGN_GRID
             target = inversion_target_db(
                 identification.rolloff, protect, freqs, PUBLISH_FS
             )
-            return _result(
-                filters,
-                "exact",
-                identification.rolloff,
-                protect,
-                freqs,
-                target,
-                params,
-                binds,
-            )
+            ceiling = np.interp(freqs, envelopes.freqs, ceiling_db)
+            if np.all(target <= ceiling):
+                return _result(
+                    filters,
+                    "exact",
+                    identification.rolloff,
+                    protect,
+                    freqs,
+                    target,
+                    params,
+                    binds,
+                )
+            # A constrained inverse is no longer the closed-form shelf identity.
+            # Fit the same identified response with its evidence ceiling applied.
+            target = np.minimum(target, ceiling)
+            binds = True
+            logger.info("Evidence ceiling restricts the exact inverse; fitting instead")
         except ExactInversionUnavailable as unavailable:
             logger.info(f"Closed form unavailable ({unavailable}); fitting instead")
 
-    freqs = DESIGN_GRID
-    target = _fitted_target(freqs, fit, protect_corner, params, ceiling_db, envelopes)
+    if target is None:
+        target = _fitted_target(freqs, fit, protect_corner, params, ceiling_db, envelopes)
     filters, _ = fit_minimal_biquads(
         target,
         freqs,
