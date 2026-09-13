@@ -45,3 +45,31 @@ def test_exact_inversion_is_used_only_when_the_evidence_licenses_it(ceiling, met
     assert result.noise_ceiling_binds == (method == "fitted")
     assert result.mv_adjust_db <= min(ceiling, params.max_boost_db) + params.residual_target_db
     assert result.residual_db <= params.residual_target_db
+
+
+@pytest.mark.parametrize("route", ["shared", "parametric"])
+def test_uncertain_bins_withhold_boost_without_introducing_cuts(route):
+    from dataclasses import replace
+
+    from beqanalyser.design.design import _fitted_target, _noise_ceiling
+    from beqanalyser.design.diagnose import Diagnosis
+    from beqanalyser.design.pipeline import PipelineParams, priced_by_evidence
+
+    envelopes = envelopes_with_margin(2.0)
+    uncertain = DESIGN_GRID < 15.0
+    envelopes = replace(envelopes, margin_se_db=np.where(uncertain, 3.0, 0.0))
+    if route == "shared":
+        target, _ = priced_by_evidence(
+            np.full_like(DESIGN_GRID, 10.0),
+            envelopes,
+            Diagnosis(DESIGN_GRID, np.zeros_like(DESIGN_GRID), {}),
+            PipelineParams(),
+        )
+    else:
+        params = DesignParams()
+        fit = identified_rolloff().fit
+        _, ceiling = _noise_ceiling(envelopes, fit, params)
+        target = _fitted_target(DESIGN_GRID, fit, 5.0, params, ceiling, envelopes)
+    assert np.all(target >= 0.0)
+    np.testing.assert_array_equal(target[uncertain], 0.0)
+    assert np.max(target[~uncertain]) == pytest.approx(2.0)

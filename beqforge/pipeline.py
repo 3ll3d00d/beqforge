@@ -481,6 +481,8 @@ def priced_by_evidence(
         envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
         np.inf,
     )
+    # An unsupported boost is zero, never an instruction to cut.
+    native_ceiling = np.maximum(native_ceiling, 0.0)
     ceiling = np.interp(DESIGN_GRID, envelopes.freqs, native_ceiling)
     if not math.isnan(floor):
         # Held flat below the noise floor, as the target is and for the same reason: down there

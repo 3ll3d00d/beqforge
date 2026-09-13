@@ -282,6 +282,8 @@ def _noise_ceiling(
         envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
         np.inf,
     )
+    # An unsupported boost is zero, never an instruction to cut.
+    ceiling = np.maximum(ceiling, 0.0)
     wanted = -attenuation_db(
         envelopes.freqs, fit.corner_hz, fit.slope_db_per_octave, fit.knee
     )
