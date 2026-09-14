@@ -219,10 +219,7 @@ class PipelineParams:
     10 independent loud events) — SE there ran 4-8x every other title's, and the ceiling
     tightened accordingly without being told to.
 
-    `Envelopes.measurable` still governs where this applies at all: a bin with no peak/quiet
-    separation is left to the other guards (the noise-floor hold, the fitter's own
-    `max_gain_db`, and ultimately acceptance) rather than read as zero-confidence, for the
-    reason that property's own docstring gives."""
+    Missing or deliberately omitted measurements license no boost."""
 
     fit_seeds: tuple[int, ...] = (0,)
     """Seeds the fit is repeated from at each section count and split.
@@ -319,7 +316,7 @@ class Candidate:
 
     @property
     def confidence(self) -> float:
-        """P(a real rolloff was applied), fit quality excluded — designer-interface.md §3.
+        """Uncalibrated evidence score, with fit quality excluded.
 
         `confidence_from_evidence` on this candidate's own `verdict.recovered_fraction` and
         `verdict.shaping_fraction` (§14.3). An ordinal within this run, not a calibrated
@@ -341,6 +338,9 @@ class Report:
     fit_stats: FitStats
     accept: AcceptParams = field(default_factory=AcceptParams)
     """The model the candidates were judged by — `accepted` needs the shape that was asked for."""
+
+    evidence_notes: tuple[str, ...] = ()
+    """Measurement limitations and abstention reasons, including runs with no candidates."""
 
     ranking_tie_db: float = 0.25
     """Flatness difference below which two candidates are the same answer (`accepted`).
@@ -453,6 +453,16 @@ def _taper(freqs: np.ndarray, reference_hz: float, ratio: float) -> np.ndarray:
     return 0.5 * (1.0 + np.cos(math.pi * np.clip(position, 0.0, 1.0)))
 
 
+def evidence_notes(envelopes, z: float) -> list[str]:
+    """Keep absent and failed measurements visible even when no proposal survives."""
+    states = envelopes.evidence_states(z)
+    return [
+        f"correction evidence: {int(np.sum(states == state))} bins {state}; no boost licensed"
+        for state in ("failure", "unavailable", "omitted")
+        if np.any(states == state)
+    ]
+
+
 def priced_by_evidence(
     target: np.ndarray,
     envelopes,
@@ -462,44 +472,19 @@ def priced_by_evidence(
     """Clip a target to the boost each bin's own measured margin supports.
 
     Per-bin, at `confidence_z` standard errors, independent of what any other bin or title needs.
-    A bin that is unmeasurable (`Envelopes.measurable` false) or has no bootstrap SE to derive a
-    ceiling from is left unrestricted rather than held to 0 dB — both properties' docstrings are
-    explicit that missing evidence must be weighted away, not read as proof of a deep rolloff.
-    What stands under an unrestricted bin is the fitter's own per-section `max_gain_db` and the
-    acceptance model, not nothing.
-
-    **Shared by every strategy that builds a target.** It used to be inline in `flatten` and so
-    applied only there, which meant `counterfactual` handed the fitter a target no evidence had
-    priced. That is not a small gap: on Alien the ceiling held `flatten` to 27 dB where it wanted
-    40, while `counterfactual` went on to claim 30 dB below the 42.5 Hz level-independence floor
-    and was accepted for it.
+    Unsupported bins license zero boost, including profiling omissions. The noise-floor
+    hold must not expand this allowance: it bounds target construction, not evidence.
     """
-    floor = diagnosis.noise_floor_hz
-    has_evidence = envelopes.measurable & np.isfinite(envelopes.margin_se_db)
-    native_ceiling = np.where(
-        has_evidence,
-        envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
-        np.inf,
+    native_ceiling = envelopes.boost_ceiling(params.confidence_z)
+    ceiling = np.interp(
+        DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
     )
-    # An unsupported boost is zero, never an instruction to cut.
-    native_ceiling = np.maximum(native_ceiling, 0.0)
-    ceiling = np.interp(DESIGN_GRID, envelopes.freqs, native_ceiling)
-    if not math.isnan(floor):
-        # Held flat below the noise floor, as the target is and for the same reason: down there
-        # nothing tracks the passband, so a ceiling that keeps falling toward DC is shaping a
-        # second time rather than adding evidence — measured on title 4, stacking the two left a
-        # ceiling still falling at 5 Hz and the fitter spent a section chasing the knee.
-        ceiling = np.where(
-            DESIGN_GRID < floor,
-            float(np.interp(floor, DESIGN_GRID, ceiling)),
-            ceiling,
-        )
     # Per-bin, not global: a target whose *peak* sits under the ceiling's peak can still be
     # clipped somewhere else entirely. Measured on Alien — target.max() (35 dB, near 22 Hz)
     # never exceeded noise_ceiling.max() (42 dB, near 30 Hz), so this note was silent while
     # 5-17 Hz was being held 10-12 dB below its raw deficit the whole time. The bin with the
     # worst clip is the one worth naming, not the target's own unrelated peak.
-    notes: list[str] = []
+    notes = evidence_notes(envelopes, params.confidence_z)
     clipped = target - ceiling
     worst_bin = int(np.argmax(clipped))
     if clipped[worst_bin] > 0.5:
@@ -858,6 +843,11 @@ def run(
     which of the three moved.
     """
     params = params or PipelineParams()
+    unknown = set(params.strategies) - STRATEGIES.keys()
+    if unknown:
+        raise ValueError(
+            f"unknown strategy {sorted(unknown)!r}; have {', '.join(sorted(STRATEGIES))}"
+        )
     timings = Timings()
     FIT_STATS.reset()
     logger.info("=" * 80)
@@ -926,6 +916,33 @@ def run(
                 ),
             )
 
+    limitations = evidence_notes(envelopes, params.confidence_z)
+    blockers = []
+    if material.coverage != "complete_programme":
+        blockers.append(
+            "excerpt: programme quiet-frame evidence unavailable; restoration withheld"
+        )
+    if not material.channels:
+        blockers.append("channel evidence unavailable; restoration withheld")
+    if not envelopes.loud_frames:
+        blockers.append("no qualifying loud events; restoration withheld")
+    if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
+        blockers.append("no bins support a positive correction; restoration withheld")
+    limitations.extend(blockers)
+    for note in limitations:
+        logger.info(note)
+    if blockers:
+        return Report(
+            material,
+            diagnosis,
+            identification,
+            [],
+            timings,
+            FIT_STATS,
+            accept=params.accept,
+            evidence_notes=tuple(limitations),
+        )
+
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
     proposals: list[Proposal] = []
@@ -962,7 +979,10 @@ def run(
             if key is not None:
                 cache.store(cache_path, name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
-        proposals.extend(produced)
+        proposals.extend(
+            dataclasses.replace(p, notes=tuple(dict.fromkeys((*p.notes, *limitations))))
+            for p in produced
+        )
 
     # Every proposal that needs a fit goes into one escalation, so a section tier is as wide
     # as the run rather than as wide as one target. That costs the per-proposal breakdown this
@@ -1009,6 +1029,7 @@ def run(
         timings=timings,
         fit_stats=FIT_STATS,
         accept=params.accept,
+        evidence_notes=tuple(limitations),
     )
 
 
@@ -1117,6 +1138,7 @@ def _judge(
         required_offset_db=required_gain_reduction_db(material, filters, params),
         target_db=target,
     )
+    verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:
         logger.info(f"    {note}")

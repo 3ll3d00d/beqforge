@@ -181,6 +181,8 @@ def show_result(report: Report) -> None:
     print(RULE)
     print("RESULT")
     accepted = report.accepted
+    for note in report.evidence_notes:
+        print(f"  {note}")
     if accepted is None:
         print("\n  No candidate passed. Abstaining is the correct output here (§2.5);")
         print("  the failures above say what would have to change.\n")

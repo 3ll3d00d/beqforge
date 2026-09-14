@@ -247,8 +247,8 @@ class Verdict:
     shaping_fraction: float = math.nan
     """Share of the cascade's peak gain claimed below `filter_floor_hz`, R2's boundary.
 
-    NaN when no filter floor was measured (level-independence held everywhere the guard could
-    check, so there is nothing to attribute to shaping). 0.0 when the floor was measured but
+    NaN when no filter floor was measured: the legacy floor value does not distinguish
+    a successful check from an unavailable one. 0.0 when the floor was measured but
     the cascade claims nothing below it. This is `assess`'s existing shaping-note dB — the
     boost claimed below the floor in excess of what the cascade already reached there —
     expressed as a fraction of the cascade's own peak gain so it is comparable across
@@ -481,8 +481,8 @@ def shaping_fraction(
     and reading the full shelf gain would say every floor claims everything. Expressed as a
     fraction of the cascade's own peak gain so it is comparable across candidates.
 
-    NaN when `filter_floor_hz` is NaN — level-independence held everywhere measurable, so
-    there is nothing to call shaping. 0.0 when the floor was measured but nothing is claimed
+    NaN when `filter_floor_hz` is NaN — the legacy value is ambiguous, so
+    shaping cannot be quantified. 0.0 when the floor was measured but nothing is claimed
     beyond it.
     """
     if math.isnan(filter_floor_hz):
@@ -499,32 +499,20 @@ def shaping_fraction(
 def confidence_from_evidence(
     recovered_fraction: float, shaping_fraction: float
 ) -> float:
-    """P(a real rolloff was applied), fit quality excluded — designer-interface.md §3.
+    """Uncalibrated evidence score, not a probability of a mastering filter.
 
-    **An ordinal, not a calibrated probability** — there is no labelled corpus to calibrate
-    one against (designer-interface.md §3's own revision says as much), so this only has to be
-    monotone in the evidence and comparable *within* one run, which is all the contract asks
-    of v1. Two inputs, per §14.3:
-
-    * `recovered_fraction` — how much of the raw deficit the evidence ceiling licensed. A
-      binding ceiling means the marginal regime (§4.1), so less recovered reads as less
-      confidence. NaN (no target — the parametric route) is treated as 1.0: there is no
-      evidence-priced ceiling to have clipped, so this dimension says nothing against the
-      candidate and confidence rests on `shaping_fraction` alone.
-    * `shaping_fraction` — how much of the realised correction sits below the level-
-      independence floor, where inverting the attenuation is shaping rather than identifying a
-      filter. NaN (no floor measured) is treated as 0.0: nothing was found to be shaping.
-
-    Multiplied rather than averaged so either dimension alone can drive confidence toward
-    zero — a candidate that is both barely-licensed and mostly-shaping should not average out
-    to a middling score."""
+    Missing components contribute zero support. A NaN floor cannot distinguish a successful
+    check from an unavailable one; do not silently give either the maximum score.
+    """
     ceiling_component = (
-        1.0
-        if math.isnan(recovered_fraction)
+        0.0
+        if not math.isfinite(recovered_fraction)
         else min(max(recovered_fraction, 0.0), 1.0)
     )
     identification_component = 1.0 - (
-        0.0 if math.isnan(shaping_fraction) else min(max(shaping_fraction, 0.0), 1.0)
+        1.0
+        if not math.isfinite(shaping_fraction)
+        else min(max(shaping_fraction, 0.0), 1.0)
     )
     return ceiling_component * identification_component
 

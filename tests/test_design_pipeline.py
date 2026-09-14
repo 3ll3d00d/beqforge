@@ -17,7 +17,19 @@ from beqanalyser.design.pipeline import (
     flatten_targets,
     run,
 )
-from tests.test_design_diagnose import FS, high_passed, material_from, scened_noise
+from tests.test_design_diagnose import (
+    FS,
+    high_passed,
+    material_from,
+    scened_noise as _scened_noise,
+)
+
+
+def scened_noise(seed, samples):
+    """Include shared quiet scenes so target tests have measured contrast (R1)."""
+    loud = _scened_noise(seed, samples).reshape(-1, int(10 * FS))
+    quiet = loud[:, : int(5 * FS)] * 1e-4
+    return np.concatenate((loud, quiet), axis=1).ravel()
 
 
 @pytest.fixture(scope="module")

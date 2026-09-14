@@ -166,7 +166,7 @@ def _block_bootstrap_se(
     gather and one `percentile` call rather than one per bin.
     """
     runs = _runs(mask)
-    if len(runs) < 2:
+    if len(runs) < 2 or n_boot < 2:
         return np.full(bins.shape[0], np.inf)
     n_frames = int(mask.sum())
     run_lengths = np.array([r.size for r in runs])
@@ -235,15 +235,35 @@ class Envelopes:
 
     How much to trust the margin at each frequency, derived from how many independent loud
     and quiet events actually support it there, rather than assumed as one number for every
-    title. `inf` outside `ExtractionParams.confidence_band_hz`, or wherever fewer than two
-    independent runs exist to estimate a spread from at all.
+    title. `inf` for deliberately omitted profiling bins, or wherever fewer than two
+    independent runs/replicates exist to estimate a spread from at all.
 
-    `inf` here must read as "this mechanism has nothing to say", the same convention
-    `measurable` uses for a missing peak/quiet separation — a caller deriving a ceiling from
-    `margin_db - z * margin_se_db` must treat an infinite result as *no restriction*, not as
-    zero boost. The alternative reading would make declining to spend the bootstrap outside
-    the confidence band indistinguishable from a genuine absence of evidence inside it, and
-    silently zero every target that reaches past 60 Hz."""
+    Missing uncertainty licenses no boost. `confidence_computed` distinguishes deliberately
+    omitted profiling bins from attempted but unavailable measurements."""
+
+    confidence_computed: np.ndarray | None = None
+    """Bins selected for bootstrap calculation; None denotes legacy/unknown provenance."""
+
+    def evidence_states(self, z: float) -> np.ndarray:
+        """Per-bin support, failure, unavailable or omitted; no state proves a rolloff."""
+        states = np.full(self.freqs.shape, "unavailable", dtype="<U11")
+        finite = np.isfinite(self.peak_db) & np.isfinite(self.quiet_db)
+        states[finite & ~self.measurable] = "failure"
+        measured = self.measurable & np.isfinite(self.margin_se_db)
+        states[measured] = "failure"
+        states[measured & (self.margin_db > z * self.margin_se_db)] = "support"
+        if self.confidence_computed is not None:
+            states[~self.confidence_computed] = "omitted"
+        return states
+
+    def boost_ceiling(self, z: float) -> np.ndarray:
+        """Temporal-contrast allowance; absent evidence never supplies permission."""
+        supported = self.evidence_states(z) == "support"
+        ceiling = np.zeros_like(self.freqs)
+        ceiling[supported] = (
+            self.margin_db[supported] - z * self.margin_se_db[supported]
+        )
+        return ceiling
 
     @property
     def margin_db(self) -> np.ndarray:
@@ -346,6 +366,7 @@ def extract(
         quiet_frames=int(quiet.sum()),
         total_frames=len(band_energy_db),
         margin_se_db=margin_se_db,
+        confidence_computed=np.isin(np.arange(freqs.size), confidence_bins),
     )
     if not envelopes.loud_frames:
         logger.warning(

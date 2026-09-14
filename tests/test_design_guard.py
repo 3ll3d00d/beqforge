@@ -210,6 +210,13 @@ def test_the_floor_binds_before_the_boost_cap() -> None:
     )
     diagnosis = diagnose(material)
     envelopes = extract(material.mono_mix, float(material.fs))
+    # R1: this fixture has no qualifying loud events and must not license a target.
+    assert not flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
+    # Isolate the floor-hold/notes contract with explicitly supplied support, rather than
+    # relying on missing measurements to provide an infinite ceiling.
+    from tests.test_design_design import envelopes_with_margin
+
+    envelopes = envelopes_with_margin(100.0)
     proposal = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())[
         0
     ]
@@ -235,6 +242,13 @@ def test_a_white_floor_needs_no_holding_and_says_so() -> None:
     )
     diagnosis = diagnose(material)
     envelopes = extract(material.mono_mix, float(material.fs))
+    # R1: this fixture has no qualifying loud events and must not license a target.
+    assert not flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
+    # Isolate the floor-hold/notes contract with explicitly supplied support, rather than
+    # relying on missing measurements to provide an infinite ceiling.
+    from tests.test_design_design import envelopes_with_margin
+
+    envelopes = envelopes_with_margin(100.0)
     proposal = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())[
         0
     ]
@@ -253,5 +267,12 @@ def test_an_unbound_target_says_nothing() -> None:
     )
     diagnosis = diagnose(material)
     envelopes = extract(material.mono_mix, float(material.fs))
+    # R1: this fixture has no qualifying loud events and must not license a target.
+    assert not flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
+    # Isolate the floor-hold/notes contract with explicitly supplied support, rather than
+    # relying on missing measurements to provide an infinite ceiling.
+    from tests.test_design_design import envelopes_with_margin
+
+    envelopes = envelopes_with_margin(100.0)
     proposals = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
     assert proposals and not proposals[0].notes

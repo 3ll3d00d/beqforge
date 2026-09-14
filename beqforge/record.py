@@ -282,6 +282,7 @@ def write(
         "identification": (
             None if report.identification is None else str(report.identification)
         ),
+        "evidence_notes": list(report.evidence_notes),
         "candidates": [_candidate(c) for c in report.candidates],
         "accepted": None if accepted is None else accepted.label,
         "curves": curves,

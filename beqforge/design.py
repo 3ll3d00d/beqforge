@@ -157,6 +157,11 @@ def design(
     protect_corner = max(protect_corner, params.lowest_frequency_hz)
     binds, ceiling_db = _noise_ceiling(envelopes, fit, params)
 
+    if not np.any(ceiling_db > 0):
+        return _decline(
+            "evidence_unavailable", "No measured support for a positive correction."
+        )
+
     target = None
     freqs = DESIGN_GRID
     if identification.rolloff is not None:
@@ -170,7 +175,7 @@ def design(
             target = inversion_target_db(
                 identification.rolloff, protect, freqs, PUBLISH_FS
             )
-            ceiling = np.interp(freqs, envelopes.freqs, ceiling_db)
+            ceiling = np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
             if np.all(target <= ceiling):
                 return _result(
                     filters,
@@ -191,7 +196,9 @@ def design(
             logger.info(f"Closed form unavailable ({unavailable}); fitting instead")
 
     if target is None:
-        target = _fitted_target(freqs, fit, protect_corner, params, ceiling_db, envelopes)
+        target = _fitted_target(
+            freqs, fit, protect_corner, params, ceiling_db, envelopes
+        )
     filters, _ = fit_minimal_biquads(
         target,
         freqs,
@@ -237,7 +244,9 @@ def _fitted_target(
         PUBLISH_FS,
     )
     capped = np.minimum(correction + termination, params.max_boost_db)
-    return np.minimum(capped, np.interp(freqs, envelopes.freqs, ceiling_db))
+    return np.minimum(
+        capped, np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
+    )
 
 
 def _nearest_even_order(order: float) -> int:
@@ -269,21 +278,9 @@ def _noise_ceiling(
     boost caps, differently applied"; keeping the flat one here would have left the parametric
     route asserting a number the rest of the system had stopped asserting.
 
-    **And `inf` means no restriction, not zero boost.** The previous line was
-    `np.where(np.isfinite(ceiling), ceiling, 0.0)`, which read a bin with no measurable
-    peak/quiet separation as permitting no boost at all. `Envelopes.measurable` and
-    `margin_se_db` both have docstrings saying the opposite in as many words — missing evidence
-    must be weighted away, not read as proof of a deep rolloff — and `flatten` follows that.
-    Two paths disagreeing about what an unmeasurable bin means is worse than either answer.
+    Missing and omitted measurements license no boost, as on the shared target path.
     """
-    has_evidence = envelopes.measurable & np.isfinite(envelopes.margin_se_db)
-    ceiling = np.where(
-        has_evidence,
-        envelopes.margin_db - params.confidence_z * envelopes.margin_se_db,
-        np.inf,
-    )
-    # An unsupported boost is zero, never an instruction to cut.
-    ceiling = np.maximum(ceiling, 0.0)
+    ceiling = envelopes.boost_ceiling(params.confidence_z)
     wanted = -attenuation_db(
         envelopes.freqs, fit.corner_hz, fit.slope_db_per_octave, fit.knee
     )

@@ -238,6 +238,9 @@ def analysis_to_json(analysis: Analysis) -> dict[str, Any]:
             "quiet_frames": int(envelopes.quiet_frames),
             "total_frames": int(envelopes.total_frames),
             "margin_se_db": _pack(envelopes.margin_se_db),
+            "confidence_computed": None
+            if envelopes.confidence_computed is None
+            else envelopes.confidence_computed.tolist(),
         },
         "identification": None
         if found is None
@@ -286,6 +289,9 @@ def analysis_from_json(raw: dict[str, Any]) -> Analysis:
         quiet_frames=int(e["quiet_frames"]),
         total_frames=int(e["total_frames"]),
         margin_se_db=_unpack(e["margin_se_db"]),
+        confidence_computed=None
+        if e.get("confidence_computed") is None
+        else np.asarray(e["confidence_computed"], dtype=bool),
     )
     found = raw["identification"]
     identification = None
