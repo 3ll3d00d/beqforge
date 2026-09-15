@@ -322,7 +322,14 @@ def main() -> int:
 
         out = args.charts / material.name
         for candidate in report.candidates:
-            render(candidate.label, candidate.filters, material, relevant, out)
+            render(
+                candidate.label,
+                candidate.filters,
+                material,
+                relevant,
+                out,
+                params.realisation,
+            )
         print(f"\n  charts written to {out}/")
 
     if not args.no_record:
@@ -332,6 +339,7 @@ def main() -> int:
             material,
             {c.label: c.filters for c in report.candidates},
             relevant,
+            params.realisation,
         )
         destination = args.record or args.material.with_suffix(".run.json.gz")
         record.write(destination, report, params, args.material, curves)

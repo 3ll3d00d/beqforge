@@ -15,11 +15,12 @@ own output, so a systematic error inverted into the correction is invisible here
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy import signal
+from scipy import fft, signal
 
 from beqanalyser.design import DESIGN_GRID, BiquadSpec
 from beqanalyser.design.diagnose import DiagnoseParams, plateau_reference
@@ -28,6 +29,7 @@ from beqanalyser.design.filters import (
     biquad_sos,
     magnitude_db,
     publication_filters,
+    unstable_sections,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,74 @@ def device_error_db(
     exact = magnitude_db(sos, DESIGN_GRID, realisation.fs)
     rounded = magnitude_db(realisation.quantise(sos), DESIGN_GRID, realisation.fs)
     return np.interp(freqs, DESIGN_GRID, rounded - exact)
+
+
+def device_waveform(
+    filters: list[BiquadSpec],
+    samples: np.ndarray,
+    fs: float,
+    realisation: Realisation | None = None,
+    *,
+    include_tail: bool = False,
+) -> np.ndarray:
+    """Apply the published device's complex transfer to band-limited analysis samples.
+
+    Zero-padded Fourier convolution evaluates H_device(f) at physical frequencies, including
+    phase and coefficient quantisation. No analysis-rate biquad is substituted. The input is
+    the band-limited reconstruction of the extraction, zero-extended outside the programme;
+    this does not recover content removed during extraction. Padding covers at least eight
+    seconds and twelve decades of pole decay per section. `include_tail` retains ring-out
+    for peak measurement. Unstable devices have no finite waveform and are refused.
+    """
+    device = realisation or Realisation()
+    filters = publication_filters(filters)
+    if not filters:
+        return np.asarray(samples, dtype=float).copy()
+    if device.fs < fs:
+        raise ValueError("device rate must cover the analysis bandwidth")
+    if unstable_sections(filters, device):
+        raise ValueError(
+            "unstable published device has no finite verification waveform"
+        )
+    sos = device.quantise(biquad_sos(filters, device.fs))
+    radius = max(float(np.max(np.abs(np.roots(row[3:])))) for row in sos)
+    decay = 0.0 if radius == 0 else -math.log(1e-12) / -math.log(radius)
+    guard = max(
+        int(math.ceil(8 * fs)), int(math.ceil(decay * len(sos) * fs / device.fs))
+    )
+    size = fft.next_fast_len(len(samples) + 2 * guard)
+    padded = np.zeros(size)
+    padded[guard : guard + len(samples)] = samples
+    freqs = fft.rfftfreq(size, 1 / fs)
+    _, transfer = signal.freqz_sos(sos, worN=freqs, fs=device.fs)
+    corrected = fft.irfft(fft.rfft(padded) * transfer, n=size)
+    end = guard + len(samples) + (guard if include_tail else 0)
+    return corrected[guard:end].copy()
+
+
+def waveform_peak(samples: np.ndarray) -> float:
+    """Peak of the reconstructed waveform, sampled at sixteen times the analysis rate.
+
+    A long Kaiser interpolation kernel preserves the extraction's usable bandwidth. Blocks
+    overlap by the kernel support, so their boundaries do not truncate the interpolation.
+    Sixteen-fold sampling bounds sinusoidal peak-grid loss at Nyquist to 0.042 dB; dedicated
+    device-rate simulations separately exercise multitone/transient peak error. Headroom is
+    an output, never an acceptance gate.
+    """
+    factor, half_width, block = 16, 48, 65536
+    kernel = signal.firwin(
+        2 * half_width * factor + 1, 1 / factor, window=("kaiser", 10)
+    )
+    peak = 0.0
+    for start in range(0, len(samples), block):
+        end = min(start + block, len(samples))
+        left, right = max(0, start - half_width), min(len(samples), end + half_width)
+        interpolated = signal.resample_poly(
+            samples[left:right], factor, 1, window=kernel
+        )
+        retained = interpolated[(start - left) * factor : (end - left) * factor]
+        peak = max(peak, float(np.max(np.abs(retained))))
+    return peak
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,14 +401,10 @@ def verify(
     One reference, from `before` alone so a filter cannot move its own goalposts, applied to
     both curves so what's compared is how far `after` closed on where `before` already stood.
 
-    **`after_db` is what the device will play, not what the optimiser designed.** `realisation`
-    describes the device — it takes coefficients, so it rounds them to its own format — and the
-    magnitude error that rounding causes is added here. It has to be added rather than filtered
-    in: quantisation happens at the device's rate, and `samples` are at the analysis rate, so
-    filtering with coefficients rounded at 96 kHz would measure neither device. Judging the
-    realised curve is what lets the acceptance model drop a calibrated drift threshold and ask
-    the only question that matters — does the shape survive the device — which is comparative
-    and needs no constant.
+    The corrected waveform uses the device-rate complex response, including publication
+    rounding and coefficient quantisation, on the band-limited extracted signal. Magnitude
+    and phase therefore include the full rate difference. An unstable publication retains
+    only a frequency-response diagnostic for rejection; it has no finite waveform/headroom.
 
     `priced_target_db` is the evidence-priced target the fitter was handed, if any (§14.2) — on
     `DESIGN_GRID`, `None` for a caller-supplied candidate with no target. Only reaches
@@ -349,10 +415,16 @@ def verify(
             "exclusions fragment the judged band; contiguous verification unavailable"
         )
     filters = publication_filters(filters)
-    corrected = signal.sosfilt(biquad_sos(filters, fs), samples)
+    device = realisation or Realisation()
     freqs, before = _mean_db(samples, fs)
-    _, after = _mean_db(corrected, fs)
-    after = after + device_error_db(filters, freqs, realisation or Realisation())
+    if filters and unstable_sections(filters, device):
+        # Keep the fitter's unstable fallback reviewable; assess rejects exact Jury failure.
+        after = before + magnitude_db(
+            device.quantise(biquad_sos(filters, device.fs)), freqs, device.fs
+        )
+    else:
+        corrected = device_waveform(filters, samples, fs, device)
+        _, after = _mean_db(corrected, fs)
     reference_db, _ = plateau_reference(
         before, freqs, diagnose_params or DiagnoseParams(), exclude_bands_hz
     )

@@ -36,10 +36,10 @@ matplotlib.use("Agg")  # written to file, never shown; plt.show() blocks a headl
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from scipy import signal  # noqa: E402
 
 from beqanalyser.design import BiquadSpec  # noqa: E402
-from beqanalyser.design.filters import biquad_sos  # noqa: E402
+from beqanalyser.design.filters import Realisation, unstable_sections  # noqa: E402
+from beqanalyser.design.verify import device_waveform  # noqa: E402
 from beqanalyser.design.material import Material  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -236,6 +236,7 @@ def render(
     material: Material,
     channels: list[str],
     out_dir: Path,
+    realisation: Realisation | None = None,
 ) -> list[Path]:
     """Write the mono and per-channel PvA charts for one candidate.
 
@@ -244,7 +245,10 @@ def render(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     fs = float(material.fs)
-    sos = biquad_sos(filters, fs)
+    device = realisation or Realisation()
+    if filters and unstable_sections(filters, device):
+        logger.warning(f"No waveform chart for {label}: unstable publication")
+        return []
     written: list[Path] = []
 
     def chart(name: str, signals: dict[str, np.ndarray], title: str) -> Path:
@@ -258,7 +262,7 @@ def render(
             levels[channel] = (
                 unfiltered,
                 programme_levels_db(
-                    signal.sosfilt(sos, samples),
+                    device_waveform(filters, samples, fs, device),
                     fs,
                     frame_index=unfiltered.loudest_index,
                 ),

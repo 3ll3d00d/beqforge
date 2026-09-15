@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from scipy import signal
 
 from beqanalyser.design import DESIGN_GRID, BiquadSpec
 from beqanalyser.design import cache
@@ -77,7 +76,7 @@ from beqanalyser.design.material import (
     Material,
     bass_managed_sum,
 )
-from beqanalyser.design.verify import Correction, verify
+from beqanalyser.design.verify import Correction, device_waveform, verify, waveform_peak
 
 logger = logging.getLogger(__name__)
 
@@ -1152,8 +1151,14 @@ def required_gain_reduction_db(
     sub = bass_managed_sum(material)
     if sub is None:
         return math.nan
-    filtered = signal.sosfilt(biquad_sos(filters, float(material.fs)), sub)
-    peak = float(np.max(np.abs(filtered)))
+    try:
+        filtered = device_waveform(
+            filters, sub, float(material.fs), params.realisation, include_tail=True
+        )
+    except ValueError as unavailable:
+        logger.warning(f"Headroom unavailable: {unavailable}")
+        return math.nan
+    peak = waveform_peak(filtered)
     if peak <= 0.0:
         return 0.0
     return min(20.0 * math.log10(1.0 / peak), 0.0)
@@ -1252,6 +1257,11 @@ def _judge(
         filter_floor_hz=diagnosis.filter_floor_hz,
         required_offset_db=required_gain_reduction_db(material, filters, params),
         target_db=target,
+    )
+    verdict.notes.append(
+        f"verification transfer: published quantised device at {params.realisation.fs:g} Hz; "
+        f"full-band mono mix from {material.fs:g} Hz extraction, complex response including phase; "
+        "headroom uses the same transfer with ring-out and 16x peak interpolation"
     )
     verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")

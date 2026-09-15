@@ -33,6 +33,7 @@ from typing import Any
 import numpy as np
 
 from beqanalyser.design import BiquadSpec
+from beqanalyser.design.filters import Realisation
 from beqanalyser.design.material import Material
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,10 @@ def read(path: Path | str) -> dict[str, Any]:
 
 
 def curves_from(
-    material: Material, filters_by_label: dict[str, list[BiquadSpec]], names
+    material: Material,
+    filters_by_label: dict[str, list[BiquadSpec]],
+    names,
+    realisation: Realisation | None = None,
 ):
     """Chart curves for every signal, unfiltered once and filtered per candidate.
 
@@ -360,11 +364,11 @@ def curves_from(
     filtered ones are the cross product and are what make a redraw exact rather than an
     approximation of what a magnitude model would have shown.
     """
-    from scipy import signal as scipy_signal
-
     from beqanalyser.design.charts import programme_levels_db
-    from beqanalyser.design.filters import biquad_sos
+    from beqanalyser.design.filters import unstable_sections
+    from beqanalyser.design.verify import device_waveform
 
+    device = realisation or Realisation()
     fs = float(material.fs)
     signals = {"mono": material.mono_mix}
     signals.update({n: material.channels[n] for n in names if n in material.channels})
@@ -382,12 +386,15 @@ def curves_from(
         }
 
     filtered: dict[str, dict[str, Any]] = {}
+    unavailable: dict[str, str] = {}
     for label, specs in filters_by_label.items():
-        sos = biquad_sos(specs, fs)
+        if specs and unstable_sections(specs, device):
+            unavailable[label] = "unstable publication: no finite waveform"
+            continue
         filtered[label] = {}
         for name, samples in signals.items():
             levels = programme_levels_db(
-                scipy_signal.sosfilt(sos, samples),
+                device_waveform(specs, samples, fs, device),
                 fs,
                 frame_index=unfiltered[name]["loudest_index"],
             )
@@ -396,4 +403,11 @@ def curves_from(
                 "average": _arr(levels.average),
                 "loudest_second": _arr(levels.loudest_second),
             }
-    return {"freqs": freqs, "unfiltered": unfiltered, "filtered": filtered}
+    return {
+        "freqs": freqs,
+        "unfiltered": unfiltered,
+        "filtered": filtered,
+        "unavailable": unavailable,
+        "verification_model": "band-limited extraction through published device complex transfer",
+        "realisation": asdict(device),
+    }
