@@ -55,6 +55,8 @@ from beqanalyser.design.diagnose import (
     diagnose,
     mean_spectrum,
     plateau_reference,
+    smooth_unexcluded,
+    unexcluded,
 )
 from beqanalyser.design.extraction import ExtractionParams, extract
 from beqanalyser.design.filters import (
@@ -273,13 +275,13 @@ class PipelineParams:
 
     verify_band_hz: tuple[float, float] = (5.0, 45.0)
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
-    """Authored features to drop, still manual (§3.1, §10).
+    """Authored intervals omitted from evidence, with zero requested correction.
 
-    Reaches every stage that reads the spectrum: the `flatten` target, the verification band,
-    and identification. It used to reach the first two only, because `IdentifyParams` carries
-    a field of the same name that nothing set — so `--exclude 12 25` removed a hand-authored
-    feature from the target and from the judgement while `identify_rolloff` went on fitting
-    it, which is the failure §3.5 records as dragging a corner from 13 Hz to 20."""
+    References and smoothing use separate contiguous segments. Diagnosis, extraction,
+    identification, all strategies and verification share these omissions. A fragmented
+    judged interval cannot establish a continuous correction and causes explicit abstention.
+    A smooth fitted cascade may still act inside an omission; zero is the target, not a
+    guarantee that an arbitrary authored interval can be preserved exactly by biquads."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,7 +440,8 @@ def _deficit_anchor(
     a plateau level necessarily returns above the plateau's top, and that return is programme,
     not deficit.
     """
-    over = deficit_db >= params.flatten_deficit_floor_db
+    keep = unexcluded(grid, params.exclude_bands_hz)
+    over = (deficit_db >= params.flatten_deficit_floor_db) & keep
     if not over.any():
         # nothing to correct anywhere; the caller discards the proposal on max() < 1 dB
         return float(plateau_hz[0])
@@ -448,7 +451,9 @@ def _deficit_anchor(
     # Same reasoning as `_lowest_run` in `diagnose`.
     run = max(1, int(round(len(grid) * params.flatten_settled_octaves / _GRID_OCTAVES)))
     first = int(np.argmax(over))
-    settled = np.convolve((~over[first:]).astype(float), np.ones(run), mode="valid")
+    settled = np.convolve(
+        ((~over & keep)[first:]).astype(float), np.ones(run), mode="valid"
+    )
     closed = np.flatnonzero(settled >= run)
     if closed.size:
         return float(grid[first + int(closed[0])])
@@ -495,6 +500,7 @@ def priced_by_evidence(
     ceiling = np.interp(
         DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
     )
+    ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
     # Per-bin, not global: a target whose *peak* sits under the ceiling's peak can still be
     # clipped somewhere else entirely. Measured on Alien — target.max() (35 dB, near 22 Hz)
     # never exceeded noise_ceiling.max() (42 dB, near 30 Hz), so this note was silent while
@@ -527,19 +533,19 @@ def flatten_targets(
     ~2 dB below. Flat is the shape; how far past flat to go is the preference dial of §4.3.
     """
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    keep = np.ones_like(freqs, dtype=bool)
-    for low, high in params.exclude_bands_hz:
-        keep &= ~((freqs >= low) & (freqs <= high))
-    freqs, response = freqs[keep], response[keep]
     # "flat" means the mix's own plateau, measured on the mix, not a level read off one
     # nominated frequency. A point reference also inherits whatever local wobble sits at that
     # point: across the four titles the plateau level and the level at 40 Hz differ by -2.5 to
     # +2.8 dB, which is a straight offset on the whole target.
-    level, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    level, plateau_hz = plateau_reference(
+        response, freqs, params.diagnose, params.exclude_bands_hz
+    )
     if not math.isfinite(level):
         return []
     response = response - level
-    deficit = np.convolve(np.maximum(-response, 0.0), np.ones(15) / 15, mode="same")
+    deficit = smooth_unexcluded(
+        np.maximum(-response, 0.0), freqs, params.exclude_bands_hz, 15
+    )
 
     target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
@@ -780,7 +786,11 @@ def counterfactual_target(
     for name in diagnosis.filtered_channels:
         samples = material.channels[name]
         response = diagnosis.channels[name].response_db
-        boost = np.clip(-np.minimum(response, 0.0), 0.0, restore_cap_db)
+        boost = np.where(
+            unexcluded(freqs, params.exclude_bands_hz) & np.isfinite(response),
+            np.clip(-np.minimum(response, 0.0), 0.0, restore_cap_db),
+            0.0,
+        )
         # restoration stops at this channel's own plateau, since that is what its response
         # was referenced to — a common cutoff would restore one channel into its passband
         # while stopping another short of its knee
@@ -788,15 +798,18 @@ def counterfactual_target(
         boost = np.where(knee, 0.0, boost)
         spectrum = restoration.spectra[name]
         gain = np.interp(restoration.bins, freqs, boost, left=boost[0], right=0.0)
+        gain[~unexcluded(restoration.bins, params.exclude_bands_hz)] = 0.0
         lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=len(samples))
         mix_gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
         restored = restored + mix_gain * (lifted - samples)
 
     before = restoration.before_db
     grid, after = mean_spectrum(restored, material.fs)
-    deficit = np.maximum(after - before, 0.0)
+    deficit = np.where(
+        unexcluded(grid, params.exclude_bands_hz), np.maximum(after - before, 0.0), 0.0
+    )
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
-    target = np.maximum(np.convolve(target, np.ones(9) / 9, mode="same"), 0.0)
+    target = smooth_unexcluded(target, DESIGN_GRID, params.exclude_bands_hz, 9)
     # Terminated where this title's own restored deficit closes, and tapered, exactly as
     # `flatten` is — `_deficit_anchor` and `_taper` carry the reasoning for both halves of that.
     #
@@ -808,9 +821,13 @@ def counterfactual_target(
     # Blazing Saddles at 44.4 Hz and Alien at 34.4-48.1 Hz — two of the three titles that
     # abstain. Their counterfactual candidates are not marginal but wrecked, a -39.7 dB hole at
     # 40 Hz and cliffs relocated to 23-37 Hz, because the deficit was cut off mid-knee.
-    _, plateau_hz = plateau_reference(before, grid, params.diagnose)
+    _, plateau_hz = plateau_reference(
+        before, grid, params.diagnose, params.exclude_bands_hz
+    )
     anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
-    return target * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
+    target *= _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
+    target[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
+    return target
 
 
 def _fit_all(
@@ -882,6 +899,26 @@ def run(
     which of the three moved.
     """
     params = params or PipelineParams()
+    # One effective exclusion contract at every stage, including directly configured omissions.
+    bands = tuple(
+        sorted(
+            set(
+                (
+                    *params.exclude_bands_hz,
+                    *params.diagnose.exclude_bands_hz,
+                    *params.extraction.exclude_bands_hz,
+                    *params.identify.exclude_bands_hz,
+                )
+            )
+        )
+    )
+    unexcluded(DESIGN_GRID, bands)  # validate even when all evidence is unavailable
+    params = dataclasses.replace(
+        params,
+        exclude_bands_hz=bands,
+        diagnose=dataclasses.replace(params.diagnose, exclude_bands_hz=bands),
+        extraction=dataclasses.replace(params.extraction, exclude_bands_hz=bands),
+    )
     unknown = set(params.strategies) - STRATEGIES.keys()
     if unknown:
         raise ValueError(
@@ -958,7 +995,9 @@ def run(
     limitations = evidence_notes(envelopes, params.confidence_z)
     blockers = []
     mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
-    mix_level, _ = plateau_reference(mix_response, mix_freqs, params.diagnose)
+    mix_level, _ = plateau_reference(
+        mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
+    )
     if not math.isfinite(mix_level):
         blockers.append("no usable contiguous mix plateau; restoration withheld")
     if material.coverage != "complete_programme":
@@ -972,10 +1011,22 @@ def run(
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
     if math.isfinite(mix_level):
-        _, region = plateau_reference(mix_response, mix_freqs, params.diagnose)
+        _, region = plateau_reference(
+            mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
+        )
         limitations.append(
             f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
             f"median {mix_level:.6f} dB; shared by targets and verification"
+        )
+    if math.isfinite(mix_level):
+        judged = judged_band_hz(material, diagnosis, params)
+        if any(a <= judged[1] and b >= judged[0] for a, b in bands):
+            blockers.append(
+                "exclusions fragment the judged band; contiguous verification unavailable"
+            )
+    if bands:
+        limitations.append(
+            f"authored exclusions {bands}: omitted evidence, zero requested correction"
         )
     limitations.extend(blockers)
     for note in limitations:
@@ -1146,11 +1197,15 @@ def judged_band_hz(
     # band's edge at 340-400 Hz and every title read as uncorrected. `_deficit_anchor` scans
     # upward from the bottom and stops where the deficit first stays shut, which is the question.
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    level, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    level, plateau_hz = plateau_reference(
+        response, freqs, params.diagnose, params.exclude_bands_hz
+    )
     if not math.isfinite(level):
         raise ValueError("no usable contiguous mix plateau")
     levelled = response - level
-    deficit = np.convolve(np.maximum(-levelled, 0.0), np.ones(15) / 15, mode="same")
+    deficit = smooth_unexcluded(
+        np.maximum(-levelled, 0.0), freqs, params.exclude_bands_hz, 15
+    )
     on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     return low, min(
         max(high, _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)),

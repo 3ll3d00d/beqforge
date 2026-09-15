@@ -55,6 +55,9 @@ class DiagnoseParams:
     use this. A channel's own response is referenced to its own plateau — see
     `reference_percentile`."""
 
+    exclude_bands_hz: tuple[tuple[float, float], ...] = ()
+    """Authored intervals omitted from references and diagnostic evidence."""
+
     reference_percentile: float = 90.0
     """Percentile of a channel's own response, in log frequency, taken as its reference level.
 
@@ -215,10 +218,47 @@ def mean_spectrum(
     return freqs[keep], 10.0 * np.log10(power[keep] + 1e-300)
 
 
+def unexcluded(freqs: np.ndarray, bands: tuple[tuple[float, float], ...]) -> np.ndarray:
+    """Inclusive omissions on the original axis; never compress before discovering regions."""
+    keep = np.ones_like(freqs, dtype=bool)
+    for low, high in bands:
+        if not 0 < low <= high:
+            raise ValueError("exclusions require 0 < low <= high")
+        keep &= ~((freqs >= low) & (freqs <= high))
+    return keep
+
+
+def retained_regions(freqs: np.ndarray, keep: np.ndarray, bands=()) -> list[np.ndarray]:
+    """Connected bins, also split by omissions narrower than the sampling interval."""
+    indices = np.flatnonzero(keep)
+    breaks = np.diff(indices) != 1
+    for low, high in bands:
+        breaks |= (freqs[indices[:-1]] <= high) & (freqs[indices[1:]] >= low)
+    return np.split(indices, np.flatnonzero(breaks) + 1)
+
+
+def smooth_unexcluded(
+    values: np.ndarray, freqs: np.ndarray, bands, width: int
+) -> np.ndarray:
+    """Smooth each retained segment separately; omitted bins request zero correction."""
+    result = np.zeros_like(values)
+    for region in retained_regions(
+        freqs, unexcluded(freqs, bands) & np.isfinite(values), bands
+    ):
+        if not len(region):
+            continue
+        kernel = min(width, len(region))
+        result[region] = np.convolve(
+            values[region], np.ones(kernel) / kernel, mode="same"
+        )
+    return result
+
+
 def plateau_reference(
     values_db: np.ndarray,
     freqs: np.ndarray,
     params: DiagnoseParams,
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
 ) -> tuple[float, tuple[float, float]]:
     """A channel's own reference level, and the band over which it holds it.
 
@@ -226,18 +266,26 @@ def plateau_reference(
     that title. See `DiagnoseParams.reference_percentile` for why a fixed band cannot do it.
     """
     grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
-    curve = np.interp(grid, freqs, values_db, left=np.nan, right=np.nan)
+    bands = (*params.exclude_bands_hz, *exclude_bands_hz)
+    source = unexcluded(freqs, bands) & np.isfinite(values_db)
+    if not source.any():
+        return math.nan, (math.nan, math.nan)
+    curve = np.interp(grid, freqs[source], values_db[source], left=np.nan, right=np.nan)
+    curve[~unexcluded(grid, bands)] = np.nan
     # Median discovery over roughly one sixth octave suppresses estimator-bin scatter
     # without turning a narrow authored peak into the reference. Level uses the raw curve.
-    discovery = ndimage.median_filter(curve, size=11, mode="nearest")
+    discovery = np.full_like(curve, np.nan)
+    for region in retained_regions(grid, np.isfinite(curve), bands):
+        if len(region):
+            discovery[region] = ndimage.median_filter(
+                curve[region], size=11, mode="nearest"
+            )
     finite = np.isfinite(curve)
     if not finite.any():
         return math.nan, (math.nan, math.nan)
     threshold = float(np.percentile(curve[finite], params.reference_percentile))
-    within = np.flatnonzero(
-        finite & (np.abs(discovery - threshold) <= params.reference_tolerance_db)
-    )
-    regions = np.split(within, np.flatnonzero(np.diff(within) != 1) + 1)
+    within = finite & (np.abs(discovery - threshold) <= params.reference_tolerance_db)
+    regions = retained_regions(grid, within, bands)
     candidates = []
     for region in regions:
         if len(region) < 3:
@@ -267,14 +315,17 @@ def band_slope(
 ) -> float:
     """Least-squares slope in dB per octave over a band. Positive falls toward the bottom."""
     band = (freqs >= low_hz) & (freqs <= high_hz)
-    if band.sum() < 3:
+    if band.sum() < 3 or not np.isfinite(values_db[band]).all():
         return math.nan
     octaves = np.log2(freqs[band])
     return float(np.polyfit(octaves, values_db[band], 1)[0])
 
 
 def steepest_slope(
-    values_db: np.ndarray, freqs: np.ndarray, band_hz: tuple[float, float]
+    values_db: np.ndarray,
+    freqs: np.ndarray,
+    band_hz: tuple[float, float],
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
 ) -> tuple[float, float]:
     """The steepest half-octave slope in a band, and where it is.
 
@@ -284,6 +335,8 @@ def steepest_slope(
     best, at = 0.0, math.nan
     candidates = freqs[(freqs >= band_hz[0]) & (freqs <= band_hz[1] / math.sqrt(2))]
     for low in candidates:
+        if any(a <= low * math.sqrt(2) and b >= low for a, b in exclude_bands_hz):
+            continue
         slope = band_slope(values_db, freqs, low, low * math.sqrt(2))
         if math.isfinite(slope) and slope > best:
             best, at = slope, float(low)
@@ -443,7 +496,12 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     for name in material.channels:
         response = spectra[name][band]
         level, plateau = plateau_reference(response, freqs, params)
-        slope, at = steepest_slope(response, freqs, params.band_hz)
+        response = np.where(
+            unexcluded(freqs, params.exclude_bands_hz), response, np.nan
+        )
+        slope, at = steepest_slope(
+            response, freqs, params.band_hz, params.exclude_bands_hz
+        )
         response = response - level
         share = shares[name][band] if len(shares[name]) != len(freqs) else shares[name]
         # the share band is common to every channel on purpose: which channel supplies the
@@ -451,17 +509,21 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         in_share_band = (freqs >= params.share_band_hz[0]) & (
             freqs <= params.share_band_hz[1]
         )
+        in_share_band &= unexcluded(freqs, params.exclude_bands_hz)
+        passband_share = (
+            float(share[in_share_band].mean()) if in_share_band.any() else 0.0
+        )
         channels[name] = ChannelDiagnosis(
             name=name,
             response_db=response,
             share=share,
             max_slope_db_per_octave=slope,
             max_slope_hz=at,
-            passband_share=float(share[in_share_band].mean()),
+            passband_share=passband_share,
             is_filtered=(
                 math.isfinite(level)
                 and slope >= params.knee_slope_db_per_octave
-                and float(share[in_share_band].mean()) >= params.min_passband_share
+                and passband_share >= params.min_passband_share
             ),
             plateau_hz=plateau,
         )
@@ -506,7 +568,9 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     # spectrum or the top of the plateau. Above it the strata diverge because loud scenes have
     # a different content spectrum, not because anything was filtered, and the spread is
     # already climbing at the plateau's upper edge — starting there stops on the first step.
-    consistent = spread <= params.level_tolerance_db
+    consistent = (spread <= params.level_tolerance_db) & unexcluded(
+        strata_freqs, params.exclude_bands_hz
+    )
     region = (strata_freqs >= params.band_hz[0]) & (strata_freqs <= reference_hz[0])
     # a plateau reaching the bottom of the analysis band leaves nothing to search: there is
     # no attenuation under it whose level-independence could fail. That is the honest answer
@@ -522,6 +586,9 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     # here rather than again inside each call — it was 4 s a band on a two-hour title
     tracking_reference = scene_envelope(subject, material.fs, reference_hz, params)
     for low, high in _octave_bands(params.band_hz[0], reference_hz[0]):
+        if any(a <= high and b >= low for a, b in params.exclude_bands_hz):
+            noise_floor = high
+            break
         tracking = band_tracking(
             subject,
             material.fs,

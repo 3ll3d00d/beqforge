@@ -344,13 +344,17 @@ def verify(
     `DESIGN_GRID`, `None` for a caller-supplied candidate with no target. Only reaches
     `Correction.concerns`'s smoke test here; `assess` takes it directly.
     """
+    if any(a <= band_hz[1] and b >= band_hz[0] for a, b in exclude_bands_hz):
+        raise ValueError(
+            "exclusions fragment the judged band; contiguous verification unavailable"
+        )
     filters = publication_filters(filters)
     corrected = signal.sosfilt(biquad_sos(filters, fs), samples)
     freqs, before = _mean_db(samples, fs)
     _, after = _mean_db(corrected, fs)
     after = after + device_error_db(filters, freqs, realisation or Realisation())
     reference_db, _ = plateau_reference(
-        before, freqs, diagnose_params or DiagnoseParams()
+        before, freqs, diagnose_params or DiagnoseParams(), exclude_bands_hz
     )
 
     if not np.isfinite(reference_db):

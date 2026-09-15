@@ -26,12 +26,17 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
+from beqanalyser.design.diagnose import unexcluded
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class ExtractionParams:
     """Knobs for the reduction. Defaults are settled on the harness, not chosen by taste."""
+
+    exclude_bands_hz: tuple[tuple[float, float], ...] = ()
+    """Authored intervals omitted from scene selection, coherence and boost evidence."""
 
     frame_samples: int = 1024
     """STFT window. At 1 kHz this is ~1 Hz bins over ~1 s, which resolves a knee across
@@ -316,6 +321,8 @@ def extract(
     in_scene_band = (freqs >= params.scene_band_hz[0]) & (
         freqs <= params.scene_band_hz[1]
     )
+    keep = unexcluded(freqs, params.exclude_bands_hz)
+    in_scene_band &= keep
     band_energy_db = 10.0 * np.log10(power[in_scene_band].sum(axis=0) + 1e-300)
 
     floor_db = float(np.percentile(band_energy_db, params.floor_percentile))
@@ -330,11 +337,14 @@ def extract(
     peak_db = _envelope_db(power, loud, params.envelope_percentile)
     quiet_db = _envelope_db(power, quiet, params.envelope_percentile)
     reference = params.reference_band_hz
-    coherence = _coherence(freqs, power, reference)
+    coherence = np.full_like(freqs, np.nan)
+    if keep.any():
+        coherence[keep] = _coherence(freqs[keep], power[keep], reference)
 
     margin_se_db = np.full(freqs.shape[0], np.inf)
     # every analysed bin, unless a profiling run has pinned the count — see `confidence_bins`
     confidence_bins = np.arange(freqs.shape[0])[: params.confidence_bins]
+    confidence_bins = confidence_bins[keep[confidence_bins]]
     if confidence_bins.size and loud.any() and quiet.any():
         rng = np.random.default_rng(0)
         se_peak = _block_bootstrap_se(
@@ -355,6 +365,8 @@ def extract(
         )
         margin_se_db[confidence_bins] = np.hypot(se_peak, se_quiet)
 
+    for values in (mean_db, peak_db, quiet_db):
+        values[~keep] = np.nan
     envelopes = Envelopes(
         freqs=freqs,
         mean_db=mean_db,
@@ -420,6 +432,8 @@ def _coherence(
     total_db = 10.0 * np.log10(power.sum(axis=0) + 1e-300)
     in_reference = (freqs >= reference_band_hz[0]) & (freqs <= reference_band_hz[1])
 
+    if not in_reference.any():
+        return np.full(len(freqs), np.nan)
     residual_bins = _remove_trend(bins_db, total_db)
     residual_reference = _remove_trend(
         bins_db[in_reference].mean(axis=0)[None, :], total_db
