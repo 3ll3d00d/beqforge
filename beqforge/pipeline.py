@@ -535,15 +535,10 @@ def flatten_targets(
     # nominated frequency. A point reference also inherits whatever local wobble sits at that
     # point: across the four titles the plateau level and the level at 40 Hz differ by -2.5 to
     # +2.8 dB, which is a straight offset on the whole target.
-    _, plateau_hz = plateau_reference(response, freqs, params.diagnose)
-    held = (freqs >= plateau_hz[0]) & (freqs <= plateau_hz[1])
-    # the *median across the plateau*, not the percentile that located it. A high percentile
-    # is the right way to find where a channel holds level — it ignores a narrow authored
-    # feature — but the wrong level to ask a mix to reach, because ~90% of the curve sits
-    # under it by construction and the deficit then never closes. On the synthetic fixture,
-    # flat to within a couple of dB across the whole band, that put the target's stop at
-    # 150 Hz regardless of where the wall was.
-    response = response - float(np.median(response[held]))
+    level, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    if not math.isfinite(level):
+        return []
+    response = response - level
     deficit = np.convolve(np.maximum(-response, 0.0), np.ones(15) / 15, mode="same")
 
     target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
@@ -962,6 +957,10 @@ def run(
 
     limitations = evidence_notes(envelopes, params.confidence_z)
     blockers = []
+    mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
+    mix_level, _ = plateau_reference(mix_response, mix_freqs, params.diagnose)
+    if not math.isfinite(mix_level):
+        blockers.append("no usable contiguous mix plateau; restoration withheld")
     if material.coverage != "complete_programme":
         blockers.append(
             "excerpt: programme quiet-frame evidence unavailable; restoration withheld"
@@ -972,6 +971,12 @@ def run(
         blockers.append("no qualifying loud events; restoration withheld")
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
+    if math.isfinite(mix_level):
+        _, region = plateau_reference(mix_response, mix_freqs, params.diagnose)
+        limitations.append(
+            f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
+            f"median {mix_level:.6f} dB; shared by targets and verification"
+        )
     limitations.extend(blockers)
     for note in limitations:
         logger.info(note)
@@ -1141,9 +1146,10 @@ def judged_band_hz(
     # band's edge at 340-400 Hz and every title read as uncorrected. `_deficit_anchor` scans
     # upward from the bottom and stops where the deficit first stays shut, which is the question.
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    _, plateau_hz = plateau_reference(response, freqs, params.diagnose)
-    held = (freqs >= plateau_hz[0]) & (freqs <= plateau_hz[1])
-    levelled = response - float(np.median(response[held]))
+    level, plateau_hz = plateau_reference(response, freqs, params.diagnose)
+    if not math.isfinite(level):
+        raise ValueError("no usable contiguous mix plateau")
+    levelled = response - level
     deficit = np.convolve(np.maximum(-levelled, 0.0), np.ones(15) / 15, mode="same")
     on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     return low, min(

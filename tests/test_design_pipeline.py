@@ -148,8 +148,8 @@ def test_flatten_stops_where_the_material_stops_being_short() -> None:
     def walled_at(corner: float):
         return material_from(
             {
-                "L": scened_noise(30, samples),
-                "C": scened_noise(31, samples),
+                "L": 0.01 * scened_noise(30, samples),
+                "C": 0.01 * scened_noise(31, samples),
                 "LFE": high_passed(scened_noise(32, samples), corner, order=6),
             }
         )

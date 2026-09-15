@@ -353,6 +353,9 @@ def verify(
         before, freqs, diagnose_params or DiagnoseParams()
     )
 
+    if not np.isfinite(reference_db):
+        raise ValueError("no usable contiguous mix plateau")
+
     keep = np.ones_like(freqs, dtype=bool)
     for low, high in exclude_bands_hz:
         keep &= ~((freqs >= low) & (freqs <= high))

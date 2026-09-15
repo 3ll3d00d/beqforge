@@ -27,7 +27,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy import signal
+from scipy import ndimage, signal
 
 from beqanalyser.design.material import Material
 
@@ -78,6 +78,12 @@ class DiagnoseParams:
 
     reference_tolerance_db: float = 3.0
     """How far below the reference still counts as plateau, for the reported extent."""
+
+    reference_min_octaves: float = 1 / 3
+    """Minimum contiguous width; narrower authored peaks cannot supply a reference."""
+
+    reference_max_slope_db_per_octave: float = 3.0
+    """Maximum absolute trend of a usable plateau; steeper monotonic spectra abstain."""
 
     knee_slope_db_per_octave: float = 14.0
     """Slope over a half-octave window above which a channel is called filtered.
@@ -203,6 +209,7 @@ def mean_spectrum(
     samples: np.ndarray, fs: float, nperseg: int = WELCH_NPERSEG
 ) -> tuple[np.ndarray, np.ndarray]:
     """Welch mean power spectrum in dB, positive frequencies only."""
+    nperseg = min(nperseg, len(samples))
     freqs, power = signal.welch(samples, fs=fs, nperseg=nperseg, noverlap=nperseg // 2)
     keep = freqs > 0
     return freqs[keep], 10.0 * np.log10(power[keep] + 1e-300)
@@ -219,10 +226,40 @@ def plateau_reference(
     that title. See `DiagnoseParams.reference_percentile` for why a fixed band cannot do it.
     """
     grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
-    curve = np.interp(grid, freqs, values_db)
-    level = float(np.percentile(curve, params.reference_percentile))
-    within = np.flatnonzero(curve >= level - params.reference_tolerance_db)
-    return level, (float(grid[within[0]]), float(grid[within[-1]]))
+    curve = np.interp(grid, freqs, values_db, left=np.nan, right=np.nan)
+    # Median discovery over roughly one sixth octave suppresses estimator-bin scatter
+    # without turning a narrow authored peak into the reference. Level uses the raw curve.
+    discovery = ndimage.median_filter(curve, size=11, mode="nearest")
+    finite = np.isfinite(curve)
+    if not finite.any():
+        return math.nan, (math.nan, math.nan)
+    threshold = float(np.percentile(curve[finite], params.reference_percentile))
+    within = np.flatnonzero(
+        finite & (np.abs(discovery - threshold) <= params.reference_tolerance_db)
+    )
+    regions = np.split(within, np.flatnonzero(np.diff(within) != 1) + 1)
+    candidates = []
+    for region in regions:
+        if len(region) < 3:
+            continue
+        width = float(np.log2(grid[region[-1]] / grid[region[0]]))
+        slope = band_slope(curve, grid, grid[region[0]], grid[region[-1]])
+        if (
+            width < params.reference_min_octaves
+            or abs(slope) > params.reference_max_slope_db_per_octave
+        ):
+            continue
+        candidates.append(
+            (width, -float(np.ptp(curve[region])), -int(region[0]), region)
+        )
+    if not candidates:
+        return math.nan, (math.nan, math.nan)
+    # Widest first, then flattest, then lowest frequency: deterministic and never bridges a valley.
+    region = max(candidates, key=lambda item: item[:3])[3]
+    return float(np.median(curve[region])), (
+        float(grid[region[0]]),
+        float(grid[region[-1]]),
+    )
 
 
 def band_slope(
@@ -406,8 +443,8 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     for name in material.channels:
         response = spectra[name][band]
         level, plateau = plateau_reference(response, freqs, params)
-        response = response - level
         slope, at = steepest_slope(response, freqs, params.band_hz)
+        response = response - level
         share = shares[name][band] if len(shares[name]) != len(freqs) else shares[name]
         # the share band is common to every channel on purpose: which channel supplies the
         # low end is a comparison, and a comparison needs one yardstick
@@ -422,7 +459,8 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
             max_slope_hz=at,
             passband_share=float(share[in_share_band].mean()),
             is_filtered=(
-                slope >= params.knee_slope_db_per_octave
+                math.isfinite(level)
+                and slope >= params.knee_slope_db_per_octave
                 and float(share[in_share_band].mean()) >= params.min_passband_share
             ),
             plateau_hz=plateau,
@@ -450,6 +488,9 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
     subject = material.channels[dominant]
     # the floors are that channel's, so they are referenced to that channel's plateau
     reference_hz = channels[dominant].plateau_hz
+    if not all(math.isfinite(f) for f in reference_hz):
+        logger.warning("Dominant channel has no usable contiguous plateau")
+        return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
     strata_freqs, strata = stratified_response(
         subject, material.fs, params, reference_hz
     )

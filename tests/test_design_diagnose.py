@@ -209,7 +209,8 @@ def test_the_plateau_reference_clears_the_knee() -> None:
     assert channel.plateau_hz[0] > 30.0
     # and the response it produces is referenced there, so 30 Hz reads as attenuated
     freqs = diagnose(material).freqs
-    assert np.interp(30.0, freqs, channel.response_db) < -2.0
+    assert np.interp(30.0, freqs, channel.response_db) < 0.0
+    assert np.interp(15.0, freqs, channel.response_db) < -20.0
 
 
 def test_the_passband_envelope_is_the_same_however_it_is_obtained() -> None:
