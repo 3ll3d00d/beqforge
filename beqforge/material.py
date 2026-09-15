@@ -60,6 +60,25 @@ BM_CROSSOVER_HZ = 80.0
 """Bass-management crossover the sub feed is modelled at — beqdesigner's own LR4, at 80 Hz."""
 
 
+@dataclass(frozen=True, slots=True)
+class PlaybackParams:
+    """Declared sub-feed model, not a claim about an arbitrary receiver or room."""
+
+    crossover_hz: float = BM_CROSSOVER_HZ
+    """LR4 low-pass on mains before summing and on the sub bus after summing."""
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.crossover_hz) or self.crossover_hz <= 0:
+            raise ValueError("playback crossover must be finite and positive")
+
+    def description(self) -> str:
+        return (
+            f"modelled sub output: mains LR4 low-pass {self.crossover_hz:g} Hz, "
+            f"summed bus LR4 low-pass {self.crossover_hz:g} Hz; "
+            "mains -20.2 dB, LFE -10.2 dB; no room/speaker response"
+        )
+
+
 def bass_managed_sum(
     material: "Material", crossover_hz: float = BM_CROSSOVER_HZ
 ) -> np.ndarray | None:
@@ -72,7 +91,7 @@ def bass_managed_sum(
     measure that cost honestly the signal has to be the sub feed, not the mono mix: mains
     low-passed into the sub bus, LFE 10 dB hotter, and the summed bus low-passed again on the
     way out. Both filters are Linkwitz-Riley 4th order, as `model/signal.py` in beqdesigner
-    uses, there applied before and/or after the sum; here both, which is what a receiver does.
+    uses, there applied before and/or after the sum; here both as an explicit modelling assumption, not a universal receiver topology.
 
     `MAIN_GAIN`/`LFE_GAIN` are the attenuation that keeps the sum inside full scale, and they
     are beqdesigner's worst-case coherent-summation figure — `20*log10(n_mains) + LFE at +10 dB`

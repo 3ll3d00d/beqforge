@@ -108,7 +108,7 @@ def test_pipeline_records_the_parameters_it_judges(monkeypatch):
     original = [BiquadSpec("low_shelf", 25.1378, 10.34567, 0.707123)]
     published = publication_filters(original)
     samples = np.random.default_rng(71).normal(size=20000)
-    material = SimpleNamespace(mono_mix=samples, fs=1000)
+    material = SimpleNamespace(mono_mix=samples, fs=1000, channels={"LFE": samples})
     diagnosis = SimpleNamespace(
         noise_floor_hz=float("nan"), filter_floor_hz=float("nan")
     )
@@ -119,7 +119,13 @@ def test_pipeline_records_the_parameters_it_judges(monkeypatch):
     )
     assert candidate.filters == published
     assert candidate.optimiser_filters == original
-    expected = verify(published, samples, 1000, band_hz=(5.0, 45.0))
+    expected = verify(
+        published,
+        pipeline.bass_managed_sum(material),
+        1000,
+        band_hz=(5.0, 45.0),
+        reference_samples=samples,
+    )
     np.testing.assert_array_equal(candidate.correction.after_db, expected.after_db)
     encoded = record._candidate(candidate)
     assert encoded["filters"] == [asdict(s) for s in published]

@@ -74,6 +74,7 @@ from beqanalyser.design.material import (
     LFE_GAIN,
     MAIN_GAIN,
     Material,
+    PlaybackParams,
     bass_managed_sum,
 )
 from beqanalyser.design.verify import Correction, device_waveform, verify, waveform_peak
@@ -118,6 +119,8 @@ class PipelineParams:
     identify: IdentifyParams = field(default_factory=IdentifyParams)
     accept: AcceptParams = field(default_factory=AcceptParams)
     realisation: Realisation = field(default_factory=Realisation)
+    playback: PlaybackParams = field(default_factory=PlaybackParams)
+    """Sub-feed model used for playback verification and clipping measurement."""
 
     strategies: tuple[str, ...] = ("flatten", "counterfactual", "parametric")
     """Which target-derivation strategies to run, by name (see `STRATEGIES`).
@@ -1005,6 +1008,7 @@ def run(
         )
     if not material.channels:
         blockers.append("channel evidence unavailable; restoration withheld")
+        blockers.append("playback verification unavailable: no channel decomposition")
     if not envelopes.loud_frames:
         blockers.append("no qualifying loud events; restoration withheld")
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
@@ -1027,6 +1031,13 @@ def run(
         limitations.append(
             f"authored exclusions {bands}: omitted evidence, zero requested correction"
         )
+    if not blockers:
+        sub = bass_managed_sum(material, params.playback.crossover_hz)
+        if sub is None or not np.any(sub):
+            blockers.append(
+                "playback verification unavailable: silent or absent sub feed"
+            )
+    limitations.append(params.playback.description())
     limitations.extend(blockers)
     for note in limitations:
         logger.info(note)
@@ -1148,7 +1159,7 @@ def required_gain_reduction_db(
     question means anything. The cascade's peak magnitude is not a substitute, and a mono
     mix without channel decomposition cannot establish the sub feed's headroom.
     """
-    sub = bass_managed_sum(material)
+    sub = bass_managed_sum(material, params.playback.crossover_hz)
     if sub is None:
         return math.nan
     try:
@@ -1237,9 +1248,12 @@ def _judge(
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
+    sub = bass_managed_sum(material, params.playback.crossover_hz)
+    if sub is None:
+        raise ValueError("playback verification unavailable: no channel decomposition")
     correction = verify(
         filters,
-        material.mono_mix,
+        sub,
         float(material.fs),
         band_hz=judged_band_hz(material, diagnosis, params),
         diagnose_params=params.diagnose,
@@ -1247,6 +1261,8 @@ def _judge(
         accept_params=params.accept,
         realisation=params.realisation,
         priced_target_db=target,
+        reference_samples=material.mono_mix,
+        playback_model=params.playback.description(),
     )
     verdict = assess(
         filters,
@@ -1260,9 +1276,10 @@ def _judge(
     )
     verdict.notes.append(
         f"verification transfer: published quantised device at {params.realisation.fs:g} Hz; "
-        f"full-band mono mix from {material.fs:g} Hz extraction, complex response including phase; "
+        f"sub output from {material.fs:g} Hz extraction, relative to unchanged playback baseline; "
         "headroom uses the same transfer with ring-out and 16x peak interpolation"
     )
+    verdict.notes.append(params.playback.description())
     verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:

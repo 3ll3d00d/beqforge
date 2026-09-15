@@ -286,6 +286,12 @@ def _candidate(candidate) -> dict[str, Any]:
             "tilt_db_per_octave": _num(correction.tilt_db_per_octave),
             "level_db": _num(correction.level_db),
             "band_hz": list(correction.band_hz),
+            "signal_domain": correction.signal_domain,
+            "playback_model": correction.playback_model,
+            "playback_before_db": _arr(correction.playback_before_db),
+            "playback_after_db": _arr(correction.playback_after_db),
+            "playback_baseline_db": _arr(correction.playback_baseline_db),
+            "reference_level_db": _num(correction.reference_level_db),
         },
         "verdict": _verdict(candidate.verdict),
     }

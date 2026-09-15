@@ -9,7 +9,8 @@ Axes follow the catalogue's convention rather than the analysis grid — linear 
 way. Everything else in the system works in log-frequency; this is the one place that does not,
 deliberately.
 
-Two charts per candidate. The mono mix is what the filter is judged on and what is listened to;
+Two diagnostic charts per candidate. The mono mix is the full-band target-construction domain;
+final verification measures the sub output and retains its raw spectra in the candidate record.
 the per-channel chart says where the mix's low end comes from, and carries only the channels
 that clear `min_passband_share` — a channel supplying 0.1% of the passband is noise on a plot
 as much as it is in the analysis.

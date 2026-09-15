@@ -232,6 +232,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("material", type=Path)
     parser.add_argument(
+        "--crossover",
+        type=float,
+        default=80.0,
+        metavar="HZ",
+        help="declared playback model: LR4 mains and sub-bus low-pass (default: 80 Hz)",
+    )
+    parser.add_argument(
         "--exclude",
         nargs=2,
         type=float,
@@ -300,7 +307,10 @@ def main() -> int:
                 f"have {', '.join(sorted(STRATEGIES))}"
             )
         strategies = tuple(chosen)
+    from beqanalyser.design.material import PlaybackParams
+
     params = PipelineParams(
+        playback=PlaybackParams(crossover_hz=args.crossover),
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
     )

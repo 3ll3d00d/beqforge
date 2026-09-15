@@ -139,6 +139,17 @@ class Correction:
     before_db: np.ndarray
     after_db: np.ndarray
     band_hz: tuple[float, float]
+    signal_domain: str = "analysis_signal"
+    playback_model: str | None = None
+    playback_before_db: np.ndarray | None = None
+    playback_after_db: np.ndarray | None = None
+    playback_baseline_db: np.ndarray | None = None
+    reference_level_db: float | None = None
+    """Raw sub spectra and the unchanged sub-minus-programme baseline, when verified.
+
+    before_db/after_db then describe the sub output relative to that baseline and the
+    programme plateau. The crossover is preserved rather than becoming a flattening target.
+    These fields are absent on legacy records and ordinary analysis-only measurements."""
 
     @property
     def spread_db(self) -> float:
@@ -378,6 +389,8 @@ def verify(
     accept_params: "AcceptParams | None" = None,
     realisation: "Realisation | None" = None,
     priced_target_db: np.ndarray | None = None,
+    reference_samples: np.ndarray | None = None,
+    playback_model: str | None = None,
 ) -> Correction:
     """Apply `filters` to `samples` and measure the corrected low end.
 
@@ -401,6 +414,15 @@ def verify(
     One reference, from `before` alone so a filter cannot move its own goalposts, applied to
     both curves so what's compared is how far `after` closed on where `before` already stood.
 
+    With `reference_samples`, `samples` is the post-bass-management sub feed and the reference
+    is the aligned full-band programme used to construct targets. The fixed baseline is
+    PSD(sub_before) - PSD(programme_before), measured before correction: it includes the
+    model's crossover and coherent channel sum, not a target or fitted cascade. Sub spectra
+    are judged relative to this unchanged baseline and the programme's own plateau. Thus
+    independent wrong-filter checks retain the same house/material meaning, and a crossover
+    does not become a deficit. Raw playback spectra and the baseline remain in Correction.
+    This describes the sub output, not the combined sub-plus-mains acoustic response.
+
     The corrected waveform uses the device-rate complex response, including publication
     rounding and coefficient quantisation, on the band-limited extracted signal. Magnitude
     and phase therefore include the full rate difference. An unstable publication retains
@@ -414,6 +436,13 @@ def verify(
         raise ValueError(
             "exclusions fragment the judged band; contiguous verification unavailable"
         )
+    if reference_samples is not None:
+        if len(reference_samples) != len(samples):
+            raise ValueError(
+                "playback and reference signals must have identical sample alignment"
+            )
+        if not np.any(samples):
+            raise ValueError("playback verification unavailable: silent sub feed")
     filters = publication_filters(filters)
     device = realisation or Realisation()
     freqs, before = _mean_db(samples, fs)
@@ -425,8 +454,10 @@ def verify(
     else:
         corrected = device_waveform(filters, samples, fs, device)
         _, after = _mean_db(corrected, fs)
+    source = before if reference_samples is None else _mean_db(reference_samples, fs)[1]
+    baseline = np.zeros_like(before) if reference_samples is None else before - source
     reference_db, _ = plateau_reference(
-        before, freqs, diagnose_params or DiagnoseParams(), exclude_bands_hz
+        source, freqs, diagnose_params or DiagnoseParams(), exclude_bands_hz
     )
 
     if not np.isfinite(reference_db):
@@ -437,8 +468,16 @@ def verify(
         keep &= ~((freqs >= low) & (freqs <= high))
     correction = Correction(
         freqs=freqs[keep],
-        before_db=(before - reference_db)[keep],
-        after_db=(after - reference_db)[keep],
+        before_db=(before - baseline - reference_db)[keep],
+        after_db=(after - baseline - reference_db)[keep],
+        signal_domain="sub_output_relative_to_playback"
+        if reference_samples is not None
+        else "analysis_signal",
+        playback_model=playback_model,
+        playback_before_db=before[keep] if reference_samples is not None else None,
+        playback_after_db=after[keep] if reference_samples is not None else None,
+        playback_baseline_db=baseline[keep] if reference_samples is not None else None,
+        reference_level_db=reference_db,
         band_hz=band_hz,
     )
     logger.info(f"Applied correction: {correction}")
