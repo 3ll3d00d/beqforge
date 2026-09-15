@@ -119,7 +119,7 @@ def test_headroom_uses_published_device_phase_quantisation_and_ringout(monkeypat
     samples = programme() * 8
     filters = [BiquadSpec("low_shelf", 200.004, 20.0004, 0.70704)]
     material = Material("peaks", FS, samples, {"L": samples}, "complete_programme")
-    monkeypatch.setattr(pipeline, "bass_managed_sum", lambda *args: samples)
+    monkeypatch.setattr(pipeline, "bass_managed_sum", lambda *args, **kwargs: samples)
     offsets = []
     for device in (Realisation(fs=48000), Realisation(fs=96000, coefficient_bits=20)):
         expected = reference(filters, samples, device, tail=FS)

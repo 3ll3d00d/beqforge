@@ -277,6 +277,16 @@ def _candidate(candidate) -> dict[str, Any]:
         "unpriced_target_db": _arr(candidate.unpriced_target_db),
         "target_notes": list(candidate.target_notes),
         "mv_adjust_db": _num(candidate.mv_adjust_db),
+        "peak_gain_db": _num(candidate.peak_gain_db),
+        "headroom": None
+        if candidate.headroom is None
+        else {
+            **asdict(candidate.headroom),
+            "offset_db": _num(candidate.headroom.offset_db),
+            "peak": _num(candidate.headroom.peak),
+            "summary": candidate.headroom.summary(),
+            "assumptions": candidate.headroom.assumptions(),
+        },
         "confidence": _num(candidate.confidence),
         "correction": {
             "freqs": _arr(correction.freqs),
@@ -335,6 +345,12 @@ def write(
         "publication": {
             "parameter_decimals": {"freq_hz": 2, "gain_db": 3, "q": 4},
             "realisation": asdict(params.realisation),
+        },
+        "playback": {
+            "assumed_model": asdict(params.playback),
+            "bass_management_fs": int(report.material.fs),
+            "signal_domain": "post_bass_management_sub_output",
+            "full_scale_peak": 1.0,
         },
         "evidence_notes": list(report.evidence_notes),
         "candidates": [_candidate(c) for c in report.candidates],

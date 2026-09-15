@@ -85,7 +85,22 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
     ] + [
         {"text": text, "kind": _note_kind(text, "verdict")} for text in verdict["notes"]
     ]
+    headroom = candidate.get("headroom") or {}
+    offset = verdict["required_offset_db"]
+    legacy_headroom = (
+        "gain reduction unavailable"
+        if offset is None
+        else (
+            "recorded no reduction"
+            if offset >= 0
+            else f"recorded {-offset:.1f} dB reduction"
+        )
+    )
     return {
+        "headroom_summary": headroom.get("summary")
+        or f"{legacy_headroom} (playback model unspecified)",
+        "headroom_assumptions": headroom.get("assumptions")
+        or "Playback assumptions were not recorded.",
         "key": key,
         "name": _friendly_name(key),
         "material_path": document["fingerprint"]["material_path"],

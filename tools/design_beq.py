@@ -8,7 +8,7 @@ derivation, candidate designs, acceptance — and prints the evidence alongside 
 commentary is the point: a residual says a cascade matched the target it was handed, never
 that the target was right, so a result without its reasoning is not a result.
 
-Writes nothing. Add `--exclude LOW HIGH` for an authored feature that should not be treated
+Writes a run record unless `--no-record` is given. Add `--exclude LOW HIGH` for an authored feature that should not be treated
 as shape (still manual; §3.1).
 """
 
@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqanalyser.design.material import load  # noqa: E402
+from beqanalyser.design.filters import Realisation  # noqa: E402
 from beqanalyser.design.pipeline import (  # noqa: E402
     STRATEGIES,
     PipelineParams,
@@ -123,12 +124,17 @@ def show_identification(report: Report) -> None:
         )
 
 
-def _headroom(offset_db: float) -> str:
+def _headroom(offset_db: float, measurement=None) -> str:
+    if measurement is not None:
+        return measurement.summary()
     if math.isnan(offset_db):
-        return "gain reduction unavailable (no channel decomposition)"
-    if offset_db >= 0.0:
-        return "no gain reduction needed"
-    return f"needs {-offset_db:.1f} dB of gain reduction"
+        return "gain reduction unavailable (playback measurement unavailable)"
+    result = (
+        "no gain reduction needed"
+        if offset_db >= 0
+        else f"needs {-offset_db:.1f} dB of gain reduction"
+    )
+    return f"{result} (playback model unspecified)"
 
 
 def show_candidates(report: Report) -> None:
@@ -161,7 +167,7 @@ def show_candidates(report: Report) -> None:
         print(
             f"      device: {v.device_error_db:.2f} dB of rounding error, tightest section has "
             f"{v.dc_margin_steps:.1f} steps of DC headroom (drift p90 {v.drift_db:.2f} dB)"
-            f"   clipping: {_headroom(v.required_offset_db)}"
+            f"   clipping: {_headroom(v.required_offset_db, candidate.headroom)}"
         )
         recovered = (
             "n/a"
@@ -193,8 +199,8 @@ def show_result(report: Report) -> None:
         "n/a" if math.isnan(recovered_fraction) else f"{recovered_fraction * 100:.0f}%"
     )
     print(
-        f"\n  {accepted.label}    peak boost {accepted.mv_adjust_db:+.1f} dB, "
-        + _headroom(offset)
+        f"\n  {accepted.label}    peak boost {accepted.peak_gain_db:+.1f} dB, "
+        + _headroom(offset, accepted.headroom)
         + f"\n  recovered {recovered} of the measured deficit, "
         f"confidence {accepted.confidence:.2f}\n"
     )
@@ -232,11 +238,54 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("material", type=Path)
     parser.add_argument(
+        "--device-rate",
+        type=float,
+        default=96000.0,
+        metavar="HZ",
+        help="published device sample rate",
+    )
+    parser.add_argument(
+        "--coefficient-bits",
+        type=int,
+        default=28,
+        help="device fixed-point coefficient word length",
+    )
+    parser.add_argument(
+        "--integer-bits",
+        type=int,
+        default=5,
+        help="device coefficient integer bits, including sign",
+    )
+    parser.add_argument(
         "--crossover",
         type=float,
         default=80.0,
         metavar="HZ",
-        help="declared playback model: LR4 mains and sub-bus low-pass (default: 80 Hz)",
+        help="LR4 mains low-pass; the sub bus follows by default (80 Hz)",
+    )
+    parser.add_argument(
+        "--main-gain-db",
+        type=float,
+        default=-20.2,
+        help="assumed extracted-mains to sub-bus gain",
+    )
+    parser.add_argument(
+        "--lfe-gain-db",
+        type=float,
+        default=-10.2,
+        help="assumed extracted-LFE to sub-bus gain",
+    )
+    parser.add_argument(
+        "--sub-gain-db",
+        type=float,
+        default=0.0,
+        help="assumed sub output gain; full scale is 1",
+    )
+    parser.add_argument(
+        "--sub-lowpass",
+        default="crossover",
+        metavar="HZ|off|crossover",
+        help="LR4 sub-bus low-pass: follow crossover (default), separate corner, or off",
     )
     parser.add_argument(
         "--exclude",
@@ -309,12 +358,42 @@ def main() -> int:
         strategies = tuple(chosen)
     from beqanalyser.design.material import PlaybackParams
 
+    try:
+        lowpass = (
+            None
+            if args.sub_lowpass == "off"
+            else (
+                "crossover"
+                if args.sub_lowpass == "crossover"
+                else float(args.sub_lowpass)
+            )
+        )
+        playback = PlaybackParams(
+            crossover_hz=args.crossover,
+            sub_lowpass_hz=lowpass,
+            main_gain_db=args.main_gain_db,
+            lfe_gain_db=args.lfe_gain_db,
+            sub_gain_db=args.sub_gain_db,
+        )
+    except ValueError as invalid:
+        parser.error(str(invalid))
+    if not math.isfinite(args.device_rate) or args.device_rate <= 0:
+        parser.error("device rate must be finite and positive")
+    if not 0 < args.integer_bits < args.coefficient_bits:
+        parser.error("device format requires 0 < integer bits < coefficient bits")
     params = PipelineParams(
-        playback=PlaybackParams(crossover_hz=args.crossover),
+        realisation=Realisation(
+            fs=args.device_rate,
+            coefficient_bits=args.coefficient_bits,
+            integer_bits=args.integer_bits,
+        ),
+        playback=playback,
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
     )
     material = load(args.material)
+    if params.realisation.fs < material.fs:
+        parser.error("device rate must cover the analysis bandwidth")
     cache_path = (
         None
         if args.no_cache

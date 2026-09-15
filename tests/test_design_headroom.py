@@ -38,7 +38,9 @@ def test_headroom_distinguishes_unknown_clipping_and_silence(
         assert "needs" in _headroom(offset)
     else:
         assert offset == 0.0
-        assert _headroom(offset) == "no gain reduction needed"
+        assert (
+            _headroom(offset) == "no gain reduction needed (playback model unspecified)"
+        )
 
 
 def test_unavailable_headroom_remains_unknown_in_the_verdict_and_record():

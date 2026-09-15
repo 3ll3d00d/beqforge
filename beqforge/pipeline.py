@@ -287,6 +287,35 @@ class PipelineParams:
 
 
 @dataclass(frozen=True, slots=True)
+class Headroom:
+    """A clipping measurement qualified by its signal, gain and device assumptions."""
+
+    offset_db: float
+    peak: float | None
+    playback: PlaybackParams
+    realisation: Realisation
+    analysis_fs: float
+    unavailable_reason: str | None = None
+    full_scale: float = 1.0
+
+    def summary(self) -> str:
+        if self.unavailable_reason is not None:
+            return f"gain reduction unavailable ({self.unavailable_reason})"
+        if self.offset_db >= 0:
+            return "no gain reduction needed for the assumed sub-feed model"
+        return f"needs {-self.offset_db:.1f} dB gain reduction for the assumed sub-feed model"
+
+    def assumptions(self) -> str:
+        device = self.realisation
+        return (
+            f"{self.playback.description()}; bass management at {self.analysis_fs:g} Hz; "
+            f"published BEQ at {device.fs:g} Hz, fixed-point "
+            f"{device.integer_bits}.{device.coefficient_bits - device.integer_bits}; "
+            "unity full scale, extraction bandwidth only, ring-out retained, 16x interpolated peak"
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Candidate:
     """One design and everything known about it."""
 
@@ -321,16 +350,28 @@ class Candidate:
     states as a ratio but this states as the curve itself.
     """
 
+    headroom: Headroom | None = None
+    """Exact playback assumptions and measured peak, absent for legacy/caller-built candidates."""
+
+    @property
+    def peak_gain_db(self) -> float:
+        """Peak filter magnitude, distinct from clipping cost on the sub feed."""
+        if self.headroom is None:
+            return float(
+                np.max(
+                    magnitude_db(
+                        biquad_sos(self.filters, PUBLISH_FS), DESIGN_GRID, PUBLISH_FS
+                    )
+                )
+            )
+        device = self.headroom.realisation
+        sos = device.quantise(biquad_sos(publication_filters(self.filters), device.fs))
+        return float(np.max(magnitude_db(sos, DESIGN_GRID, device.fs)))
+
     @property
     def mv_adjust_db(self) -> float:
-        """Master-volume reduction the cascade requires; positive means turn down.
-
-        Taken from the cascade rather than the target: the target is not defined for every
-        route, and it is the published filter's peak gain that the listener has to make room
-        for regardless of how it was arrived at.
-        """
-        sos = biquad_sos(self.filters, PUBLISH_FS)
-        return float(np.max(magnitude_db(sos, DESIGN_GRID, PUBLISH_FS)))
+        """Legacy name for peak filter gain; never a master-volume/headroom requirement."""
+        return self.peak_gain_db
 
     @property
     def confidence(self) -> float:
@@ -1032,7 +1073,7 @@ def run(
             f"authored exclusions {bands}: omitted evidence, zero requested correction"
         )
     if not blockers:
-        sub = bass_managed_sum(material, params.playback.crossover_hz)
+        sub = bass_managed_sum(material, playback=params.playback)
         if sub is None or not np.any(sub):
             blockers.append(
                 "playback verification unavailable: silent or absent sub feed"
@@ -1149,30 +1190,48 @@ def run(
     )
 
 
+def measure_headroom(
+    material: Material,
+    filters: list[BiquadSpec],
+    params: PipelineParams,
+    *,
+    sub_samples: np.ndarray | None = None,
+) -> Headroom:
+    """Measure clipping on a declared sub-feed model; missing information stays unavailable."""
+    sub = (
+        sub_samples
+        if sub_samples is not None
+        else bass_managed_sum(material, playback=params.playback)
+    )
+    reason = None
+    peak = None
+    offset = math.nan
+    if sub is None:
+        reason = "no channel decomposition"
+    elif not np.isfinite(sub).all():
+        reason = "non-finite sub-feed samples"
+    else:
+        try:
+            filtered = device_waveform(
+                filters, sub, float(material.fs), params.realisation, include_tail=True
+            )
+            if not np.isfinite(filtered).all():
+                raise ValueError("non-finite device waveform")
+            peak = waveform_peak(filtered)
+            offset = min(-20.0 * math.log10(peak), 0.0) if peak > 0 else 0.0
+        except ValueError as unavailable:
+            reason = str(unavailable)
+            logger.warning(f"Headroom unavailable: {reason}")
+    return Headroom(
+        offset, peak, params.playback, params.realisation, float(material.fs), reason
+    )
+
+
 def required_gain_reduction_db(
     material: Material, filters: list[BiquadSpec], params: PipelineParams
 ) -> float:
-    """Gain reduction needed on the sub feed: 0.0 when none, NaN when unavailable.
-
-    beqdesigner's own quantity — `min(20*log10(1/peak), 0)` on the filtered signal — measured on
-    the bass-managed sum a BEQ actually operates on, because that is the only signal where the
-    question means anything. The cascade's peak magnitude is not a substitute, and a mono
-    mix without channel decomposition cannot establish the sub feed's headroom.
-    """
-    sub = bass_managed_sum(material, params.playback.crossover_hz)
-    if sub is None:
-        return math.nan
-    try:
-        filtered = device_waveform(
-            filters, sub, float(material.fs), params.realisation, include_tail=True
-        )
-    except ValueError as unavailable:
-        logger.warning(f"Headroom unavailable: {unavailable}")
-        return math.nan
-    peak = waveform_peak(filtered)
-    if peak <= 0.0:
-        return 0.0
-    return min(20.0 * math.log10(1.0 / peak), 0.0)
+    """Compatibility scalar; `measure_headroom` also retains assumptions and unavailable reasons."""
+    return measure_headroom(material, filters, params).offset_db
 
 
 def judged_band_hz(
@@ -1248,7 +1307,7 @@ def _judge(
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
-    sub = bass_managed_sum(material, params.playback.crossover_hz)
+    sub = bass_managed_sum(material, playback=params.playback)
     if sub is None:
         raise ValueError("playback verification unavailable: no channel decomposition")
     correction = verify(
@@ -1264,6 +1323,7 @@ def _judge(
         reference_samples=material.mono_mix,
         playback_model=params.playback.description(),
     )
+    headroom = measure_headroom(material, filters, params, sub_samples=sub)
     verdict = assess(
         filters,
         correction,
@@ -1271,7 +1331,7 @@ def _judge(
         params.accept,
         params.realisation,
         filter_floor_hz=diagnosis.filter_floor_hz,
-        required_offset_db=required_gain_reduction_db(material, filters, params),
+        required_offset_db=headroom.offset_db,
         target_db=target,
     )
     verdict.notes.append(
@@ -1279,7 +1339,8 @@ def _judge(
         f"sub output from {material.fs:g} Hz extraction, relative to unchanged playback baseline; "
         "headroom uses the same transfer with ring-out and 16x peak interpolation"
     )
-    verdict.notes.append(params.playback.description())
+    verdict.notes.append(headroom.summary())
+    verdict.notes.append(headroom.assumptions())
     verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:
@@ -1293,6 +1354,7 @@ def _judge(
         optimiser_filters=optimiser_filters,
         correction=correction,
         verdict=verdict,
+        headroom=headroom,
         target_notes=target_notes,
         method=method,
         effective_params=effective_params,

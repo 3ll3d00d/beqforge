@@ -65,57 +65,92 @@ class PlaybackParams:
     """Declared sub-feed model, not a claim about an arbitrary receiver or room."""
 
     crossover_hz: float = BM_CROSSOVER_HZ
-    """LR4 low-pass on mains before summing and on the sub bus after summing."""
+    """LR4 mains low-pass before summing; a playback setting, not a target/reference band."""
+
+    sub_lowpass_hz: float | Literal["crossover"] | None = "crossover"
+    """LR4 on the summed bus: follow the crossover, use a separate corner, or None to omit."""
+
+    main_gain_db: float = -20.2
+    lfe_gain_db: float = -10.2
+    """Assumed gains from extracted channel samples to the sub bus, relative to unity."""
+
+    sub_gain_db: float = 0.0
+    """Assumed output gain after summing/filtering; full scale remains a peak of 1."""
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.crossover_hz) or self.crossover_hz <= 0:
             raise ValueError("playback crossover must be finite and positive")
+        lowpass = self.bus_lowpass_hz
+        if lowpass is not None and (not np.isfinite(lowpass) or lowpass <= 0):
+            raise ValueError(
+                "sub low-pass must be finite and positive, crossover, or None"
+            )
+        if not all(
+            np.isfinite(g)
+            for g in (self.main_gain_db, self.lfe_gain_db, self.sub_gain_db)
+        ):
+            raise ValueError("playback gains must be finite")
+
+    @property
+    def bus_lowpass_hz(self) -> float | None:
+        return (
+            self.crossover_hz
+            if self.sub_lowpass_hz == "crossover"
+            else self.sub_lowpass_hz
+        )
 
     def description(self) -> str:
+        bus = (
+            "disabled"
+            if self.bus_lowpass_hz is None
+            else f"LR4 {self.bus_lowpass_hz:g} Hz"
+        )
         return (
-            f"modelled sub output: mains LR4 low-pass {self.crossover_hz:g} Hz, "
-            f"summed bus LR4 low-pass {self.crossover_hz:g} Hz; "
-            "mains -20.2 dB, LFE -10.2 dB; no room/speaker response"
+            f"assumed sub output: mains LR4 low-pass {self.crossover_hz:g} Hz; "
+            f"sub-bus low-pass {bus}; gains mains {self.main_gain_db:+g} dB, "
+            f"LFE {self.lfe_gain_db:+g} dB, sub {self.sub_gain_db:+g} dB; "
+            "no room/speaker response"
         )
 
 
 def bass_managed_sum(
-    material: "Material", crossover_hz: float = BM_CROSSOVER_HZ
+    material: "Material",
+    crossover_hz: float = BM_CROSSOVER_HZ,
+    *,
+    playback: PlaybackParams | None = None,
 ) -> np.ndarray | None:
-    """The sub feed a BEQ actually operates on, at the scale a device would see it.
+    """Sub output under the declared model, in units where a peak of 1 is full scale.
 
-    Returns None when channel decomposition is unavailable.
-
-    A BEQ is applied **post bass management, to the sub channel only** — which is why the
-    headroom a filter costs is not a master-volume figure and usually is not a cost at all. To
-    measure that cost honestly the signal has to be the sub feed, not the mono mix: mains
-    low-passed into the sub bus, LFE 10 dB hotter, and the summed bus low-passed again on the
-    way out. Both filters are Linkwitz-Riley 4th order, as `model/signal.py` in beqdesigner
-    uses, there applied before and/or after the sum; here both as an explicit modelling assumption, not a universal receiver topology.
-
-    `MAIN_GAIN`/`LFE_GAIN` are the attenuation that keeps the sum inside full scale, and they
-    are beqdesigner's worst-case coherent-summation figure — `20*log10(n_mains) + LFE at +10 dB`
-    — which for 7 mains is the 20.2 dB they encode. Because that is a *worst* case and real
-    content does not sum coherently, the measured sub feed peaks 9 to 46 dB below full scale,
-    and a correction of tens of dB at frequencies with no content in them costs nothing.
+    The positional crossover is retained for callers of the original model. `playback`
+    supplies the complete configuration when given. Defaults reproduce the historical
+    mains-LR4/sum/bus-LR4 arrangement and -20.2/-10.2 dB gains. Those are assumptions, not
+    calibrated receiver levels. Bass-management filters run at the extraction sample rate;
+    BEQ verification separately applies the declared device's published realisation.
+    Missing channel decomposition cannot establish this signal and returns None.
     """
-    # A mono mix cannot reconstruct the separately low-passed channel contributions.
     if not material.channels:
         return None
-
     from scipy import signal as _signal
 
-    section = _signal.butter(
-        2, crossover_hz, btype="low", fs=float(material.fs), output="sos"
-    )
-    lr4 = np.vstack([section, section])
+    model = playback or PlaybackParams(crossover_hz=crossover_hz)
+
+    def lowpass(samples: np.ndarray, corner: float) -> np.ndarray:
+        section = _signal.butter(
+            2, corner, btype="low", fs=float(material.fs), output="sos"
+        )
+        return _signal.sosfilt(np.vstack([section, section]), samples)
+
     total = np.zeros_like(material.mono_mix)
     for name, samples in material.channels.items():
         if name == "LFE":
-            total = total + samples * LFE_GAIN
+            total = total + samples * 10.0 ** (model.lfe_gain_db / 20.0)
         else:
-            total = total + _signal.sosfilt(lr4, samples) * MAIN_GAIN
-    return _signal.sosfilt(lr4, total)
+            total = total + lowpass(samples, model.crossover_hz) * 10.0 ** (
+                model.main_gain_db / 20.0
+            )
+    if model.bus_lowpass_hz is not None:
+        total = lowpass(total, model.bus_lowpass_hz)
+    return total * 10.0 ** (model.sub_gain_db / 20.0)
 
 
 def load(path: Path | str) -> Material:
