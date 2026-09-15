@@ -22,8 +22,8 @@ is a line with a reason behind it rather than a special case, and `Strategy.cach
 where another strategy would declare itself onto the same footing.
 
 **Staleness is per stage, and each stage names its own dependencies.** `record._source_digest`
-hashes every module in `design/`, which is right for "would this code still draw this picture"
-and wrong here: it would mean editing the fitter invalidates the analysis, which is exactly
+hashes design modules, root RBJ arithmetic and record/replay entry points, which is right for
+"would this code still draw this picture" and wrong here: it would mean editing the fitter invalidates the analysis, which is exactly
 the case a cache is for. `ANALYSIS_MODULES` and `PARAMETRIC_MODULES` are the correctness
 argument, not a convenience — a module a stage can reach and that is not listed will leave a
 stale answer looking fresh.
@@ -84,9 +84,9 @@ PARAMETRIC_MODULES = ANALYSIS_MODULES + (
 
 `__init__.py` here is the **package root**, not `design/__init__.py`. `filters.py` imports
 `LowShelf`, `HighShelf` and `PeakingEQ` from it, so the RBJ formulae that produce every
-published cascade live outside `design/` entirely. `record._source_digest` globs `design/*.py`
-and therefore cannot see them; a cache that inherited that blind spot would serve a cascade
-built by superseded arithmetic and call it current.
+published cascade live outside `design/` entirely. Both this stage and the record source
+fingerprint include them. The analysis does not depend on them and stays reusable when
+only the RBJ arithmetic or fitting changes.
 
 `pipeline.py` is here because `parametric_targets` lives in it and builds the `DesignParams`.
 It over-invalidates — editing `counterfactual_target` drops a parametric proposal that did not

@@ -248,6 +248,11 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   `replay` refuses a stale one. That check exists because charts were once redrawn from
   cascades typed back in by hand and went stale across two behaviour changes without anything
   looking wrong.
+* Record fingerprints cover all design sources, the root RBJ implementation and production
+  extraction/design/replay/ledger entry points plus the ledger template. Extend
+  `record.RECORD_SOURCE_FILES` when a new dependency lives outside `design/`; keep stage-cache
+  dependency lists separate. Legacy records are read verbatim and need explicit stale replay,
+  never an automatic upgrade of evidence, publication or strategy claims.
 * **The record and the `.beq` export are two different things.** The record is ours and has to
   be exact and complete for re-analysis; the export is beqdesigner's and only needs the
   filters plus the underlying signal. Do not merge them — it would make the cache hostage to a

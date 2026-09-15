@@ -38,7 +38,12 @@ from beqanalyser.design.material import Material
 logger = logging.getLogger(__name__)
 
 SCHEMA = 1
-"""Bumped when a field changes meaning. `stale_against` refuses to read another schema."""
+"""Bumped when a field changes meaning; mismatches require explicit stale replay.
+
+Evidence notes, publication details and strategy metadata are additive. Legacy documents are
+read verbatim, never upgraded into claims they did not make; changed source fingerprints mark
+them stale even when their schema remains readable.
+"""
 
 DECIMALS = 3
 """Curve precision. dB, against material that wobbles by several of them."""
@@ -59,30 +64,65 @@ def _back(value: float | None) -> float:
     return math.nan if value is None else float(value)
 
 
-def _source_digest() -> str:
-    """SHA-256 over the design package's sources, first 12 hex.
+RECORD_SOURCE_FILES = (
+    "beqanalyser/__init__.py",
+    "tools/extract.py",
+    "tools/design_beq.py",
+    "tools/replay.py",
+    "tools/render_ledger.py",
+    "tools/ledger_template.html",
+)
+"""Record/replay dependencies outside design/, relative to the repository root.
 
-    `git describe --dirty` cannot carry this on its own: a dirty tree yields the same string
-    however it is dirty, so a record written before an edit and one written after are
-    indistinguishable by it — and this working tree is dirty most of the time. That is the
-    exact case the staleness check exists for, so the source is hashed directly.
+The root package owns the RBJ arithmetic. The entry points extract material, configure runs,
+replay/export records and select/render ledger results; the template controls their display.
+All design modules are included separately, including newly added ones. This deliberately
+invalidates records on presentation edits too; a record claims what this code would produce.
+
+Docs, tests, clustering-only modules, experiments and the standalone summariser are excluded
+from the content hash. Git revision/dirty status remains a conservative additional check, so
+an unrelated commit or the first dirty edit can still mark a record stale. Successive unrelated
+edits in an already-dirty tree do not change the content hash. Extracted data is fingerprinted
+separately by material_digest. This is a source fingerprint, not an installed-environment hash.
+Stage caches retain their narrower dependency lists in cache.py.
+"""
+
+
+def _repository_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _source_paths(root: Path) -> tuple[Path, ...]:
+    declared = {root / name for name in RECORD_SOURCE_FILES}
+    design_modules = set((root / "beqanalyser" / "design").rglob("*.py"))
+    return tuple(sorted(declared | design_modules))
+
+
+def _source_digest() -> str:
+    """SHA-256 over record/replay source identities and contents, first 12 hex.
+
+    git describe --dirty cannot distinguish successive edits in an already-dirty tree.
+    Include paths and delimited content digests so changes, additions and removals all count.
+    Missing explicitly declared sources raise rather than silently weakening the fingerprint.
     """
-    digest = hashlib.sha256()
-    for path in sorted(Path(__file__).resolve().parent.glob("*.py")):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+    root = _repository_root()
+    digest = hashlib.sha256(b"record-sources-v2\0")
+    for path in _source_paths(root):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()[:12]
 
 
 def _git_revision() -> str:
-    """`git describe`, plus a hash of the design sources so a dirty tree is distinguishable."""
+    """`git describe`, plus record/replay source contents to distinguish dirty edits."""
     try:
         out = subprocess.run(
             ["git", "describe", "--always", "--dirty", "--abbrev=12"],
             capture_output=True,
             text=True,
             timeout=5,
-            cwd=Path(__file__).resolve().parent,
+            cwd=_repository_root(),
         )
         described = out.stdout.strip() or "unknown"
     except (OSError, subprocess.SubprocessError):
