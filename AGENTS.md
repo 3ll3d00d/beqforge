@@ -39,7 +39,7 @@ Single package, no CLI, no API, no service. Everything is driven by editing `__m
 | `beqanalyser/design/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
 | `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures; writes a `.run.json.gz` record beside the material unless `--no-record`. |
 | `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
-| `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Needs no beqdesigner. |
+| `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Requires an explicit supported channel layout; preserves layout provenance. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, and the two record comparison tools. See PERFORMANCE.md §4-5. |
 | `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
@@ -280,4 +280,7 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   [PERFORMANCE.md](PERFORMANCE.md) is the profile and the plan — where the time goes, which changes
   cannot alter an output and which trade accuracy for it. Read it before optimising anything here;
   it records what was already measured and ruled out (`tol` is not a lever, `verify` is 0.3 s).
+* Extraction never infers LFE from channel count. Unknown layouts are refused; legacy `.npz` files
+  load with an unverified-provenance warning and need re-extraction or source-layout verification.
+  Relabelling channels cannot fix a wrongly weighted stored `mono_mix`.
 * `data/` holds extracted material and is gitignored. Nothing in it is committed.

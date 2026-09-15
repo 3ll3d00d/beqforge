@@ -8,7 +8,10 @@ ffmpeg and does the mixing in numpy.
 
     uv run python tools/extract.py FILM.mkv --out data/
 
-Writes `<name>.npz` holding `mono_mix`, the per-channel arrays, `fs` and `coverage`.
+Writes `<name>.npz` holding `mono_mix`, per-channel arrays, `fs`, `coverage`, decoded
+`layout`, `source_layout` and `extraction_mapping` provenance. Unknown or missing layouts
+are refused: channel count alone cannot identify speakers. Legacy extractions need
+re-extraction or verification against their source; relabelling cannot repair a bad mix.
 Load it with `beqanalyser.design.material.load`.
 
 One ffmpeg pass decodes every channel at 1 kHz and the mix is computed afterwards. `pan` and
@@ -36,15 +39,34 @@ logger = logging.getLogger("extract")
 ANALYSIS_FS = 1000
 """Decimated analysis rate. 500 Hz of usable bandwidth, decades above any plausible knee."""
 
-LAYOUTS: dict[int, tuple[str, ...]] = {
-    1: ("M",),
-    2: ("L", "R"),
-    3: ("L", "R", "LFE"),
-    4: ("L", "R", "C", "LFE"),
-    6: ("L", "R", "C", "LFE", "Ls", "Rs"),
-    8: ("L", "R", "C", "LFE", "Lb", "Rb", "Ls", "Rs"),
+# Explicit ffmpeg native channel order; never infer speaker roles from a count.
+LAYOUTS: dict[str, tuple[str, ...]] = {
+    "mono": ("M",),
+    "stereo": ("L", "R"),
+    "2.1": ("L", "R", "LFE"),
+    "3.0": ("L", "R", "C"),
+    "3.0(back)": ("L", "R", "Cb"),
+    "4.0": ("L", "R", "C", "Cb"),
+    "quad": ("L", "R", "Lb", "Rb"),
+    "quad(side)": ("L", "R", "Ls", "Rs"),
+    "3.1": ("L", "R", "C", "LFE"),
+    "4.1": ("L", "R", "C", "LFE", "Cb"),
+    "5.0": ("L", "R", "C", "Lb", "Rb"),
+    "5.0(side)": ("L", "R", "C", "Ls", "Rs"),
+    "5.1": ("L", "R", "C", "LFE", "Lb", "Rb"),
+    "5.1(side)": ("L", "R", "C", "LFE", "Ls", "Rs"),
+    "6.0": ("L", "R", "C", "Cb", "Ls", "Rs"),
+    "6.0(front)": ("L", "R", "Lc", "Rc", "Ls", "Rs"),
+    "hexagonal": ("L", "R", "C", "Lb", "Rb", "Cb"),
+    "6.1": ("L", "R", "C", "LFE", "Cb", "Ls", "Rs"),
+    "6.1(back)": ("L", "R", "C", "LFE", "Lb", "Rb", "Cb"),
+    "6.1(front)": ("L", "R", "LFE", "Lc", "Rc", "Ls", "Rs"),
+    "7.0": ("L", "R", "C", "Lb", "Rb", "Ls", "Rs"),
+    "7.0(front)": ("L", "R", "C", "Lc", "Rc", "Ls", "Rs"),
+    "7.1": ("L", "R", "C", "LFE", "Lb", "Rb", "Ls", "Rs"),
+    "7.1(wide)": ("L", "R", "C", "LFE", "Lb", "Rb", "Lc", "Rc"),
+    "7.1(wide-side)": ("L", "R", "C", "LFE", "Lc", "Rc", "Ls", "Rs"),
 }
-"""Channel order ffmpeg decodes into, by channel count. Others are named positionally."""
 
 
 def probe(path: Path, stream: int) -> dict:
@@ -91,12 +113,17 @@ def decode(path: Path, stream: int, channels: int, source_fs: int) -> np.ndarray
 
 
 def channel_names(count: int, layout: str | None) -> tuple[str, ...]:
-    if count in LAYOUTS:
-        return LAYOUTS[count]
-    logger.warning(
-        f"Unrecognised layout {layout!r} ({count} channels); naming positionally"
-    )
-    return tuple(f"c{i}" for i in range(count))
+    names = LAYOUTS.get(layout)
+    if names is None:
+        raise ValueError(
+            f"Unsupported or ambiguous channel layout {layout!r} ({count} channels); "
+            "extract from a source with an explicit supported ffmpeg layout"
+        )
+    if len(names) != count:
+        raise ValueError(
+            f"Channel layout {layout!r} defines {len(names)} channels, but stream reports {count}"
+        )
+    return names
 
 
 def mono_mix(samples: np.ndarray, names: tuple[str, ...]) -> np.ndarray:
@@ -128,7 +155,10 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     info = probe(args.source, args.stream)
     count = int(info["channels"])
-    names = channel_names(count, info.get("channel_layout"))
+    try:
+        names = channel_names(count, info.get("channel_layout"))
+    except ValueError as exc:
+        parser.error(str(exc))
     logger.info(
         f"{args.source.name}: {count}ch {info.get('channel_layout')} -> {names}"
     )
@@ -144,6 +174,8 @@ def main() -> int:
         "fs": np.int32(ANALYSIS_FS),
         "coverage": "excerpt" if args.excerpt else "complete_programme",
         "layout": np.array(names),
+        "source_layout": info["channel_layout"],
+        "extraction_mapping": "ffmpeg_layout_v1",
     }
     if not args.mono_only:
         for i, name in enumerate(names):

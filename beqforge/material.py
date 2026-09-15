@@ -39,6 +39,10 @@ class Material:
     mono_mix: np.ndarray
     channels: dict[str, np.ndarray]
     coverage: Coverage
+    layout: tuple[str, ...] = ()
+    source_layout: str | None = None
+    channel_mapping: str | None = None
+    """Extraction provenance; None means historical or caller-supplied, not verified."""
 
     @property
     def duration_s(self) -> float:
@@ -105,11 +109,23 @@ def load(path: Path | str) -> Material:
             if key.startswith("channel_")
         }
         material = Material(
+            layout=tuple(str(n) for n in data["layout"]) if "layout" in data else (),
+            source_layout=str(data["source_layout"])
+            if "source_layout" in data
+            else None,
+            channel_mapping=str(data["extraction_mapping"])
+            if "extraction_mapping" in data
+            else None,
             name=path.stem,
             fs=int(data["fs"]),
             mono_mix=np.asarray(data["mono_mix"], dtype=np.float64),
             channels=channels,
             coverage=str(data["coverage"]),  # type: ignore[arg-type]
+        )
+    if material.channel_mapping != "ffmpeg_layout_v1":
+        logger.warning(
+            f"{path}: unverified channel-layout provenance; re-extract or verify against "
+            "the original source layout. Relabelling cannot repair a wrongly weighted mono_mix."
         )
     logger.info(f"Loaded {material}")
     return material

@@ -159,6 +159,7 @@ def test_material_round_trips_through_the_extractor(tmp_path) -> None:
     assert material.fs == 1000
     assert material.coverage == "complete_programme"
     assert material.mono_mix.dtype == np.float64
-    assert set(material.channels) == {"L", "R", "C", "LFE", "Ls", "Rs"}
+    assert material.source_layout == "5.1"
+    assert set(material.channels) == {"L", "R", "C", "LFE", "Lb", "Rb"}
     assert all(len(c) == len(material.mono_mix) for c in material.channels.values())
     assert material.duration_s == pytest.approx(10.0, abs=0.1)
