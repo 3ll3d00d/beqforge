@@ -62,6 +62,7 @@ from beqanalyser.design.filters import (
     FitRequest,
     FitStats,
     Realisation,
+    publication_filters,
     biquad_sos,
     correction_band_hz,
     fit_minimal_biquads_all,
@@ -285,6 +286,9 @@ class Candidate:
     fit_error_db: float
     correction: Correction
     verdict: Verdict
+    optimiser_filters: list[BiquadSpec] = field(default_factory=list)
+    """Full-precision fit, retained only for diagnostics and its residual."""
+
     target_notes: tuple[str, ...] = ()
     """What bounded the target, if anything.
 
@@ -1117,6 +1121,8 @@ def _judge(
     none (the parametric route) — passed through to `verify`/`assess` so intent (§14.2) can
     fall back to the house curve rather than to an all-zero target, which is a different claim.
     """
+    optimiser_filters = filters
+    filters = publication_filters(filters)
     correction = verify(
         filters,
         material.mono_mix,
@@ -1148,6 +1154,7 @@ def _judge(
         target_db=target if target is not None else np.zeros_like(DESIGN_GRID),
         unpriced_target_db=unpriced_target,
         fit_error_db=error,
+        optimiser_filters=optimiser_filters,
         correction=correction,
         verdict=verdict,
         target_notes=target_notes,

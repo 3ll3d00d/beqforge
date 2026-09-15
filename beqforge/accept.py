@@ -24,6 +24,8 @@ import numpy as np
 from beqanalyser.design import DESIGN_GRID, BiquadSpec
 from beqanalyser.design.filters import (
     Realisation,
+    publication_filters,
+    unstable_sections,
     biquad_sos,
     drift_distribution,
     magnitude_db,
@@ -547,6 +549,7 @@ def assess(
     not be judged against a target that could itself be wrong (§6.2).
     """
     params = params or AcceptParams()
+    filters = publication_filters(filters)
     realisation = realisation or Realisation()
     failures: list[str] = []
     notes: list[str] = []
@@ -704,19 +707,11 @@ def assess(
     # The strict Jury conditions put both poles of each real biquad inside the
     # unit circle. Check the device coefficients: finite-band magnitude samples
     # cannot detect an uncancelled pole at DC, and no tolerance licenses one.
-    for index, section in enumerate(realisation.quantise(sos)):
-        a0, a1, a2 = section[3:]
-        stable = (
-            np.all(np.isfinite(section))
-            and a0 > 0.0
-            and a0 + a1 + a2 > 0.0
-            and a0 - a1 + a2 > 0.0
-            and a0 - a2 > 0.0
+    for index in unstable_sections(filters, realisation):
+        failures.append(
+            f"section {index + 1} is not stable after publication rounding and "
+            "device coefficient quantisation"
         )
-        if not stable:
-            failures.append(
-                f"section {index + 1} is not stable after device coefficient quantisation"
-            )
 
     full = magnitude_db(sos, grid, realisation.fs)
     # §4.2's headroom, measured on the waveform rather than on the magnitude. Reported on

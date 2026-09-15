@@ -25,7 +25,7 @@ import json
 import logging
 import math
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -228,6 +228,7 @@ def _candidate(candidate) -> dict[str, Any]:
     return {
         "label": candidate.label,
         "filters": [_spec(f) for f in candidate.filters],
+        "optimiser_filters": [_spec(f) for f in candidate.optimiser_filters],
         "fit_error_db": _num(candidate.fit_error_db),
         "target_db": _arr(candidate.target_db),
         "unpriced_target_db": _arr(candidate.unpriced_target_db),
@@ -282,6 +283,10 @@ def write(
         "identification": (
             None if report.identification is None else str(report.identification)
         ),
+        "publication": {
+            "parameter_decimals": {"freq_hz": 2, "gain_db": 3, "q": 4},
+            "realisation": asdict(params.realisation),
+        },
         "evidence_notes": list(report.evidence_notes),
         "candidates": [_candidate(c) for c in report.candidates],
         "accepted": None if accepted is None else accepted.label,

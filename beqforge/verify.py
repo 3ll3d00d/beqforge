@@ -23,7 +23,12 @@ from scipy import signal
 
 from beqanalyser.design import DESIGN_GRID, BiquadSpec
 from beqanalyser.design.diagnose import DiagnoseParams, plateau_reference
-from beqanalyser.design.filters import Realisation, biquad_sos, magnitude_db
+from beqanalyser.design.filters import (
+    Realisation,
+    biquad_sos,
+    magnitude_db,
+    publication_filters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +345,7 @@ def verify(
     `DESIGN_GRID`, `None` for a candidate with no target (the parametric route). Only reaches
     `Correction.concerns`'s smoke test here; `assess` takes it directly.
     """
+    filters = publication_filters(filters)
     corrected = signal.sosfilt(biquad_sos(filters, fs), samples)
     freqs, before = _mean_db(samples, fs)
     _, after = _mean_db(corrected, fs)

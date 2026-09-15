@@ -32,6 +32,11 @@ from typing import Any
 import numpy as np
 
 from beqanalyser.design import BiquadSpec
+from beqanalyser.design.filters import (
+    Realisation,
+    publication_filters,
+    unstable_sections,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +64,16 @@ def _curve(name: str, description: str, freqs, values, colour=None) -> dict[str,
 
 
 def _section(spec: BiquadSpec, fs: int) -> dict[str, Any]:
+    spec = publication_filters([spec])[0]
     kind = _TYPES.get(spec.type)
     if kind is None:
         raise ValueError(f"no beqdesigner filter type for {spec.type!r}")
     out: dict[str, Any] = {
         "_type": kind,
         "fs": fs,
-        "fc": round(float(spec.freq_hz), 2),
-        "q": round(float(spec.q), 4),
-        "gain": round(float(spec.gain_db), 3),
+        "fc": spec.freq_hz,
+        "q": spec.q,
+        "gain": spec.gain_db,
     }
     # `fc` for every type: PeakingEQ overrides its parent's `freq` and writes `fc`, and
     # `filter_from_json` reads `fc` in all three branches. Only the shelves take a `count`.
@@ -94,6 +100,7 @@ def _signal(
     peak,
     specs: list[BiquadSpec] | None = None,
     metadata: dict[str, Any] | None = None,
+    publish_fs: float = PUBLISH_FS,
 ) -> dict[str, Any]:
     signal: dict[str, Any] = {
         "_type": "SignalData",
@@ -106,7 +113,7 @@ def _signal(
         "offset": "0",
     }
     if specs:
-        signal["filter"] = _cascade(specs, PUBLISH_FS)
+        signal["filter"] = _cascade(specs, publish_fs)
     if metadata:
         signal["metadata"] = metadata
     return signal
@@ -126,6 +133,7 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
     title = record["material"]["name"]
     accepted = record.get("accepted")
 
+    device = Realisation(**record.get("publication", {}).get("realisation", {}))
     signals: list[dict[str, Any]] = []
     for name, measured in curves["unfiltered"].items():
         if name == "mono":
@@ -138,6 +146,18 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
     for candidate in record["candidates"]:
         label = candidate["label"]
         verdict = candidate["verdict"]
+        specs = [
+            BiquadSpec(f["type"], f["freq_hz"], f["gain_db"], f["q"])
+            for f in candidate["filters"]
+        ]
+        for spec in specs:
+            if spec.type not in _TYPES:
+                raise ValueError(f"no beqdesigner filter type for {spec.type!r}")
+        if verdict["passed"] and unstable_sections(specs, device):
+            raise ValueError(
+                f"{label}: accepted filter is unstable at publication precision"
+            )
+
         signals.append(
             _signal(
                 f"{title} {label}" + ("" if label != accepted else " (accepted)"),
@@ -145,10 +165,8 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
                 freqs,
                 mono["average"],
                 mono["peak"],
-                specs=[
-                    BiquadSpec(f["type"], f["freq_hz"], f["gain_db"], f["q"])
-                    for f in candidate["filters"]
-                ],
+                specs=specs,
+                publish_fs=device.fs,
                 # our verdict has nowhere to live in beqdesigner's model, so it rides here
                 # rather than being silently dropped or forced into a typed field
                 metadata={

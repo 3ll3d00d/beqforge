@@ -785,6 +785,8 @@ def _publishable(
     whole budget has been spent. That is what lets the escalation stop early and still reach
     the answer the full enumeration would.
     """
+    if unstable_sections(specs, realisation or Realisation()):
+        return False
     if realisation is None or max_drift_db is None:
         return True
     drift = float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
@@ -909,6 +911,41 @@ def fit_to_biquads(
     return best[0], best[1]
 
 
+def publication_filters(filters: list[BiquadSpec]) -> list[BiquadSpec]:
+    """Canonical text parameters: Hz to 2 decimals, dB to 3, Q to 4.
+
+    Independent of the device coefficient format and the hypothetical jitter diagnostic.
+    Both judging and external export must use these same parameters.
+    """
+    return [
+        BiquadSpec(
+            s.type,
+            round(float(s.freq_hz), 2),
+            round(float(s.gain_db), 3),
+            round(float(s.q), 4),
+        )
+        for s in filters
+    ]
+
+
+def unstable_sections(
+    filters: list[BiquadSpec], realisation: "Realisation"
+) -> list[int]:
+    """Indices failing strict Jury stability at exact publication/device precision."""
+    sos = realisation.quantise(biquad_sos(publication_filters(filters), realisation.fs))
+    return [
+        i
+        for i, section in enumerate(sos)
+        if not (
+            np.all(np.isfinite(section))
+            and section[3] > 0
+            and section[3] + section[4] + section[5] > 0
+            and section[3] - section[4] + section[5] > 0
+            and section[3] - section[5] > 0
+        )
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class Realisation:
     """How the published cascade will actually be realised, for robustness scoring.
@@ -939,7 +976,9 @@ class Realisation:
     fragility §5.1 exists to reject."""
 
     publication_precision: tuple[float, float, float] = (0.005, 0.005, 0.0005)
-    """Half-step of the precision a filter is published at: frequency, gain, Q.
+    """Hypothetical jitter half-widths for sensitivity diagnostics: frequency, gain, Q.
+
+    These do not control canonical publication rounding; see `publication_filters`.
 
     A cascade is published as text and reloaded, so the coefficients that reach the hardware
     are not the optimiser's. `accept` judges drift at the 90th percentile over this rounding,
