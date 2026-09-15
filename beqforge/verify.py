@@ -132,10 +132,9 @@ class Correction:
         be got right twice when §14.4 wires it in). `priced_target_db` is on `DESIGN_GRID` and
         is interpolated onto `self.freqs`.
 
-        `priced_target_db is None` means no strategy built a target for this candidate — the
-        parametric route fits directly against an identified rolloff and passes none — and the
-        intent then falls back to the house curve alone, exactly what every clause compared
-        against before this existed. Treating an absent target as an all-zero one would be
+        `priced_target_db is None` means no strategy built a target for this candidate.
+        A caller-supplied cascade may have none; intent then falls back to the house curve
+        alone, exactly what every clause compared against before this existed. Treating an absent target as an all-zero one would be
         wrong: zero added to `before_db` is not "no intent", it is "intent to leave the input
         exactly as it was", which is not what a candidate with no target is claiming.
         """
@@ -342,7 +341,7 @@ def verify(
     and needs no constant.
 
     `priced_target_db` is the evidence-priced target the fitter was handed, if any (§14.2) — on
-    `DESIGN_GRID`, `None` for a candidate with no target (the parametric route). Only reaches
+    `DESIGN_GRID`, `None` for a caller-supplied candidate with no target. Only reaches
     `Correction.concerns`'s smoke test here; `assess` takes it directly.
     """
     filters = publication_filters(filters)

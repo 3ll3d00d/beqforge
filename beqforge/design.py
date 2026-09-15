@@ -13,6 +13,7 @@ Two routes, matching the contract's `method`:
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -94,6 +95,15 @@ class DesignParams:
     45 dB used it, expressing a correction under 5 dB above 10 Hz as a 3 Hz shelf with +45 dB.
     No BEQ should publish a section gain like that, whatever the realised response does."""
 
+    max_gain_db: float | None = None
+    """Explicit per-section bound; None retains max_boost_db + gain_headroom_db."""
+
+    max_drift_db: float | None = None
+    """Optional publication-sensitivity screen shared with the pipeline fitter."""
+
+    residual_band_hz: tuple[float, float] = RESIDUAL_BAND_HZ
+    """Evaluation band shared by numerical fitting and the reported residual."""
+
     max_sections: int = 6
     """Ceiling on biquads the numerical route may spend. The device budget is 10 (§5)."""
 
@@ -115,6 +125,14 @@ class DesignParams:
     quantisation. Measured on this pipeline's own output at 96 kHz in 5.23 fixed point, the
     drift falls from 0.98 dB to 0.19 dB for no meaningful loss of accuracy."""
 
+    @property
+    def section_gain_db(self) -> float:
+        return (
+            self.max_boost_db + self.gain_headroom_db
+            if self.max_gain_db is None
+            else self.max_gain_db
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Design:
@@ -130,6 +148,10 @@ class Design:
     noise_ceiling_binds: bool
     decline_reason: str | None = None
     decline_message: str | None = None
+    target_db: np.ndarray | None = None
+    """The actual evidence-priced target on DESIGN_GRID, including exact inverses."""
+    unpriced_target_db: np.ndarray | None = None
+    target_notes: tuple[str, ...] = ()
 
     @property
     def declined(self) -> bool:
@@ -140,6 +162,8 @@ def design(
     identification: Identification,
     envelopes: Envelopes,
     params: DesignParams | None = None,
+    *,
+    price_target: Callable[[np.ndarray], tuple[np.ndarray, list[str]]] | None = None,
 ) -> Design:
     """Invert an identified rolloff into a publishable cascade."""
     params = params or DesignParams()
@@ -155,15 +179,17 @@ def design(
         params.max_boost_db / (20.0 * max(fit.implied_order, 0.5))
     )
     protect_corner = max(protect_corner, params.lowest_frequency_hz)
-    binds, ceiling_db = _noise_ceiling(envelopes, fit, params)
+    _, ceiling_db = _noise_ceiling(envelopes, fit, params)
 
     if not np.any(ceiling_db > 0):
         return _decline(
             "evidence_unavailable", "No measured support for a positive correction."
         )
 
-    target = None
     freqs = DESIGN_GRID
+    filters = None
+    protect = None
+    unpriced = None
     if identification.rolloff is not None:
         protect = HighPass(
             identification.rolloff.alignment,
@@ -172,46 +198,77 @@ def design(
         )
         try:
             filters = invert_to_shelves(identification.rolloff, protect)
-            target = inversion_target_db(
+            unpriced = inversion_target_db(
                 identification.rolloff, protect, freqs, PUBLISH_FS
             )
-            ceiling = np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
-            if np.all(target <= ceiling):
-                return _result(
-                    filters,
-                    "exact",
-                    identification.rolloff,
-                    protect,
-                    freqs,
-                    target,
-                    params,
-                    binds,
-                )
-            # A constrained inverse is no longer the closed-form shelf identity.
-            # Fit the same identified response with its evidence ceiling applied.
-            target = np.minimum(target, ceiling)
-            binds = True
-            logger.info("Evidence ceiling restricts the exact inverse; fitting instead")
         except ExactInversionUnavailable as unavailable:
             logger.info(f"Closed form unavailable ({unavailable}); fitting instead")
 
-    if target is None:
-        target = _fitted_target(
-            freqs, fit, protect_corner, params, ceiling_db, envelopes
+    if unpriced is None:
+        unpriced = _unpriced_fitted_target(freqs, fit, protect_corner, params)
+    if price_target is None:
+        ceiling = np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
+        target = np.clip(unpriced, 0.0, ceiling)
+        notes = []
+    else:
+        target, notes = price_target(unpriced)
+    binds = bool(np.any(unpriced > target))
+    if binds:
+        notes.append("evidence ceiling restricts the parametric inverse")
+    if not np.any(target > 0):
+        return _decline(
+            "evidence_unavailable", "No measured support for a positive correction."
         )
+
+    # Closed form is only an option when it meets the same effective resource bounds.
+    if (
+        filters is not None
+        and np.array_equal(target, unpriced)
+        and len(filters) <= params.max_sections
+        and all(
+            abs(f.gain_db) <= params.section_gain_db
+            and f.freq_hz >= params.lowest_frequency_hz
+            for f in filters
+        )
+    ):
+        return _result(
+            filters,
+            "exact",
+            identification.rolloff,
+            protect,
+            freqs,
+            target,
+            params,
+            binds,
+            unpriced,
+            tuple(notes),
+        )
+
     filters, _ = fit_minimal_biquads(
         target,
         freqs,
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
-        band_hz=RESIDUAL_BAND_HZ,
+        band_hz=params.residual_band_hz,
         placement_band_hz=correction_band_hz(target, freqs, params.lowest_frequency_hz),
-        max_gain_db=params.max_boost_db + params.gain_headroom_db,
+        max_gain_db=params.section_gain_db,
         realisation=params.realisation,
         seeds=params.fit_seeds,
+        max_drift_db=params.max_drift_db,
     )
-    return _result(filters, "fitted", None, None, freqs, target, params, binds)
+    return _result(
+        filters,
+        "fitted",
+        None,
+        None,
+        freqs,
+        target,
+        params,
+        binds,
+        unpriced,
+        tuple(notes),
+    )
 
 
 def _fitted_target(
@@ -221,6 +278,16 @@ def _fitted_target(
     params: DesignParams,
     ceiling_db: np.ndarray,
     envelopes: Envelopes,
+) -> np.ndarray:
+    """The terminated parametric target, restricted by the measured evidence."""
+    capped = _unpriced_fitted_target(freqs, fit, protect_corner, params)
+    return np.clip(
+        capped, 0.0, np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
+    )
+
+
+def _unpriced_fitted_target(
+    freqs: np.ndarray, fit, protect_corner: float, params: DesignParams
 ) -> np.ndarray:
     """The correction implied by the fitted attenuation, terminated and capped.
 
@@ -244,9 +311,7 @@ def _fitted_target(
         PUBLISH_FS,
     )
     capped = np.minimum(correction + termination, params.max_boost_db)
-    return np.minimum(
-        capped, np.interp(freqs, envelopes.freqs, ceiling_db, left=0.0, right=0.0)
-    )
+    return np.maximum(capped, 0.0)
 
 
 def _nearest_even_order(order: float) -> int:
@@ -297,8 +362,10 @@ def _result(
     target: np.ndarray,
     params: DesignParams,
     binds: bool,
+    unpriced_target: np.ndarray,
+    notes: tuple[str, ...],
 ) -> Design:
-    band = RESIDUAL_BAND_HZ
+    band = params.residual_band_hz
     boost = magnitude_db(biquad_sos(filters, PUBLISH_FS), freqs, PUBLISH_FS)
     return Design(
         filters=filters,
@@ -309,6 +376,9 @@ def _result(
         rolloff=rolloff,
         protect=protect,
         noise_ceiling_binds=binds,
+        target_db=target.copy(),
+        unpriced_target_db=unpriced_target.copy(),
+        target_notes=notes,
     )
 
 

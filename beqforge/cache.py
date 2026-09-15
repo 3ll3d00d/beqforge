@@ -331,6 +331,8 @@ def proposals_to_json(proposals: list) -> list[dict[str, Any]]:
     return [
         {
             "label": p.label,
+            "method": p.method,
+            "effective_params": p.effective_params,
             "target_db": _pack(p.target_db),
             "unpriced_target_db": _pack(p.unpriced_target_db),
             "filters": None if p.filters is None else [_spec(f) for f in p.filters],
@@ -346,6 +348,8 @@ def proposals_from_json(raw: list[dict[str, Any]], factory) -> list:
     return [
         factory(
             label=str(p["label"]),
+            method=p.get("method"),
+            effective_params=p.get("effective_params"),
             target_db=_unpack(p["target_db"]),
             unpriced_target_db=_unpack(p.get("unpriced_target_db")),
             filters=None

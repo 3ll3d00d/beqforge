@@ -48,7 +48,7 @@ from beqanalyser.design.accept import (
     assess,
     confidence_from_evidence,
 )
-from beqanalyser.design.design import DesignParams, design
+from beqanalyser.design.design import DesignMethod, DesignParams, design
 from beqanalyser.design.diagnose import (
     Diagnosis,
     DiagnoseParams,
@@ -191,6 +191,12 @@ class PipelineParams:
     the acceptance window can hold and a slope it can defend at once — not in how many
     sections are on offer to fit whatever target they hand the optimiser."""
 
+    parametric_max_boost_db: float = 20.0
+    """Total parametric correction cap, used to place its protective high-pass.
+
+    Separate from max_gain_db, the per-section bound shared by every fitter.
+    """
+
     residual_target_db: float = 0.5
     max_gain_db: float = 26.0
     """The fitter's per-*section* gain bound (§5.1), not a bound on any target.
@@ -289,6 +295,10 @@ class Candidate:
     optimiser_filters: list[BiquadSpec] = field(default_factory=list)
     """Full-precision fit, retained only for diagnostics and its residual."""
 
+    method: DesignMethod | None = None
+    effective_params: str | None = None
+    """Effective strategy settings used to derive the proposal, for reproducibility."""
+
     target_notes: tuple[str, ...] = ()
     """What bounded the target, if anything.
 
@@ -301,7 +311,7 @@ class Candidate:
     unpriced_target_db: np.ndarray | None = None
     """The target before `priced_by_evidence` clipped it, if any (§14.1).
 
-    `None` for a candidate with no target at all (the parametric route) — the same convention
+    `None` for a caller-supplied candidate with no target — the same convention
     as `Proposal.unpriced_target_db`, which this is carried through from unchanged. Exists so a
     reader can see how much the evidence ceiling removed, which `verdict.recovered_fraction`
     states as a ratio but this states as the curve itself.
@@ -397,6 +407,8 @@ class Proposal:
     target_db: np.ndarray | None = None
     filters: list[BiquadSpec] | None = None
     residual_db: float = 0.0
+    method: DesignMethod | None = "non_parametric"
+    effective_params: str | None = None
     notes: tuple[str, ...] = ()
     """What bound this target, if anything. Carried through to the `Candidate`."""
 
@@ -639,6 +651,22 @@ def counterfactual_targets(
     return proposals
 
 
+def parametric_params(params: PipelineParams) -> DesignParams:
+    """The effective configuration used by both parametric derivation and its cache key."""
+    return DesignParams(
+        max_boost_db=params.parametric_max_boost_db,
+        max_drift_db=params.accept.max_drift_db,
+        max_gain_db=params.max_gain_db,
+        max_sections=params.max_sections,
+        residual_target_db=params.residual_target_db,
+        residual_band_hz=params.residual_band_hz,
+        confidence_z=params.confidence_z,
+        lowest_frequency_hz=params.lowest_frequency_hz,
+        realisation=params.realisation,
+        fit_seeds=params.fit_seeds,
+    )
+
+
 def parametric_targets(
     material: Material,
     diagnosis: Diagnosis,
@@ -652,17 +680,25 @@ def parametric_targets(
     result = design(
         identification,
         envelopes,
-        DesignParams(
-            max_sections=params.max_sections,
-            realisation=params.realisation,
-            fit_seeds=params.fit_seeds,
+        parametric_params(params),
+        price_target=lambda target: priced_by_evidence(
+            target, envelopes, diagnosis, params
         ),
     )
     if not result.filters:
         logger.info(f"  parametric declined: {result.decline_reason}")
         return []
     return [
-        Proposal("parametric", filters=result.filters, residual_db=result.residual_db)
+        Proposal(
+            "parametric",
+            filters=result.filters,
+            residual_db=result.residual_db,
+            target_db=result.target_db,
+            unpriced_target_db=result.unpriced_target_db,
+            method=result.method,
+            notes=result.target_notes,
+            effective_params=repr(parametric_params(params)),
+        )
     ]
 
 
@@ -678,12 +714,16 @@ class Strategy:
 
     derive: "Callable[..., list[Proposal]]"
     cache_modules: tuple[str, ...] | None = None
+    effective_params: Callable[[PipelineParams], object] = lambda params: params
+    """Settings consumed by derivation; also the configuration component of its cache key."""
 
 
 STRATEGIES = {
     "flatten": Strategy(flatten_targets),
     "counterfactual": Strategy(counterfactual_targets),
-    "parametric": Strategy(parametric_targets, cache.PARAMETRIC_MODULES),
+    "parametric": Strategy(
+        parametric_targets, cache.PARAMETRIC_MODULES, parametric_params
+    ),
 }
 """Every way of deriving a target, by name. All equal citizens of the same pipeline.
 
@@ -966,9 +1006,7 @@ def run(
                 params.diagnose,
                 params.extraction,
                 identify_params,
-                params.realisation,
-                params.max_sections,
-                params.exclude_bands_hz,
+                strategy.effective_params(params),
             )
         )
         held = None if key is None or fresh else cache.load(cache_path, name, key)
@@ -980,6 +1018,12 @@ def run(
                 produced = strategy.derive(
                     material, diagnosis, envelopes, identification, params
                 )
+                produced = [
+                    dataclasses.replace(
+                        p, effective_params=repr(strategy.effective_params(params))
+                    )
+                    for p in produced
+                ]
             if key is not None:
                 cache.store(cache_path, name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
@@ -1021,6 +1065,8 @@ def run(
                     params,
                     proposal.notes,
                     unpriced_target=proposal.unpriced_target_db,
+                    method=proposal.method,
+                    effective_params=proposal.effective_params,
                 )
             )
 
@@ -1116,9 +1162,11 @@ def _judge(
     params: PipelineParams,
     target_notes: tuple[str, ...] = (),
     unpriced_target: np.ndarray | None = None,
+    method: DesignMethod | None = None,
+    effective_params: str | None = None,
 ) -> Candidate:
     """`target` is the priced target the fitter was handed, or `None` for a candidate with
-    none (the parametric route) — passed through to `verify`/`assess` so intent (§14.2) can
+    none (a caller-supplied cascade) — passed through to `verify`/`assess` so intent (§14.2) can
     fall back to the house curve rather than to an all-zero target, which is a different claim.
     """
     optimiser_filters = filters
@@ -1158,4 +1206,6 @@ def _judge(
         correction=correction,
         verdict=verdict,
         target_notes=target_notes,
+        method=method,
+        effective_params=effective_params,
     )

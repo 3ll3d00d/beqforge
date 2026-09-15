@@ -237,6 +237,10 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
   channel reference sat on the fourth title's knee and understated its mains by 13-17 dB. Channels are
   now referenced to their own plateau (`plateau_reference`). `AUTOMATED_DESIGN.md` §13 is the register
   of every remaining constant and what each is standing in for — read §13.5 before adding a band.
+* Parametric design and its cache key share `parametric_params`: shared evidence/fitting knobs
+  must reach both. `parametric_max_boost_db` is a total-correction preference; `max_gain_db`
+  is a per-section bound. Preserve the actual priced target and method through every stage,
+  including the parametric route, so partial correction is judged against its intent.
 * **Every run writes a record; use it rather than rerunning.** `tools/design_beq.py` writes
   `data/<name>.run.json.gz` — diagnosis, candidates, verdicts and the chart curves — and
   `tools/replay.py` redraws charts or exports a `.beq` from it in seconds. The record is

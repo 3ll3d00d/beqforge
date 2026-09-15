@@ -227,6 +227,8 @@ def _candidate(candidate) -> dict[str, Any]:
     correction = candidate.correction
     return {
         "label": candidate.label,
+        "method": candidate.method,
+        "effective_params": candidate.effective_params,
         "filters": [_spec(f) for f in candidate.filters],
         "optimiser_filters": [_spec(f) for f in candidate.optimiser_filters],
         "fit_error_db": _num(candidate.fit_error_db),

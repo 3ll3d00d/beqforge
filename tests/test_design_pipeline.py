@@ -220,15 +220,9 @@ def test_parametric_fits_from_the_same_seeds_as_every_other_candidate() -> None:
     params = PipelineParams(fit_seeds=(0, 1, 2, 3))
     assert DesignParams().fit_seeds == PipelineParams().fit_seeds
     # and the pipeline hands its own choice down rather than letting the default stand
-    import inspect
+    from beqanalyser.design.pipeline import parametric_params
 
-    from beqanalyser.design import pipeline
-
-    source = inspect.getsource(pipeline.parametric_targets)
-    assert "fit_seeds=params.fit_seeds" in source, (
-        "parametric_targets must forward the run's seeds to DesignParams"
-    )
-    assert params.fit_seeds == (0, 1, 2, 3)
+    assert parametric_params(params).fit_seeds == (0, 1, 2, 3)
 
 
 def test_section_placement_follows_the_target_not_a_fixed_ceiling(monkeypatch) -> None:
