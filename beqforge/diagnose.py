@@ -270,20 +270,18 @@ def plateau_reference(
     for region in regions:
         if len(region) < 3:
             continue
-        width = float(np.log2(grid[region[-1]] / grid[region[0]]))
-        # The trend check is part of discovery, not the reported level, so it reads the
-        # same scatter-suppressed curve `within` was built from. Reading the raw curve
-        # here let bin-to-bin acoustic scatter reject a genuinely flat region: measured on
-        # a real title, an 81-point, 1.1-octave candidate came out to +3.01 dB/octave on
-        # the raw curve against a 3.0 limit and +2.92 on the discovery curve.
-        slope = band_slope(discovery, grid, grid[region[0]], grid[region[-1]])
-        if (
-            width < params.reference_min_octaves
-            or abs(slope) > params.reference_max_slope_db_per_octave
-        ):
+        trimmed = _trim_to_flat_subwindow(
+            discovery,
+            grid,
+            region,
+            params.reference_min_octaves,
+            params.reference_max_slope_db_per_octave,
+        )
+        if trimmed is None:
             continue
+        width = float(np.log2(grid[trimmed[-1]] / grid[trimmed[0]]))
         candidates.append(
-            (width, -float(np.ptp(curve[region])), -int(region[0]), region)
+            (width, -float(np.ptp(curve[trimmed])), -int(trimmed[0]), trimmed)
         )
     if not candidates:
         return math.nan, (math.nan, math.nan)
@@ -293,6 +291,45 @@ def plateau_reference(
         float(grid[region[0]]),
         float(grid[region[-1]]),
     )
+
+
+def _trim_to_flat_subwindow(
+    discovery: np.ndarray,
+    grid: np.ndarray,
+    region: np.ndarray,
+    min_octaves: float,
+    max_slope_db_per_octave: float,
+) -> np.ndarray | None:
+    """The region itself if it is already flat enough, else the widest edge-trimmed cut of it.
+
+    A region within `reference_tolerance_db` of the reference level is not necessarily flat
+    on its own — a peak sitting close enough in level to a genuine plateau merges with it into
+    one connected region, and the peak's own falling edge can then dominate a least-squares
+    slope taken over the whole thing. Measured on a real title: a candidate spanning a peak's
+    tail into the plateau beside it read -4.83 dB/octave against a 3.0 limit; trimming five
+    points (0.16 octaves) off the peak-side end alone dropped that to -1.99, on a plateau that
+    was otherwise 0.74-1.33 octaves wide depending how far it was trimmed.
+
+    Trims one point at a time from whichever end currently reduces the remaining slope's
+    magnitude more, stopping the moment the remainder is flat enough. This is a heuristic —
+    it does not search every possible sub-window — but it targets exactly the failure above,
+    where the corrupting influence sits at one edge rather than scattered through the region.
+    """
+    lo, hi = 0, len(region) - 1
+    while lo <= hi:
+        width = float(np.log2(grid[region[hi]] / grid[region[lo]]))
+        if hi - lo < 2 or width < min_octaves:
+            return None
+        slope = band_slope(discovery, grid, grid[region[lo]], grid[region[hi]])
+        if abs(slope) <= max_slope_db_per_octave:
+            return region[lo : hi + 1]
+        without_lo = band_slope(discovery, grid, grid[region[lo + 1]], grid[region[hi]])
+        without_hi = band_slope(discovery, grid, grid[region[lo]], grid[region[hi - 1]])
+        if abs(without_lo) <= abs(without_hi):
+            lo += 1
+        else:
+            hi -= 1
+    return None
 
 
 def band_slope(

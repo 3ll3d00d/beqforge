@@ -41,30 +41,51 @@ Full before/after is on the published Correction Ledger artifact. All three, fix
   filter** (`flatten`, 85% of the deficit, evidence score 0.95). Confirmed against all eight
   titles that no previously-accepting title's plateau region or level moved.
 
-**Two titles still correctly abstain, for reasons unrelated to the bug above — verified, not
-assumed:**
-* **Test 71** genuinely has no flat region anywhere in 4-200 Hz even under the corrected
-  (discovery-curve) slope test — the two nearest candidates measure +18.0 and −4.5 dB/octave
-  against the 3.0 limit, not a hairline miss. This is `plateau_reference` working as intended
-  on rough material, not the bug.
-  * Whether `reference_max_slope_db_per_octave` (3.0) itself is well-calibrated for real bass
-    content in general remains genuinely open — Test 71 is one real data point against it, not
-    a validation. Revisit with more real titles before touching the constant; the plateau fix
-    above already closed the one demonstrated defect.
-* **Blazing Saddles** now finds a plateau (122.5-200 Hz) but still abstains — for a completely
+**Correction to the entry above: "Test 71 genuinely has no flat region" was wrong.** A human
+looking at the spectrum sees it immediately — a clear plateau, a peak just below it in
+frequency, then a rolloff — and the first fix's own diagnosis confirmed a real, wide (0.74-1.33
+octave, depending how far it's trimmed) flat region exists at 24-63 Hz. What actually happened:
+the one connected within-tolerance region (22.46-41.66 Hz) merged the peak's falling edge with
+the genuinely flat stretch beside it, and the *whole region's* least-squares slope — -4.83
+dB/octave — failed the 3.0 limit even though the flat part alone reads -1.99. That's a second,
+distinct bug, now fixed: **`plateau_reference` tested each connected region as a single
+all-or-nothing block instead of allowing a locally bad edge to be trimmed off.** A peak sitting
+close enough in level to a real plateau to fall in the same tolerance band will always produce
+this shape — the plateau does not stop being real because a peak sits next to it.
+
+Fixed with `_trim_to_flat_subwindow` (`beqanalyser/design/diagnose.py`): before rejecting a
+region outright, trim one point at a time from whichever end currently reduces the remaining
+slope's magnitude more, stopping the moment the remainder is flat enough (or the width floor is
+hit). A heuristic — it does not search every possible sub-window, so a region with the bad
+influence spread through its middle rather than at an edge could still be missed — but it
+targets exactly the failure found. Regression test in `tests/test_design_references.py` pins it
+against the exact real Test 71 values (a direct test of the trim function, since reproducing
+the failure through the full percentile pipeline synthetically turned out to depend on fine
+bin-to-bin proportions that were impractical to fake convincingly). **Test 71 now recovers a
+filter** (`flatten`, 93% of the deficit, evidence score 0.94) with a corrected curve that does
+what a human would expect: the rolloff below the peak is lifted to meet the plateau, which is
+left nearly untouched. Confirmed against all eight titles that no other title's plateau region
+moved from this second fix.
+
+**Two titles still correctly abstain, for reasons unrelated to either bug above:**
+* **Blazing Saddles** finds a plateau (122.5-200 Hz) but still abstains — for a completely
   separate reason, "no qualifying loud events" (`extract`'s scene selection finds zero loud
   frames in 89 minutes). Plausible explanation: this is a mono-only extraction (`--mono-only`,
   a single downmixed channel), and summing a strong isolated LFE wall into dialogue/effects
   dilutes exactly the temporal peak-quiet contrast the scene detector looks for — not
   investigated further here; flagged as a real, separate limitation of mono-only material worth
   a second look if it recurs on other mono-only titles.
-* **Nocturnal Animals** separately abstains on the `min_judge_octaves` guard (judged band
-  collapsed to 0.5 octaves under the tighter, more accurate boundary) — this looks like the
-  guard correctly doing its job on a title that was always borderline (its own calibration used
-  exactly this title).
+* **Nocturnal Animals** abstains on the `min_judge_octaves` guard (judged band collapsed to 0.5
+  octaves under the tighter, more accurate boundary) — this looks like the guard correctly
+  doing its job on a title that was always borderline (its own calibration used exactly this
+  title).
 
-**Current picture: 5 of 8 titles accept** (Alien, Test2 71, Test3 71, Test4 71, Tron), three
-abstain for three distinct and separately-verified reasons above.
+**Current picture: 6 of 8 titles accept** (Alien, Test2 71, Test3 71, Test4 71, Test 71, Tron),
+two abstain for the two distinct and separately-verified reasons above. Alien and Test4 71's
+*selected* candidate shuffled between near-tied `counterfactual` boost-cap variants and
+`flatten` across these reruns (e.g. Alien: 35dB → 25dB → 45dB) without their plateau or
+evidence numbers changing — a symptom of the already-documented over-100%-recovery/near-tie
+issue in "Do next" item 1 below, not a new defect from either fix here.
 
 ### Do next — cheap: replaces a known-wrong constant with a measurement `diagnose` already makes
 
