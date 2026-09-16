@@ -16,41 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # apt/brew/choco ffmpeg builds are inconsistent about optional filters — brew's and
-      # choco's default ffmpeg both lack the libsoxr resampler tools/extract.py asks for
-      # (`Requested resampling engine is unavailable`), even though Ubuntu's apt package has
-      # it. FedericoCarboni/setup-ffmpeg's Linux/Windows builds (johnvansickle static /
-      # gyan.dev full) do include it, but its macOS source (evermeet.cx) is x64-only and
-      # macos-latest runners are arm64 — so macOS gets its own libsoxr-enabled build via the
-      # homebrew-ffmpeg tap, which compiles natively for whatever arch it runs on.
-      - name: Install ffmpeg (Linux, Windows)
-        if: runner.os != 'macOS'
-        uses: FedericoCarboni/setup-ffmpeg@v3
-
-      # macos-latest images ship homebrew-core's ffmpeg pre-linked; it has to go before the
-      # cache below is restored into the same Cellar path, or this would delete what it just
-      # restored (Cellar is keyed by formula name only, not by tap).
-      - name: Remove preinstalled ffmpeg (macOS)
-        if: runner.os == 'macOS'
-        run: brew uninstall --ignore-dependencies ffmpeg || true
-
-      # homebrew-ffmpeg/ffmpeg carries no bottle for a non-default option, so --with-libsoxr
-      # compiles ffmpeg itself from source (~10+ min) — dead weight on every push. Caching the
-      # built keg means that cost is paid once, not on every run: `brew install` recognises a
-      # matching keg already sitting in the Cellar and just relinks it instead of rebuilding.
-      - name: Cache macOS ffmpeg build
-        if: runner.os == 'macOS'
-        uses: actions/cache@v4
-        with:
-          path: /opt/homebrew/Cellar/ffmpeg
-          key: macos-arm64-ffmpeg-libsoxr-v1
+      # brew's and choco's default ffmpeg both lack the libsoxr resampler tools/extract.py
+      # prefers, unlike Ubuntu's apt package — but extract.py now detects that at runtime and
+      # falls back to ffmpeg's default resampler, so any ordinary ffmpeg install is fine here.
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: |
-          brew tap homebrew-ffmpeg/ffmpeg
-          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr
-          brew link --overwrite ffmpeg
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.1.0

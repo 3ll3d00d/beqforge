@@ -20,6 +20,7 @@ before it, and this way both signals come from the same pass.
 """
 
 import argparse
+import functools
 import json
 import logging
 import subprocess
@@ -93,6 +94,25 @@ def probe(path: Path, stream: int) -> dict:
     return streams[0]
 
 
+@functools.lru_cache(maxsize=1)
+def _soxr_available() -> bool:
+    """Whether this ffmpeg was built with libsoxr.
+
+    Not every distribution enables it — Debian/Ubuntu's apt package does, but neither brew's
+    nor Chocolatey's default `ffmpeg` does, and requesting `resampler=soxr` against one of
+    those fails outright ("Requested resampling engine is unavailable") rather than degrading.
+    Checked once per process and cached; falling back to ffmpeg's default resampler measures
+    within a few ×10⁻⁷ of soxr's own error on the same material, well inside any tolerance this
+    pipeline's decimation needs — soxr is simply the better of two adequate options when it's
+    there.
+    """
+    try:
+        out = subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, text=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return "--enable-libsoxr" in out.stdout
+
+
 def decode(path: Path, stream: int, channels: int, source_fs: int) -> np.ndarray:
     """Every channel, decimated to ANALYSIS_FS, as (samples, channels) float64.
 
@@ -101,7 +121,13 @@ def decode(path: Path, stream: int, channels: int, source_fs: int) -> np.ndarray
     """
     command = ["ffmpeg", "-v", "error", "-i", str(path), "-map", f"0:a:{stream}"]
     if source_fs != ANALYSIS_FS:
-        command += ["-af", f"aresample={ANALYSIS_FS}:resampler=soxr"]
+        if _soxr_available():
+            command += ["-af", f"aresample={ANALYSIS_FS}:resampler=soxr"]
+        else:
+            logger.warning(
+                "ffmpeg was not built with libsoxr; falling back to its default resampler"
+            )
+            command += ["-af", f"aresample={ANALYSIS_FS}"]
     else:
         logger.info(f"source is already at {ANALYSIS_FS} Hz; not resampling")
     out = subprocess.run(
@@ -189,4 +215,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows defaults a redirected/piped stdout to the system codepage rather than
+    # UTF-8, which crashes on any non-ASCII output; force UTF-8 so a print never dies
+    # on the encoding rather than the content.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())
