@@ -18,7 +18,10 @@ from beqforge import BiquadSpec
 from beqforge.accept import AcceptParams, Verdict
 from beqforge.designer import (
     CONTRACT_VERSION,
+    ContractViolation,
+    DesignCandidate,
     DesignRequest,
+    DesignResponse,
     _decline_for_blockers,
     _decline_for_no_passing_candidate,
     _ndarray_from_json,
@@ -27,6 +30,7 @@ from beqforge.designer import (
     design,
     request_from_json,
     response_to_json,
+    validate_response,
 )
 from beqforge.filters import Realisation
 from beqforge.material import PlaybackParams
@@ -159,8 +163,6 @@ def test_request_from_json_leaves_absent_fields_none() -> None:
 
 
 def test_response_to_json_success_omits_decline_fields() -> None:
-    from beqforge.designer import DesignCandidate, DesignResponse
-
     response = DesignResponse(
         contract_version="1.0",
         candidates=[
@@ -183,8 +185,6 @@ def test_response_to_json_success_omits_decline_fields() -> None:
 
 
 def test_response_to_json_decline_omits_candidates() -> None:
-    from beqforge.designer import DesignResponse
-
     response = DesignResponse(
         contract_version="1.0",
         decline_reason="no_rolloff_detected",
@@ -244,6 +244,127 @@ def test_to_design_candidate_leaves_residual_none_without_a_finite_error() -> No
     )
     assert mapped.residual_db is None
     assert mapped.residual_band_hz is None
+
+
+def test_to_design_candidate_output_satisfies_the_response_validator() -> None:
+    """Consistency between the two independent things: the mapper and the validator.
+
+    Not a tautology — `validate_response` is a separate re-implementation of beqdesigner's own
+    rules (`ContractViolation`'s docstring), so this catches the mapper and the validator
+    drifting apart from each other, not just from the contract.
+    """
+    mapped = _to_design_candidate(
+        _candidate(), PipelineParams(), report_gain_reduction=True
+    )
+    validate_response(
+        DesignResponse(contract_version=CONTRACT_VERSION, candidates=[mapped])
+    )
+
+
+# ---- response self-validation --------------------------------------------
+
+
+def _valid_candidate(**overrides) -> DesignCandidate:
+    kwargs = dict(
+        filters=[BiquadSpec(type="low_shelf", freq_hz=15.81, gain_db=15.918, q=0.7071)],
+        confidence=0.8,
+        mv_adjust_db=15.918,
+        method="fitted",
+    )
+    kwargs.update(overrides)
+    return DesignCandidate(**kwargs)
+
+
+def test_validate_response_accepts_a_well_formed_success() -> None:
+    validate_response(
+        DesignResponse(contract_version="1.0", candidates=[_valid_candidate()])
+    )
+
+
+def test_validate_response_accepts_a_well_formed_decline() -> None:
+    validate_response(
+        DesignResponse(contract_version="1.0", decline_reason="no_rolloff_detected")
+    )
+
+
+def test_validate_response_rejects_both_candidates_and_decline() -> None:
+    with pytest.raises(ContractViolation, match="both"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0",
+                candidates=[_valid_candidate()],
+                decline_reason="no_rolloff_detected",
+            )
+        )
+
+
+def test_validate_response_rejects_neither_candidates_nor_decline() -> None:
+    with pytest.raises(ContractViolation, match="neither"):
+        validate_response(DesignResponse(contract_version="1.0"))
+
+
+def test_validate_response_rejects_an_empty_candidates_list() -> None:
+    with pytest.raises(ContractViolation, match="empty candidates"):
+        validate_response(DesignResponse(contract_version="1.0", candidates=[]))
+
+
+def test_validate_response_rejects_confidence_out_of_range() -> None:
+    with pytest.raises(ContractViolation, match="confidence"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0", candidates=[_valid_candidate(confidence=1.5)]
+            )
+        )
+
+
+def test_validate_response_rejects_candidates_not_ordered_by_confidence() -> None:
+    with pytest.raises(ContractViolation, match="ordered"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0",
+                candidates=[
+                    _valid_candidate(confidence=0.4),
+                    _valid_candidate(confidence=0.9),
+                ],
+            )
+        )
+
+
+def test_validate_response_rejects_an_empty_filters_list() -> None:
+    with pytest.raises(ContractViolation, match="empty filters"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0", candidates=[_valid_candidate(filters=[])]
+            )
+        )
+
+
+def test_validate_response_rejects_a_positive_gain_reduction() -> None:
+    with pytest.raises(ContractViolation, match="gain_reduction_db"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0",
+                candidates=[_valid_candidate(gain_reduction_db=1.0)],
+            )
+        )
+
+
+def test_validate_response_rejects_a_non_publishable_biquad_type() -> None:
+    with pytest.raises(ContractViolation, match="not publishable"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.0",
+                candidates=[
+                    _valid_candidate(
+                        filters=[
+                            BiquadSpec(
+                                type="all_pass", freq_hz=20.0, gain_db=0.0, q=1.0
+                            )
+                        ]
+                    )
+                ],
+            )
+        )
 
 
 # ---- decline mapping ----------------------------------------------------

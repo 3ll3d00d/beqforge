@@ -21,14 +21,20 @@ import json
 import logging
 import math
 import sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 # the package is not installed into the venv, and tools/ rather than the repo root is what
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge.designer import design, request_from_json, response_to_json  # noqa: E402
+from beqforge.designer import (  # noqa: E402
+    ContractViolation,
+    design,
+    request_from_json,
+    response_to_json,
+    validate_response,
+)
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -66,6 +72,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         response = design(request, self.params)
+        try:
+            validate_response(response)
+        except ContractViolation as bug:
+            # our own mapping is wrong, never the caller's fault -- never ship it.
+            logger.error(f"response failed self-validation: {bug}")
+            self._respond(
+                500, {"error": f"designer produced an invalid response: {bug}"}
+            )
+            return
         outcome = (
             "declined"
             if response.decline_reason
@@ -158,7 +173,14 @@ def main() -> int:
     )
 
     _Handler.params = params
-    server = ThreadingHTTPServer((args.host, args.port), _Handler)
+    # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
+    # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
+    # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
+    # time is never released in the child). Serving one request at a time keeps the process
+    # single-threaded when that fork happens. Costs nothing real: the contract is one
+    # synchronous POST per design() call (designer-interface.md §1), so there is no concurrent
+    # request to lose.
+    server = HTTPServer((args.host, args.port), _Handler)
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)})"

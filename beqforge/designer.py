@@ -282,3 +282,102 @@ def response_to_json(response: DesignResponse) -> dict:
         "decline_reason": response.decline_reason,
         "decline_message": response.decline_message,
     }
+
+
+_ALLOWED_BIQUAD_TYPES = {"peaking_eq", "low_shelf", "high_shelf"}
+_MAX_BIQUAD_SECTIONS = 10
+
+
+class ContractViolation(ValueError):
+    """A `DesignResponse` that violates designer-interface.md §3-§5.
+
+    Mirrors beqdesigner's own `pipeline.designer.convert.validate_response` — that module
+    can't be imported from here (PyQt6, a separate repo/venv; AGENTS.md), so this is an
+    independent re-implementation of the same rules, checked against the same document. Called
+    by `tools/designer_server.py` before a response ever goes on the wire: a violation here is
+    this module's own mapping bug, never the caller's to see, per "never trust a residual"
+    applied to this boundary — a response that merely *looks* right is not enough.
+    """
+
+
+def validate_response(response: DesignResponse) -> None:
+    """:raises ContractViolation: if `response` violates the contract."""
+    is_decline = response.decline_reason is not None
+    is_success = response.candidates is not None
+    if is_success and is_decline:
+        raise ContractViolation(
+            "DesignResponse populates both candidates and decline_reason"
+        )
+    if not is_success and not is_decline:
+        raise ContractViolation(
+            "DesignResponse populates neither candidates nor decline_reason"
+        )
+
+    if is_decline:
+        if not isinstance(response.decline_reason, str) or not response.decline_reason:
+            raise ContractViolation("decline_reason must be a non-empty string")
+        return
+
+    if len(response.candidates) == 0:
+        raise ContractViolation("success response has an empty candidates list")
+
+    previous_confidence = None
+    for i, candidate in enumerate(response.candidates):
+        _validate_candidate(candidate, i)
+        if (
+            previous_confidence is not None
+            and candidate.confidence > previous_confidence
+        ):
+            raise ContractViolation(
+                f"candidates[{i}].confidence ({candidate.confidence}) exceeds "
+                f"candidates[{i - 1}]'s ({previous_confidence}) — not ordered best-first"
+            )
+        previous_confidence = candidate.confidence
+
+
+def _validate_candidate(candidate: DesignCandidate, index: int) -> None:
+    if candidate.confidence is None or not (0.0 <= candidate.confidence <= 1.0):
+        raise ContractViolation(
+            f"candidates[{index}].confidence must be in [0.0, 1.0], got {candidate.confidence}"
+        )
+    if candidate.mv_adjust_db is None or not math.isfinite(candidate.mv_adjust_db):
+        raise ContractViolation(
+            f"candidates[{index}].mv_adjust_db must be a finite number, got {candidate.mv_adjust_db}"
+        )
+    if candidate.gain_reduction_db is not None and (
+        not math.isfinite(candidate.gain_reduction_db)
+        or candidate.gain_reduction_db > 0
+    ):
+        raise ContractViolation(
+            f"candidates[{index}].gain_reduction_db must be finite and <= 0, "
+            f"got {candidate.gain_reduction_db}"
+        )
+    if not candidate.filters:
+        raise ContractViolation(f"candidates[{index}] has an empty filters list")
+    if len(candidate.filters) > _MAX_BIQUAD_SECTIONS:
+        raise ContractViolation(
+            f"candidates[{index}]: {len(candidate.filters)} sections exceeds the budget of "
+            f"{_MAX_BIQUAD_SECTIONS}"
+        )
+    for i, spec in enumerate(candidate.filters):
+        _validate_biquad_spec(spec, i, index)
+    if candidate.commentary is not None:
+        if not isinstance(candidate.commentary, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in candidate.commentary.items()
+        ):
+            raise ContractViolation(
+                f"candidates[{index}].commentary must be a dict[str, str]"
+            )
+
+
+def _validate_biquad_spec(spec: BiquadSpec, index: int, candidate_index: int) -> None:
+    prefix = f"candidates[{candidate_index}].filters[{index}]"
+    if spec.type not in _ALLOWED_BIQUAD_TYPES:
+        raise ContractViolation(f"{prefix}.type {spec.type!r} is not publishable")
+    if not math.isfinite(spec.freq_hz) or spec.freq_hz <= 0:
+        raise ContractViolation(f"{prefix}.freq_hz must be > 0, got {spec.freq_hz}")
+    if not math.isfinite(spec.gain_db):
+        raise ContractViolation(f"{prefix}.gain_db must be finite, got {spec.gain_db}")
+    if not math.isfinite(spec.q) or spec.q <= 0:
+        raise ContractViolation(f"{prefix}.q must be > 0, got {spec.q}")
