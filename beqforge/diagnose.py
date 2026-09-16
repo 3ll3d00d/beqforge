@@ -271,7 +271,12 @@ def plateau_reference(
         if len(region) < 3:
             continue
         width = float(np.log2(grid[region[-1]] / grid[region[0]]))
-        slope = band_slope(curve, grid, grid[region[0]], grid[region[-1]])
+        # The trend check is part of discovery, not the reported level, so it reads the
+        # same scatter-suppressed curve `within` was built from. Reading the raw curve
+        # here let bin-to-bin acoustic scatter reject a genuinely flat region: measured on
+        # a real title, an 81-point, 1.1-octave candidate came out to +3.01 dB/octave on
+        # the raw curve against a 3.0 limit and +2.92 on the discovery curve.
+        slope = band_slope(discovery, grid, grid[region[0]], grid[region[-1]])
         if (
             width < params.reference_min_octaves
             or abs(slope) > params.reference_max_slope_db_per_octave

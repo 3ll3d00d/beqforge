@@ -13,11 +13,10 @@ AGENTS.md remain in git history if a future decision needs to see the original w
 
 ## Automated design (`beqanalyser/design/`)
 
-### Just found: the first real-title rerun since R1-R12 landed (16 September 2026)
+### Resolved: the first real-title rerun since R1-R12 landed (16 September 2026)
 
-Rerunning all eight titles surfaced two crashes (fixed below) and a result none of R1-R12's
-own validation had exercised: **only 4 of 8 titles now accept, down from 8 of 8.** Full
-before/after is on the published Correction Ledger artifact. Two fixes, already applied:
+Rerunning all eight titles surfaced two crashes and a genuine bug in R8's plateau discovery.
+Full before/after is on the published Correction Ledger artifact. All three, fixed:
 
 * `tools/design_beq.py` computed a `relevant`-channels list using
   `params.diagnose.min_passband_share`, a field R4/R5 deleted from `DiagnoseParams` — crashed
@@ -28,31 +27,44 @@ before/after is on the published Correction Ledger artifact. Two fixes, already 
   target is built at all, leaving `candidates: []` — a case eight-for-eight prior runs never
   exercised. Both now render a "no candidate was ever constructed" state instead of crashing or
   linking a 404 image.
+* **`plateau_reference`'s trend check read the wrong curve.** Region membership (the `within`
+  mask) is decided from `discovery`, the 11-point median-filtered curve, specifically to
+  "suppress estimator-bin scatter" (the function's own docstring) — but the width/slope
+  admission test that follows read the raw, unfiltered `curve` instead. On real material that
+  let ordinary bin-to-bin scatter reject a genuinely flat region: Tron's one candidate plateau
+  (25.5-55.9 Hz, 1.1 octaves — well past the 1/3-octave minimum) measured +3.0088 dB/octave on
+  the raw curve against the 3.0 limit, and +2.9228 on the very discovery curve `within` had
+  already used to select it. Fixed by reading `discovery` for the slope too
+  (`beqanalyser/design/diagnose.py`), so region selection and region validation are now
+  consistent; regression test in `tests/test_design_references.py` reproduces it with a few
+  synthetic estimator-bin spikes rather than needing real material. **Tron now recovers a
+  filter** (`flatten`, 85% of the deficit, evidence score 0.95). Confirmed against all eight
+  titles that no previously-accepting title's plateau region or level moved.
 
-**Open finding, not yet fixed or explained: R8's plateau discovery (`reference_tolerance_db`
-3.0, `reference_max_slope_db_per_octave` 3.0, `reference_min_octaves` 1/3) finds no usable mix
-plateau at all on 3 of 8 titles — Blazing Saddles, Tron and Test 71 — each landing on "no usable
-contiguous mix plateau; restoration withheld".** This is the first time R8 has run against real
-titles rather than its synthetic/constructed fixtures (its own review entry says so explicitly).
-What makes this worth flagging rather than accepting quietly: Tron and Test 71 were the *two
-highest-confidence* results in the entire prior eight-title set (0.86 and 0.61 under the old
-score) — not marginal cases. A fourth title, Nocturnal Animals, separately now abstains on the
-`min_judge_octaves` guard (judged band collapsed to 0.5 octaves under the tighter, more accurate
-boundary) — that one looks like the guard correctly doing its job on a title that was always
-borderline (§13.4's own calibration used exactly this title). The plateau failures look
-different in kind: manual inspection of Tron's raw spectrum shows real structure (an LFE
-channel carrying 82-100% of the coherent low-frequency contribution, an unambiguous wall shape)
-with no obviously-implausible reason a reference shouldn't exist somewhere in it — but nothing
-in 4-200 Hz stays within 3 dB of the 90th percentile for a third of an octave at ≤3 dB/octave of
-trend. Two live possibilities, not distinguished yet: (a) real bass-heavy programme material is
-genuinely rougher than any fixture R8 was validated against, and the defaults need
-recalibrating against measurement rather than the synthetic cases that produced them, or (b)
-there's a real defect in the discovery algorithm this investigation didn't find. **Do not loosen
-`reference_tolerance_db`/`reference_max_slope_db_per_octave` to make these titles pass again
-without measuring why first** — that is exactly the "tune to preserve accepted titles" move the
-review process exists to prevent. Next step: plot Tron's raw mean spectrum against the
-discovery's intermediate `discovery`/`within` arrays and see which constraint is actually
-binding before touching a number.
+**Two titles still correctly abstain, for reasons unrelated to the bug above — verified, not
+assumed:**
+* **Test 71** genuinely has no flat region anywhere in 4-200 Hz even under the corrected
+  (discovery-curve) slope test — the two nearest candidates measure +18.0 and −4.5 dB/octave
+  against the 3.0 limit, not a hairline miss. This is `plateau_reference` working as intended
+  on rough material, not the bug.
+  * Whether `reference_max_slope_db_per_octave` (3.0) itself is well-calibrated for real bass
+    content in general remains genuinely open — Test 71 is one real data point against it, not
+    a validation. Revisit with more real titles before touching the constant; the plateau fix
+    above already closed the one demonstrated defect.
+* **Blazing Saddles** now finds a plateau (122.5-200 Hz) but still abstains — for a completely
+  separate reason, "no qualifying loud events" (`extract`'s scene selection finds zero loud
+  frames in 89 minutes). Plausible explanation: this is a mono-only extraction (`--mono-only`,
+  a single downmixed channel), and summing a strong isolated LFE wall into dialogue/effects
+  dilutes exactly the temporal peak-quiet contrast the scene detector looks for — not
+  investigated further here; flagged as a real, separate limitation of mono-only material worth
+  a second look if it recurs on other mono-only titles.
+* **Nocturnal Animals** separately abstains on the `min_judge_octaves` guard (judged band
+  collapsed to 0.5 octaves under the tighter, more accurate boundary) — this looks like the
+  guard correctly doing its job on a title that was always borderline (its own calibration used
+  exactly this title).
+
+**Current picture: 5 of 8 titles accept** (Alien, Test2 71, Test3 71, Test4 71, Tron), three
+abstain for three distinct and separately-verified reasons above.
 
 ### Do next — cheap: replaces a known-wrong constant with a measurement `diagnose` already makes
 

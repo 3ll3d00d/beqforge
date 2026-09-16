@@ -3,7 +3,31 @@
 import numpy as np
 import pytest
 
-from beqanalyser.design.diagnose import DiagnoseParams, plateau_reference
+from beqanalyser.design.diagnose import (
+    DiagnoseParams,
+    REFERENCE_POINTS,
+    plateau_reference,
+)
+
+
+def test_scatter_that_the_median_filter_absorbs_does_not_reject_a_flat_region():
+    """A few estimator-bin spikes must not cost a title its reference.
+
+    The trend check has to read the same scatter-suppressed curve region membership was
+    decided from — reading the raw curve instead let bin-to-bin acoustic scatter reject a
+    genuinely flat region on real material (Tron: an 81-point, 1.1-octave candidate at
+    +3.01 dB/octave raw against the 3.0 limit, +2.92 on the discovery curve). Reproduced
+    here with a handful of spikes an 11-point median filter erases but a raw least-squares
+    fit does not: on their own they swing the raw slope to -4.0 dB/octave.
+    """
+    freqs = np.geomspace(4, 200, REFERENCE_POINTS)
+    curve = np.full_like(freqs, -30.0)
+    curve[(freqs >= 25) & (freqs <= 55)] = 0.0
+    spike_at = np.flatnonzero((freqs >= 25) & (freqs <= 27))[[1, 4, 7]]
+    curve[spike_at] += 22.0
+    level, (low, high) = plateau_reference(curve, freqs, DiagnoseParams())
+    assert level == 0.0
+    assert 25 <= low < high <= 55
 
 
 def test_disjoint_plateaus_do_not_bridge_valley():
