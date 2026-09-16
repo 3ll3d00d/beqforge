@@ -88,3 +88,23 @@ def test_the_margin_is_reported_alongside_the_verdict() -> None:
     found = identify_rolloff(envelopes(with_rolloff(25.0, 4)))
     assert f"{found.min_improvement_db:.2f}" in str(found)
     assert "model improvement" in str(found)
+
+
+def test_the_verdict_survives_realistic_bin_scatter() -> None:
+    """Every case above is a noiseless analytic curve; a real `mean_db` is not one.
+
+    1.5 dB of per-bin scatter is a plausible real-material estimate (comparable to the
+    residual smoothing steps elsewhere in `design/` are built to tolerate). Neither verdict
+    should flip on it, and the fitted corner should stay close to the true one.
+    """
+    rng = np.random.default_rng(42)
+    noise = rng.normal(0.0, 1.5, size=FREQS.shape)
+
+    natural_found = identify_rolloff(envelopes(natural(-0.9) + noise))
+    assert not natural_found.detected, (
+        f"claimed a rolloff on noisy smooth content: {natural_found.improvement_db:+.3f} dB"
+    )
+
+    rolloff_found = identify_rolloff(envelopes(with_rolloff(25.0, 4) + noise))
+    assert rolloff_found.detected
+    assert rolloff_found.fit.corner_hz == pytest.approx(25.0, rel=0.2)
