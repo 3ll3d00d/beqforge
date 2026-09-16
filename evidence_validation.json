@@ -1,0 +1,395 @@
+{
+  "protocol": "conditional-temporal-v1",
+  "thresholds_tuned": false,
+  "runs": {
+    "development": {
+      "seed": 101,
+      "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, shaping_note_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), verify_band_hz=(5.0, 45.0), exclude_bands_hz=())",
+      "cases": [
+        {
+          "name": "broadband",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 4.000-200.000 Hz, median -52.390751 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "natural_bass_light",
+          "negative": true,
+          "excerpt": false,
+          "selected": "counterfactual/25dB",
+          "false_acceptance": true,
+          "abstained": false,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": 0.0,
+          "evidence_score": 0.9752719289347848,
+          "candidate_failures": {
+            "flatten": [
+              "corrected low end wobbles 9.6 dB over 5-45 Hz against 4.4 dB in the material; expected flat",
+              "introduces a cliff of 50.0 dB/oct at 5.9 Hz where the input's worst was 32.2 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/25dB": [],
+            "counterfactual/35dB": [
+              "corrected low end wobbles 6.7 dB over 5-45 Hz against 4.4 dB in the material; expected flat",
+              "introduces a cliff of 36.1 dB/oct at 5.6 Hz where the input's worst was 32.2 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/45dB": [
+              "corrected low end wobbles 7.2 dB over 5-45 Hz against 4.4 dB in the material; expected flat",
+              "corrected only down to 6.3 Hz; content continues to 5.0 Hz"
+            ],
+            "parametric": []
+          },
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 24.778-200.000 Hz, median -52.374769 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "stationary_coloured_noise",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "correction evidence: 477 bins unavailable; no boost licensed",
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 24.778-200.000 Hz, median -77.262674 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response",
+            "no qualifying loud events; restoration withheld",
+            "no bins support a positive correction; restoration withheld"
+          ]
+        },
+        {
+          "name": "varying_source",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 4.000-44.622 Hz, median -48.995473 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "varying_filtered",
+          "negative": false,
+          "excerpt": false,
+          "selected": "flatten",
+          "false_acceptance": false,
+          "abstained": false,
+          "recovery_rms_db": 17.771419936999,
+          "max_boost_noise_dominated_db": 0.0,
+          "evidence_score": 0.9778529640815729,
+          "candidate_failures": {
+            "flatten": [],
+            "counterfactual/25dB": [
+              "corrected low end wobbles 5.1 dB over 15.4238-45 Hz against 2.8 dB in the material; expected flat"
+            ],
+            "parametric": []
+          },
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 21.813-200.000 Hz, median -52.064801 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "steep_leakage",
+          "negative": false,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {
+            "flatten": [
+              "corrected low end wobbles 31.7 dB over 11.1935-45 Hz against 6.0 dB in the material; expected flat",
+              "introduces a cliff of 151.5 dB/oct at 17.6 Hz where the input's worst was 78.9 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/25dB": [
+              "peaks at 26.9 Hz then falls at 79.6 dB/oct below it against 60.2 in the material \u2014 too much too soon, then a rolloff",
+              "corrected low end wobbles 20.1 dB over 11.1935-45 Hz against 6.0 dB in the material; expected flat",
+              "introduces a cliff of 117.8 dB/oct at 14.6 Hz where the input's worst was 78.9 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/35dB": [
+              "corrected low end wobbles 28.5 dB over 11.1935-45 Hz against 6.0 dB in the material; expected flat",
+              "introduces a cliff of 126.1 dB/oct at 16.4 Hz where the input's worst was 78.9 \u2014 relocates the discontinuity rather than removing it",
+              "section 4 (peaking_eq at 61.1 Hz) contributes 0.24 dB across 11.1935-45 Hz \u2014 has not earned its slot"
+            ],
+            "counterfactual/45dB": [
+              "corrected low end wobbles 30.9 dB over 11.1935-45 Hz against 6.0 dB in the material; expected flat",
+              "introduces a cliff of 139.3 dB/oct at 16.8 Hz where the input's worst was 78.9 \u2014 relocates the discontinuity rather than removing it"
+            ]
+          },
+          "notes": [
+            "correction evidence: 3 bins failure; no boost licensed",
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 31.660-200.000 Hz, median -52.347018 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "excerpt",
+          "negative": false,
+          "excerpt": true,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 22.027-200.000 Hz, median -52.359760 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response",
+            "excerpt: programme quiet-frame evidence unavailable; restoration withheld"
+          ]
+        }
+      ]
+    },
+    "heldout": {
+      "seed": 947,
+      "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, shaping_note_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), verify_band_hz=(5.0, 45.0), exclude_bands_hz=())",
+      "cases": [
+        {
+          "name": "broadband",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 4.000-200.000 Hz, median -52.252844 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "natural_bass_light",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {
+            "flatten": [
+              "corrected only down to 8.1 Hz; content continues to 5.0 Hz"
+            ],
+            "counterfactual/25dB": [
+              "corrected low end wobbles 6.5 dB over 5-45 Hz against 4.1 dB in the material; expected flat",
+              "introduces a cliff of 37.7 dB/oct at 6.6 Hz where the input's worst was 32.8 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/35dB": [
+              "introduces a cliff of 37.0 dB/oct at 6.6 Hz where the input's worst was 32.8 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/45dB": [
+              "corrected only down to 8.1 Hz; content continues to 5.0 Hz"
+            ],
+            "parametric": [
+              "corrected low end wobbles 6.7 dB over 5-45 Hz against 4.1 dB in the material; expected flat"
+            ]
+          },
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 25.022-200.000 Hz, median -52.407913 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "stationary_coloured_noise",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "correction evidence: 477 bins unavailable; no boost licensed",
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 24.778-200.000 Hz, median -77.313303 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response",
+            "no qualifying loud events; restoration withheld",
+            "no bins support a positive correction; restoration withheld"
+          ]
+        },
+        {
+          "name": "varying_source",
+          "negative": true,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 4.000-40.454 Hz, median -48.791113 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "varying_filtered",
+          "negative": false,
+          "excerpt": false,
+          "selected": "parametric",
+          "false_acceptance": false,
+          "abstained": false,
+          "recovery_rms_db": 13.106747825972498,
+          "max_boost_noise_dominated_db": 0.0,
+          "evidence_score": 0.9785869136789457,
+          "candidate_failures": {
+            "flatten": [
+              "corrected low end wobbles 9.3 dB over 5.34724-45 Hz against 3.9 dB in the material; expected flat",
+              "introduces a cliff of 29.9 dB/oct at 5.6 Hz where the input's worst was 27.7 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/25dB": [
+              "tilts -6.6 dB/oct where -4.4 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+              "corrected level -6.0 dB against the -1.1 intended, outside the 3 dB allowed",
+              "corrected low end wobbles 7.3 dB over 5.34724-45 Hz against 3.9 dB in the material; expected flat",
+              "introduces a cliff of 35.4 dB/oct at 8.1 Hz where the input's worst was 27.7 \u2014 relocates the discontinuity rather than removing it",
+              "corrected only down to 30.0 Hz; content continues to 5.3 Hz"
+            ],
+            "counterfactual/35dB": [
+              "corrected low end wobbles 6.7 dB over 5.34724-45 Hz against 3.9 dB in the material; expected flat",
+              "section 3 (peaking_eq at 72.8 Hz) contributes 0.22 dB across 5.34724-45 Hz \u2014 has not earned its slot"
+            ],
+            "counterfactual/45dB": [
+              "peaks at 8.1 Hz then falls at 73.6 dB/oct below it against 21.6 in the material \u2014 too much too soon, then a rolloff",
+              "lifts 7.8 Hz to +14.9 dB, 9.9 dB above anything the material or the requested shape supports there \u2014 boosting what is not content",
+              "corrected low end wobbles 30.9 dB over 5.34724-45 Hz against 3.9 dB in the material; expected flat",
+              "introduces a cliff of 116.5 dB/oct at 6.1 Hz where the input's worst was 27.7 \u2014 relocates the discontinuity rather than removing it",
+              "corrected only down to 24.4 Hz; content continues to 5.3 Hz"
+            ],
+            "parametric": []
+          },
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 21.389-200.000 Hz, median -52.028119 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "steep_leakage",
+          "negative": false,
+          "excerpt": false,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {
+            "flatten": [
+              "tilts -36.4 dB/oct where -40.0 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+              "corrected low end wobbles 12.9 dB over 11.756-45 Hz against 6.4 dB in the material; expected flat",
+              "introduces a cliff of 96.2 dB/oct at 18.3 Hz where the input's worst was 77.2 \u2014 relocates the discontinuity rather than removing it",
+              "corrected only down to 44.9 Hz; content continues to 11.8 Hz"
+            ],
+            "counterfactual/25dB": [
+              "corrected low end wobbles 21.7 dB over 11.756-45 Hz against 6.4 dB in the material; expected flat",
+              "introduces a cliff of 125.0 dB/oct at 14.2 Hz where the input's worst was 77.2 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/35dB": [
+              "peaks at 30.5 Hz then falls at 75.0 dB/oct below it against 65.5 in the material \u2014 too much too soon, then a rolloff",
+              "corrected low end wobbles 30.5 dB over 11.756-45 Hz against 6.4 dB in the material; expected flat",
+              "introduces a cliff of 135.7 dB/oct at 16.6 Hz where the input's worst was 77.2 \u2014 relocates the discontinuity rather than removing it"
+            ],
+            "counterfactual/45dB": [
+              "corrected low end wobbles 32.3 dB over 11.756-45 Hz against 6.4 dB in the material; expected flat",
+              "introduces a cliff of 144.4 dB/oct at 16.6 Hz where the input's worst was 77.2 \u2014 relocates the discontinuity rather than removing it"
+            ]
+          },
+          "notes": [
+            "correction evidence: 2 bins failure; no boost licensed",
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 33.251-200.000 Hz, median -52.309261 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response"
+          ]
+        },
+        {
+          "name": "excerpt",
+          "negative": false,
+          "excerpt": true,
+          "selected": null,
+          "false_acceptance": false,
+          "abstained": true,
+          "recovery_rms_db": null,
+          "max_boost_noise_dominated_db": null,
+          "evidence_score": null,
+          "candidate_failures": {},
+          "notes": [
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+            "mix reference: contiguous plateau 21.389-200.000 Hz, median -52.444533 dB; shared by targets and verification",
+            "assumed sub output: mains LR4 low-pass 80 Hz; sub-bus low-pass LR4 80 Hz; gains mains -20.2 dB, LFE -10.2 dB, sub +0 dB; no room/speaker response",
+            "excerpt: programme quiet-frame evidence unavailable; restoration withheld"
+          ]
+        }
+      ]
+    }
+  }
+}
