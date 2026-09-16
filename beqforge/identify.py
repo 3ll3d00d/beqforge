@@ -23,9 +23,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import optimize
 
-from beqanalyser.design import HighPass
-from beqanalyser.design.extraction import Envelopes
-from beqanalyser.design.rolloff import (
+from beqforge import HighPass
+from beqforge.extraction import Envelopes
+from beqforge.rolloff import (
     DB_PER_OCTAVE_PER_ORDER,
     RolloffFit,
     attenuation_db,

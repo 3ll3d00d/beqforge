@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
-from beqanalyser.design.diagnose import unexcluded
+from beqforge.diagnose import unexcluded
 
 logger = logging.getLogger(__name__)
 

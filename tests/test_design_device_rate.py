@@ -4,14 +4,14 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID
-from beqanalyser.design.filters import (
+from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge.filters import (
     Realisation,
     biquad_sos,
     magnitude_db,
     publication_filters,
 )
-from beqanalyser.design.verify import device_waveform, waveform_peak, verify, _mean_db
+from beqforge.verify import device_waveform, waveform_peak, verify, _mean_db
 
 FS = 1000
 
@@ -113,8 +113,8 @@ def test_high_corner_discrepancy_fixture_is_preserved():
 
 
 def test_headroom_uses_published_device_phase_quantisation_and_ringout(monkeypatch):
-    from beqanalyser.design import pipeline
-    from beqanalyser.design.material import Material
+    from beqforge import pipeline
+    from beqforge.material import Material
 
     samples = programme() * 8
     filters = [BiquadSpec("low_shelf", 200.004, 20.0004, 0.70704)]
@@ -134,8 +134,8 @@ def test_headroom_uses_published_device_phase_quantisation_and_ringout(monkeypat
 
 
 def test_unstable_device_cannot_supply_headroom():
-    from beqanalyser.design.pipeline import PipelineParams, required_gain_reduction_db
-    from beqanalyser.design.material import Material
+    from beqforge.pipeline import PipelineParams, required_gain_reduction_db
+    from beqforge.material import Material
 
     filters = [
         BiquadSpec(
@@ -177,9 +177,9 @@ def test_waveform_retains_filter_ringout_and_zero_padding_prevents_wrap():
 
 
 def test_record_curves_use_declared_device_and_mark_unstable_waveforms():
-    from beqanalyser.design import record
-    from beqanalyser.design.charts import programme_levels_db
-    from beqanalyser.design.material import Material
+    from beqforge import record
+    from beqforge.charts import programme_levels_db
+    from beqforge.material import Material
 
     samples = programme()
     material = Material("record", FS, samples, {"L": samples}, "complete_programme")
@@ -207,8 +207,8 @@ def test_record_curves_use_declared_device_and_mark_unstable_waveforms():
 
 
 def test_direct_charts_forward_the_device(tmp_path, monkeypatch):
-    from beqanalyser.design import charts
-    from beqanalyser.design.material import Material
+    from beqforge import charts
+    from beqforge.material import Material
 
     samples = programme()
     material = Material("chart", FS, samples, {}, "complete_programme")

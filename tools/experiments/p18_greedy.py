@@ -1,11 +1,11 @@
 """P18 prototype: place sections where the residual is worst, then polish jointly.
 
-The approach REW's filter matcher uses, and the one `beqanalyser/filter.py` already uses on the
-clustering side of this repo — where `fit_composite_to_peq` walks a residual, fits the most
-prominent feature it finds, subtracts it and repeats. The design side instead searches every
-parameter of every section at once with a 240-member population, which is a far harder problem
-than the physics needs: a section's effect is *local*, so the error at 12 Hz is very largely
-controlled by the section nearest 12 Hz.
+The approach REW's filter matcher uses, and the one the sibling `beqanalyser` repo's
+`filter.py` already uses for its clustering pipeline — where `fit_composite_to_peq` walks a
+residual, fits the most prominent feature it finds, subtracts it and repeats. `beqforge`
+instead searches every parameter of every section at once with a 240-member population, which
+is a far harder problem than the physics needs: a section's effect is *local*, so the error at
+12 Hz is very largely controlled by the section nearest 12 Hz.
 
 Three savings, none of which is about making an evaluation cheaper:
 
@@ -28,8 +28,8 @@ import time
 import numpy as np
 from scipy import optimize
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import biquad_sos, magnitude_db
+from beqforge import BiquadSpec
+from beqforge.filters import biquad_sos, magnitude_db
 
 
 def _response(specs, freqs, fs):

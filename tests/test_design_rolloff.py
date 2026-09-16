@@ -9,9 +9,9 @@ than merely fits — and it declines on anything else.
 import numpy as np
 import pytest
 
-from beqanalyser.design import Alignment, HighPass
-from beqanalyser.design.filters import high_pass_sos, magnitude_db
-from beqanalyser.design.rolloff import (
+from beqforge import Alignment, HighPass
+from beqforge.filters import high_pass_sos, magnitude_db
+from beqforge.rolloff import (
     DB_PER_OCTAVE_PER_ORDER,
     attenuation_db,
     fit_rolloff,

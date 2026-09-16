@@ -6,16 +6,16 @@ import importlib
 import numpy as np
 import pytest
 
-from beqanalyser.design import DESIGN_GRID, BiquadSpec
-from beqanalyser.design import cache, pipeline, record
-from beqanalyser.design.accept import assess
-from beqanalyser.design.diagnose import Diagnosis
-from beqanalyser.design.filters import Realisation
-from beqanalyser.design.material import Material
-from beqanalyser.design.verify import Correction
+from beqforge import DESIGN_GRID, BiquadSpec
+from beqforge import cache, pipeline, record
+from beqforge.accept import assess
+from beqforge.diagnose import Diagnosis
+from beqforge.filters import Realisation
+from beqforge.material import Material
+from beqforge.verify import Correction
 from tests.test_design_design import identified_rolloff, envelopes_with_margin
 
-D = importlib.import_module("beqanalyser.design.design")
+D = importlib.import_module("beqforge.design")
 
 
 def inputs():

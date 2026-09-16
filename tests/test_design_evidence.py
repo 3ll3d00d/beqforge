@@ -6,19 +6,19 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID
-from beqanalyser.design.accept import confidence_from_evidence
-from beqanalyser.design.design import DesignParams, _noise_ceiling, design
-from beqanalyser.design.diagnose import Diagnosis
-from beqanalyser.design.extraction import ExtractionParams, _block_bootstrap_se, extract
-from beqanalyser.design.filters import biquad_sos
-from beqanalyser.design.material import Material
-from beqanalyser.design.pipeline import PipelineParams, priced_by_evidence, run
+from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge.accept import confidence_from_evidence
+from beqforge.design import DesignParams, _noise_ceiling, design
+from beqforge.diagnose import Diagnosis
+from beqforge.extraction import ExtractionParams, _block_bootstrap_se, extract
+from beqforge.filters import biquad_sos
+from beqforge.material import Material
+from beqforge.pipeline import PipelineParams, priced_by_evidence, run
 from tests.test_design_design import envelopes_with_margin, identified_rolloff
 
 
 def test_stationary_noise_abstains_and_records_why(tmp_path):
-    from beqanalyser.design import record
+    from beqforge import record
 
     samples = (
         signal.sosfilt(
@@ -110,7 +110,7 @@ def test_unknown_confidence_inputs_cannot_improve_score():
 
 
 def test_profiling_omissions_are_preserved_in_cache():
-    from beqanalyser.design.cache import Analysis, analysis_from_json, analysis_to_json
+    from beqforge.cache import Analysis, analysis_from_json, analysis_to_json
 
     samples = np.random.default_rng(1).normal(size=20_000)
     env = extract(samples, 1000, ExtractionParams(confidence_bins=2))
@@ -132,7 +132,7 @@ def test_profiling_omissions_are_preserved_in_cache():
 def test_coverage_and_channel_policies_apply_even_with_measured_mix_support(
     monkeypatch, coverage, channels, reason
 ):
-    from beqanalyser.design import pipeline
+    from beqforge import pipeline
 
     env = envelopes_with_margin(12.0)
     monkeypatch.setattr(pipeline, "extract", lambda *args: env)

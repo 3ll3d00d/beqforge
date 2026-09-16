@@ -7,8 +7,8 @@ comparable and the acceptance model rather than a preference decides between the
 import numpy as np
 import pytest
 
-from beqanalyser.design.extraction import extract
-from beqanalyser.design.pipeline import (
+from beqforge.extraction import extract
+from beqforge.pipeline import (
     DESIGN_GRID,
     STRATEGIES,
     PipelineParams,
@@ -45,7 +45,7 @@ def walled():
 
 
 def test_every_registered_strategy_has_the_same_signature(walled) -> None:
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     diagnosis = diagnose(walled)
     envelopes = extract(walled.mono_mix, float(walled.fs))
@@ -61,14 +61,14 @@ def test_every_registered_strategy_has_the_same_signature(walled) -> None:
 
 
 def test_flatten_proposes_a_target_that_inverts_the_measured_response(walled) -> None:
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     diagnosis = diagnose(walled)
     envelopes = extract(walled.mono_mix, float(walled.fs))
     proposals = flatten_targets(walled, diagnosis, envelopes, None, PipelineParams())
     assert len(proposals) == 1
     target = proposals[0].target_db
-    from beqanalyser.design.pipeline import DESIGN_GRID
+    from beqforge.pipeline import DESIGN_GRID
 
     # boost where the material is attenuated, none where it is not
     assert np.interp(8.0, DESIGN_GRID, target) > np.interp(30.0, DESIGN_GRID, target)
@@ -99,7 +99,7 @@ def test_the_flatten_target_stops_without_a_step(walled) -> None:
     below by half of it and the fit could never stop early: on the third title three sections
     reached 0.532 dB against a 0.5 target with the cut, and 0.432 with the taper.
     """
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     diagnosis = diagnose(walled)
     envelopes = extract(walled.mono_mix, float(walled.fs))
@@ -122,7 +122,7 @@ def test_the_flatten_target_stops_without_a_step(walled) -> None:
 
 def test_the_taper_does_not_reach_into_the_correction(walled) -> None:
     """It has to stop the target, not shrink it."""
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     diagnosis = diagnose(walled)
     envelopes = extract(walled.mono_mix, float(walled.fs))
@@ -141,7 +141,7 @@ def test_flatten_stops_where_the_material_stops_being_short() -> None:
     management" — the sentence §3.1 had to remove from the channel reference. A wall an octave
     higher must push the correction an octave higher with it.
     """
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     samples = int(FS * 300.0)
 
@@ -171,7 +171,7 @@ def test_flatten_does_not_read_the_high_frequency_fall_as_deficit() -> None:
     That return is programme, not deficit. The anchor is the *first* upward crossing into
     nothing for exactly this reason, so nothing above it may reach the target.
     """
-    from beqanalyser.design.diagnose import diagnose
+    from beqforge.diagnose import diagnose
 
     samples = int(FS * 300.0)
     material = material_from(
@@ -194,8 +194,8 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
     Sharing them must not change any target — this is three forward and three inverse
     transforms of a two-hour signal collapsing to one each, not a different calculation.
     """
-    from beqanalyser.design.diagnose import diagnose
-    from beqanalyser.design.pipeline import _Restoration, counterfactual_target
+    from beqforge.diagnose import diagnose
+    from beqforge.pipeline import _Restoration, counterfactual_target
 
     diagnosis = diagnose(walled)
     if not diagnosis.filtered_channels:
@@ -215,12 +215,12 @@ def test_parametric_fits_from_the_same_seeds_as_every_other_candidate() -> None:
     the fitter without a `seeds` argument made it three times the optimiser of anything else,
     for the strategy that is rejected on all four titles — a quarter of a run.
     """
-    from beqanalyser.design.design import DesignParams
+    from beqforge.design import DesignParams
 
     params = PipelineParams(fit_seeds=(0, 1, 2, 3))
     assert DesignParams().fit_seeds == PipelineParams().fit_seeds
     # and the pipeline hands its own choice down rather than letting the default stand
-    from beqanalyser.design.pipeline import parametric_params
+    from beqforge.pipeline import parametric_params
 
     assert parametric_params(params).fit_seeds == (0, 1, 2, 3)
 
@@ -234,7 +234,7 @@ def test_section_placement_follows_the_target_not_a_fixed_ceiling(monkeypatch) -
     whose target reached past it had its sections pinned against it. Blazing Saddles needs
     23 dB at 50 Hz and got four sections crowded into 29-40 Hz.
     """
-    from beqanalyser.design import pipeline
+    from beqforge import pipeline
 
     captured: list = []
 
@@ -285,8 +285,8 @@ def test_the_judged_band_starts_at_the_measured_noise_floor() -> None:
     import math
     from dataclasses import replace
 
-    from beqanalyser.design.diagnose import Diagnosis
-    from beqanalyser.design.pipeline import judged_band_hz
+    from beqforge.diagnose import Diagnosis
+    from beqforge.pipeline import judged_band_hz
 
     from tests.test_design_diagnose import FS, material_from, scened_noise
 
@@ -321,8 +321,8 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
     — Blazing Saddles at 44.4 Hz and Alien at 34.4-48.1 Hz, two of the three that abstain. Their
     candidates came out wrecked rather than marginal: a -39.7 dB hole at 40 Hz.
     """
-    from beqanalyser.design.diagnose import diagnose
-    from beqanalyser.design.pipeline import counterfactual_target
+    from beqforge.diagnose import diagnose
+    from beqforge.pipeline import counterfactual_target
 
     params = PipelineParams()
     diagnosis = diagnose(walled)

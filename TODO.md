@@ -1,6 +1,6 @@
 # TODO
 
-Live backlog for `beqanalyser`. What's built and why lives in [AGENTS.md](AGENTS.md) (and
+Live backlog for `beqforge`. What's built and why lives in [AGENTS.md](AGENTS.md) (and
 [README.md](README.md) for day-to-day usage) — this is what's left, ordered by cost and
 confidence, not urgency. Reprioritise as new titles or new material change what's actually
 blocking, rather than working straight down the list on inertia.
@@ -8,10 +8,12 @@ blocking, rather than working straight down the list on inertia.
 This replaces `AUTOMATED_DESIGN.md`, `PERFORMANCE.md` and `DESIGN_EVIDENCE.md` (retired
 September 2026, once their "how it works and why" content was folded into AGENTS.md). Full
 historical derivations, numbers and the play-by-play that produced the resolved items now in
-AGENTS.md remain in git history if a future decision needs to see the original working —
-`git log --follow -- AUTOMATED_DESIGN.md` from before the retirement commit.
+AGENTS.md remain in git history if a future decision needs to see the original working — but in
+the sibling `beqanalyser` repository this project was extracted from, not here: those files
+were never under `beqanalyser/design/` and so weren't carried over by the extraction.
+`git log --follow -- AUTOMATED_DESIGN.md` from before the retirement commit, there.
 
-## Automated design (`beqanalyser/design/`)
+## Automated design (`beqforge/`)
 
 ### Resolved: the first real-title rerun since R1-R12 landed (16 September 2026)
 
@@ -35,7 +37,7 @@ Full before/after is on the published Correction Ledger artifact. All three, fix
   (25.5-55.9 Hz, 1.1 octaves — well past the 1/3-octave minimum) measured +3.0088 dB/octave on
   the raw curve against the 3.0 limit, and +2.9228 on the very discovery curve `within` had
   already used to select it. Fixed by reading `discovery` for the slope too
-  (`beqanalyser/design/diagnose.py`), so region selection and region validation are now
+  (`beqforge/diagnose.py`), so region selection and region validation are now
   consistent; regression test in `tests/test_design_references.py` reproduces it with a few
   synthetic estimator-bin spikes rather than needing real material. **Tron now recovers a
   filter** (`flatten`, 85% of the deficit, evidence score 0.95). Confirmed against all eight
@@ -53,7 +55,7 @@ all-or-nothing block instead of allowing a locally bad edge to be trimmed off.**
 close enough in level to a real plateau to fall in the same tolerance band will always produce
 this shape — the plateau does not stop being real because a peak sits next to it.
 
-Fixed with `_trim_to_flat_subwindow` (`beqanalyser/design/diagnose.py`): before rejecting a
+Fixed with `_trim_to_flat_subwindow` (`beqforge/diagnose.py`): before rejecting a
 region outright, trim one point at a time from whichever end currently reduces the remaining
 slope's magnitude more, stopping the moment the remainder is flat enough (or the width floor is
 hit). A heuristic — it does not search every possible sub-window, so a region with the bad
@@ -178,7 +180,7 @@ Deprioritised: `flatten` and `counterfactual` have produced every accepted filte
   because it's what lets a chart be read against a published catalogue one — a high
   percentile (99.9th) would remove the bias and break that comparison. Not affecting any
   decision path: `extraction.py`'s peak envelope is a 95th-percentile, not a maximum.
-* Cosmetic, low priority: many docstrings/comments across `beqanalyser/design/` and `tests/`
+* Cosmetic, low priority: many docstrings/comments across `beqforge/` and `tests/`
   still cite bare section numbers (`§2.1`, `§14.2`, ...) left over from the retired
   `AUTOMATED_DESIGN.md`. Only references naming the file by name were repointed when it was
   removed; the bare numbers don't point anywhere now. Harmless — each citation sits next to a

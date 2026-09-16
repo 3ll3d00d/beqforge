@@ -4,112 +4,76 @@ Working notes for coding agents. Human-facing detail lives in [README.md](README
 
 ## What this is
 
-A research/analysis tool, not a product. It takes the BEQ catalogue (thousands of hand-authored bass-EQ
-filter sets, published as JSON by the `beqcatalogue` project), clusters their magnitude responses, and
-emits a handful of **composite curves** plus fitted IIR/graphic-EQ approximations of them.
+Derives a corrective BEQ filter directly from a film's own audio track, rather than summarising
+a catalogue of existing hand-authored ones (that's the sibling `beqanalyser` project, which this
+repo was extracted from — they share only the RBJ biquad arithmetic). The pipeline runs
+material → extraction → diagnose → target → fit → verify, and prints the evidence beside the
+answer, abstaining when nothing measures up. See "Working on `design/`" below for what it does
+and why, and [TODO.md](TODO.md) for what's still open.
 
-Single package, no CLI, no API, no service. Everything is driven by editing `__main__.py` or the notebook.
+One entry point: `tools/design_beq.py`, also installed as `beqforge design` (`pip install
+beqforge` / `uv tool install beqforge`). No API, no service.
 
 ## Layout
 
 | File | Contents |
 | --- | --- |
-| `beqanalyser/__init__.py` | All data classes + the RBJ `Biquad` hierarchy + `rms`/`cosine_similarity` helpers. Everything imports from here; it imports nothing from the package. |
-| `beqanalyser/loader.py` | Catalogue fetch/cache, IIR→magnitude conversion, distance matrix construction (`compute_distance_components` is the shared scoring core). |
-| `beqanalyser/analyser.py` | HDBSCAN clustering, assignment, composite refinement, fan envelopes. The pipeline proper. |
-| `beqanalyser/filter.py` | Fits biquad cascades / 1/3-octave GEQ to composite curves via scipy `optimize`. |
-| `beqanalyser/reporter.py` | matplotlib plots, log summaries, CSV export. Presentation only. |
-| `beqanalyser/__main__.py` | The one hard-coded run configuration. |
-| `beqanalyser/beq.ipynb` | Same pipeline, stage by stage. **Partially stale — see gotchas.** |
-| `beqanalyser/design/` | Automated filter design — a **separate capability**, not part of the clustering pipeline above. Derives a BEQ filter from a film's audio rather than summarising existing ones; the pipeline runs material → extraction → diagnose → target → fit → verify. See "Working on `design/`" below for what it does and why, and `TODO.md` for what's still open. |
-| `beqanalyser/design/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
-| `beqanalyser/design/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
-| `beqanalyser/design/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
-| `beqanalyser/design/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — diagnostic and confidence only, not on the path to a target; see "Working on `design/`" below.** |
-| `beqanalyser/design/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
-| `beqanalyser/design/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is ~75% of a run; `_sos_from_parameters` is a third copy of the RBJ formulae, kept honest by a test. |
-| `beqanalyser/design/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
-| `beqanalyser/design/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
-| `beqanalyser/design/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
-| `beqanalyser/design/accept.py` | The acceptance model. The cliff, flatness, turnover and overshoot tests are comparative and so need no calibrated threshold; the shape request (`target_tilt_db_per_octave` and its tolerances) is a stated preference; realisability is judged on the curve the device will play rather than against a drift constant. Tilt, level and extent judge against *intent* (`before_db` + the evidence-priced target), not flat, so a partial correction is judged on whether it achieved what it was licensed to. `recovered_fraction` and `shaping_fraction` report how much of the deficit was licensed and how much of the correction sits below the level-independence floor; `Candidate.confidence` is a separate, uncalibrated ordinal (`pipeline.correction_evidence_score`), not derived from either. Headroom (`required_offset_db`) is reported, never gated. |
-| `beqanalyser/design/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
-| `beqanalyser/design/cache.py` | Stage cache — the analysis, and any strategy declaring `cache_modules`. On by default; keyed per stage so work on the fitter does not drop the analysis. |
-| `beqanalyser/design/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
-| `beqanalyser/design/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
-| `beqanalyser/design/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
+| `beqforge/biquad.py` | The RBJ `Biquad` class hierarchy every filter this package builds is rendered through. Imports nothing else from the package. |
+| `beqforge/__init__.py` | Shared design types — `Alignment`, `HighPass`, `BiquadSpec`, `PolePair`, `DESIGN_GRID`, `BIQUAD_BUDGET`. |
+| `beqforge/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
+| `beqforge/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
+| `beqforge/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
+| `beqforge/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — diagnostic and confidence only, not on the path to a target; see "Working on `design/`" below.** |
+| `beqforge/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
+| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is ~75% of a run; `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
+| `beqforge/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
+| `beqforge/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
+| `beqforge/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
+| `beqforge/accept.py` | The acceptance model. The cliff, flatness, turnover and overshoot tests are comparative and so need no calibrated threshold; the shape request (`target_tilt_db_per_octave` and its tolerances) is a stated preference; realisability is judged on the curve the device will play rather than against a drift constant. Tilt, level and extent judge against *intent* (`before_db` + the evidence-priced target), not flat, so a partial correction is judged on whether it achieved what it was licensed to. `recovered_fraction` and `shaping_fraction` report how much of the deficit was licensed and how much of the correction sits below the level-independence floor; `Candidate.confidence` is a separate, uncalibrated ordinal (`pipeline.correction_evidence_score`), not derived from either. Headroom (`required_offset_db`) is reported, never gated. |
+| `beqforge/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
+| `beqforge/cache.py` | Stage cache — the analysis, and any strategy declaring `cache_modules`. On by default; keyed per stage so work on the fitter does not drop the analysis. |
+| `beqforge/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
+| `beqforge/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
+| `beqforge/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
+| `beqforge/cli.py` | `beqforge <subcommand> ...` — the installed entry point. Strips the subcommand off argv and hands the rest to the matching script in `tools/` unchanged. |
 | `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures; writes a `.run.json.gz` record beside the material unless `--no-record`. |
 | `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Requires an explicit supported channel layout; preserves layout provenance. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
+| `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
+| `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
 | `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, and the two record comparison tools. See "Performance" under "Working on `design/`" below. |
-| `tests/` | Covers `beqanalyser/design/` only; the clustering pipeline has none. `uv run pytest`. |
+| `tests/` | `uv run pytest`. |
 
-[TODO.md](TODO.md) is the live backlog for `beqanalyser/design/` — genuinely open questions,
-backlog items and known rough edges. Everything in "Working on `design/`" below is what the
-shipped implementation actually does today, not a plan for something still to be built.
-
-Dependency direction: `__init__` ← `loader` ← `analyser`; `filter` and `reporter` depend on `__init__`
-(and `reporter` on `filter` for the `TableRowConvertible` protocol). Don't introduce a cycle by importing
-`analyser` from `loader`.
-
-## Core types
-
-* `Points` — wraps one array in two views: `.full_range` and `.band_limited`. **Not** a numpy array; it
-  has no arithmetic operators. Passing one where an ndarray is expected is the most common bug here.
-* `Curves(min_freq, max_freq, magnitude, frequency)` — a `Points` for each of magnitude and frequency,
-  plus `.entry_count`. All clustering/assignment work uses `.band_limited`.
-* `BEQFilter` — one catalogue entry's `mag_freqs` / `mag_db` / `CatalogueEntry`.
-* `BEQFilterMapping` — one (entry, composite) comparison. Carries all four metrics plus the combined
-  `distance_score`, an optional `rejection_reason`, and `is_best`. One is recorded per pair, kept
-  regardless of outcome, so the mapping list is the audit trail.
-* `BEQComposite` — `mag_response` (full range) + `mag_response_band_limited`, its `mappings`, and
-  `fan_envelopes`. `assigned_entry_ids` = mappings with `is_best` and no rejection reason.
-* `ComputationCycle` → `BEQCompositeComputation` (one discovery pass, all its cycles) → `BEQResult`
-  (composites flattened across all passes, with sequential ids).
-
-## Invariants to preserve
-
-* Every entry produces exactly one `is_best` mapping per discovery pass — `map_to_best_composite`
-  asserts this.
-* `assigned + rejected == input count` within a pass — `build_beq_composites` asserts this.
-* Fan envelope bands are disjoint; no curve appears in two.
-* Composite ids are the index into `BEQResult.composites`; `reporter` indexes axes arrays by `comp.id`,
-  so ids must stay dense and zero-based.
-* A distance ≥ `distance_penalty_scale` (100) means a hard-limit violation. Code tests against that
-  constant rather than the individual limits.
+[TODO.md](TODO.md) is the live backlog — genuinely open questions, backlog items and known rough
+edges. Everything in "Working on `design/`" below is what the shipped implementation actually
+does today, not a plan for something still to be built.
 
 ## Running things
 
 ```bash
-uv sync                              # first time / after dependency changes
-uv run python -m beqanalyser         # clustering pipeline, from the repo root
-uv run python tools/design_beq.py data/NAME.npz   # automated design, all strategies
+uv sync                                             # first time / after dependency changes
+uv run python tools/design_beq.py data/NAME.npz     # automated design, all strategies
 uv run python tools/design_beq.py data/NAME.npz --strategy flatten   # just one
 uv run python tools/replay.py data/NAME.run.json.gz --charts charts   # redraw, no rerun
 uv run python tools/replay.py data/NAME.run.json.gz --beq out/NAME.beq  # into beqdesigner
-uv run ruff check beqanalyser        # ruff is a dependency; there is no config section
-uv run ruff format beqanalyser
+uv run ruff check beqforge tools tests   # ruff is a dependency; there is no config section
+uv run ruff format beqforge tools tests
 ```
+
+Once installed (`pip install beqforge` / `uv tool install beqforge`), the same pipeline runs as
+`beqforge design data/NAME.npz`, `beqforge replay ...`, `beqforge extract ...`, `beqforge
+summarise ...` and `beqforge ledger ...` — `beqforge/cli.py` dispatches each subcommand straight
+to the script it names above, so `--help` on either form shows the same thing.
 
 Notes:
 
-* Python is pinned `>=3.13,<3.14` in `pyproject.toml`. If the venv's base interpreter has gone missing,
-  `uv sync` will silently recreate `.venv` against a uv-managed 3.13.
-* `python -m beqanalyser` needs `database.bin` in the CWD. Without it, it downloads the catalogue JSON
-  from GitHub and re-derives every magnitude response through `sosfilt`/`freqz` in a process pool,
-  rebuilding a ~250 MB cache. `database.bin`, `*.npy` and `beq_composites.csv` are all gitignored —
-  never commit them.
-* First run on a fresh catalogue selection computes an `N × N` float64 distance matrix. The 2023+
-  selection in `__main__` is N≈3000 (a 67 MB matrix); the unfiltered catalogue is several times that
-  and the matrix grows quadratically. It is cached to `<data_hash>.npy`, keyed on the hash of the
-  *filtered* catalogue, so changing the `load()` predicate invalidates it.
-* Every `reporter.plot_*` function calls `plt.show()` and blocks. Don't call them from a headless script
-  without setting a non-interactive matplotlib backend.
-* The clustering pipeline has no tests, so there is no fast feedback loop there. To sanity-check a
-  pipeline change, build a small synthetic catalogue (a few dozen shelf curves with jitter, in three
-  groups), run `compute_distance_matrix` + `build_all_composites` with `min_cluster_size≈20`, and check
-  the composite count and reject rate. That runs in seconds. `beqanalyser/design/` *is* tested —
-  `uv run pytest`.
+* Python is pinned `>=3.13,<3.14` in `pyproject.toml`. If the venv's base interpreter has gone
+  missing, `uv sync` will silently recreate `.venv` against a uv-managed 3.13.
+* `tools/extract.py` needs `ffmpeg` on `PATH`; nothing else here shells out.
+* `uv run pytest` is the whole feedback loop — `uv run python tools/design_beq.py` is not a
+  substitute for it, but is the way to sanity-check a change against real material (see "Running
+  a design run" below).
 
 ### Waiting on a long run without leaking shells
 
@@ -160,40 +124,21 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
 
 ## Gotchas
 
-* **`Points` lives only at API boundaries.** `fit_all_composites_to_peq` / `_to_geq` / `_to_mag` and
-  `plot_assigned_fan_curves` take `Points`; everything beneath them takes plain ndarrays. When adding a
-  function, pick one and don't straddle — `Points` has no arithmetic operators, so the failure mode is a
-  bare `TypeError` deep in a scipy call.
-* **Band-limited vs full-range is a real distinction, not two views of the same thing.** Clustering,
-  distance and assignment use `.band_limited` / `mag_response_band_limited`. Filter fitting and its plots
-  use `.full_range` / `mag_response`. `plot_composite_evolution` plots the band-limited shape and so takes
-  a band-limited ndarray. Mixing them gives silent length mismatches in `np.interp`, not a clean error.
-* `BEQFilterMapping.assess()` and the per-metric `RejectionReason` values (`RMS_EXCEEDED` etc.) are dead
-  code — superseded by the combined distance score. Only `SUBOPTIMAL`, `NOISE` and `HARD_LIMIT` are
-  produced. Don't wire `assess()` back in without checking whether that is intended.
-* `distance_soft_penalty_scale` is plumbed through and logged but never applied.
-* The phase-1 `while assigned_rate >= 0.01` guard tests a cumulative rate that only rises, so it never
-  fires; the pass count is simply `len(iteration_params)`.
-* `rms(a, weights)` supports frequency weighting, but every caller passes `None`.
-* `BEQComposite.rejected_mappings_for_reason` compares `m.is_best == best_only`, so the default
-  (`False`) returns non-best mappings. No callers.
-* RBJ biquad formulae exist twice — `filter.py` module functions and the `__init__.py` class hierarchy.
-  Fix both or neither.
-* `map_to_best_composite` mutates the composites passed in (appends to `comp.mappings`); it also builds a
-  `best_composites` list purely to assert. It is O(entries × composites) with per-pair scipy-free numpy
-  work — the hot loop.
+* RBJ biquad formulae exist twice — `biquad.py`'s class hierarchy and `filters.py`'s
+  `_sos_from_parameters`. Fix both or neither; the test asserting they agree is what keeps that
+  honest.
+* `beqd.py`'s exported `.beq` metadata carries our verdict under a `"beqforge"` key inside
+  beqdesigner's free-form `metadata` dict — that schema is pinned by `tests/test_design_record.py`.
+  Don't rename it without updating that test.
 
 ## Conventions
 
 * British spelling in prose and identifiers (`normalise`, `summarise`, `analyser`, `LICENCE.md`).
-* Modern typing throughout: `X | None`, builtin generics, `@dataclass(slots=True)` for params objects,
-  `@override` where applicable. Don't reintroduce `typing.Optional`/`List`.
-* Config objects are frozen-ish dataclasses extending `DefaultAwareRepr`, which prints only non-default
-  fields. Add new knobs there with a docstring under the field, following the existing pattern.
-* Logging via `logging.getLogger(__name__)`, f-strings, phase banners as `"=" * 80`. No print statements
-  outside the notebook.
-* Numeric code stays vectorised over numpy; the distance matrix path is chunked and multiprocessed on
-  purpose — preserve the chunking when editing it.
+* Modern typing throughout: `X | None`, builtin generics, `@dataclass(frozen=True, slots=True)`
+  for params objects, `@override` where applicable. Don't reintroduce `typing.Optional`/`List`.
+* Logging via `logging.getLogger(__name__)`, f-strings, phase banners as `"=" * 80`. No print
+  statements outside `tools/`'s own reporting output.
+* Numeric code stays vectorised over numpy.
 
 ## Working on `design/`
 
@@ -369,14 +314,14 @@ getting them wrong first.
   `tools/replay.py`/`tools/render_ledger.py` redraw charts or export a `.beq` from it in
   seconds, **using the run's own recorded configuration** (strategy selection, exclusions,
   etc.), not a fresh default. The record is fingerprinted on the material hash, the recorded
-  params, the git revision, and a content hash over every `design/` module plus the root RBJ
-  implementation and the extraction/design/replay/ledger entry points and ledger template
-  (`record.RECORD_SOURCE_FILES`) — so successive edits inside an already-dirty tree still
-  invalidate it. `replay`/`render_ledger` refuse a stale record and say why; `--force` draws it
-  anyway. Extend `RECORD_SOURCE_FILES` when a new dependency lives outside `design/`;
-  stage-cache dependency lists are separate and narrower. Legacy records are read verbatim and
-  never silently acquire a claim (evidence, publication, playback) they did not actually
-  record.
+  params, the git revision, and a content hash over every module under `beqforge/` — including
+  `biquad.py`'s RBJ arithmetic — plus the extraction/design/replay/ledger entry points and
+  ledger template (`record.RECORD_SOURCE_FILES`) — so successive edits inside an already-dirty
+  tree still invalidate it. `replay`/`render_ledger` refuse a stale record and say why;
+  `--force` draws it anyway. Extend `RECORD_SOURCE_FILES` when a new dependency lives outside
+  `beqforge/`; stage-cache dependency lists are separate and narrower. Legacy records are read
+  verbatim and never silently acquire a claim (evidence, publication, playback) they did not
+  actually record.
 * **The record and the `.beq` export are two different things.** The record is ours and has to
   be exact and complete for re-analysis; the export is beqdesigner's and only needs the
   filters plus the underlying signal. Do not merge them — it would make the cache hostage to a
@@ -417,7 +362,7 @@ are not: a gate built and calibrated against them measured close to *inverted* a
 quantity (gain reduction actually required on the modelled sub feed) and had to be withdrawn.
 More generally, the catalogue has no negatives — nothing in it is known to be unfiltered — so it
 cannot validate a false-positive rate, and a per-title decision must never rest on a value
-derived from outside that title. This is the recurring failure mode in this subpackage; see
+derived from outside that title. This is the recurring failure mode in this package; see
 `TODO.md`'s "known contradictions" for the constants still standing in for a measurement.
 
 `data/` holds extracted material and is gitignored. Nothing in it is committed.

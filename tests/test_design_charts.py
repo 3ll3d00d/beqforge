@@ -7,8 +7,8 @@ that means something different from one chart to the next is worse than none.
 
 import numpy as np
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.charts import (
+from beqforge import BiquadSpec
+from beqforge.charts import (
     CHANNEL_COLOURS,
     FREQ_LIMITS_HZ,
     LEVEL_LIMITS_DB,

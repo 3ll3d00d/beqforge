@@ -39,15 +39,15 @@ from pathlib import Path
 
 import numpy as np
 
-from beqanalyser.design import DESIGN_GRID, BiquadSpec
-from beqanalyser.design import cache
-from beqanalyser.design.accept import (
+from beqforge import DESIGN_GRID, BiquadSpec
+from beqforge import cache
+from beqforge.accept import (
     AcceptParams,
     Verdict,
     assess,
 )
-from beqanalyser.design.design import DesignMethod, DesignParams, design
-from beqanalyser.design.diagnose import (
+from beqforge.design import DesignMethod, DesignParams, design
+from beqforge.diagnose import (
     Diagnosis,
     DiagnoseParams,
     diagnose,
@@ -57,8 +57,8 @@ from beqanalyser.design.diagnose import (
     supported_mix_change,
     unexcluded,
 )
-from beqanalyser.design.extraction import ExtractionParams, extract
-from beqanalyser.design.filters import (
+from beqforge.extraction import ExtractionParams, extract
+from beqforge.filters import (
     FIT_STATS,
     FitRequest,
     FitStats,
@@ -69,15 +69,15 @@ from beqanalyser.design.filters import (
     fit_minimal_biquads_all,
     magnitude_db,
 )
-from beqanalyser.design.identify import IdentifyParams, Identification, identify_rolloff
-from beqanalyser.design.material import (
+from beqforge.identify import IdentifyParams, Identification, identify_rolloff
+from beqforge.material import (
     LFE_GAIN,
     MAIN_GAIN,
     Material,
     PlaybackParams,
     bass_managed_sum,
 )
-from beqanalyser.design.verify import Correction, device_waveform, verify, waveform_peak
+from beqforge.verify import Correction, device_waveform, verify, waveform_peak
 
 logger = logging.getLogger(__name__)
 

@@ -11,9 +11,9 @@ Envelopes are constructed here rather than extracted, so every case has a known 
 import numpy as np
 import pytest
 
-from beqanalyser.design.extraction import Envelopes
-from beqanalyser.design.identify import IdentifyParams, identify_rolloff
-from beqanalyser.design.rolloff import DB_PER_OCTAVE_PER_ORDER, attenuation_db
+from beqforge.extraction import Envelopes
+from beqforge.identify import IdentifyParams, identify_rolloff
+from beqforge.rolloff import DB_PER_OCTAVE_PER_ORDER, attenuation_db
 
 FREQS = np.linspace(4.0, 470.0, 478)
 OCTAVES = np.log2(FREQS / FREQS[0])

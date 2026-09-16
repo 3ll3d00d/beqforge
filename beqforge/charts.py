@@ -37,10 +37,10 @@ matplotlib.use("Agg")  # written to file, never shown; plt.show() blocks a headl
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from beqanalyser.design import BiquadSpec  # noqa: E402
-from beqanalyser.design.filters import Realisation, unstable_sections  # noqa: E402
-from beqanalyser.design.verify import device_waveform  # noqa: E402
-from beqanalyser.design.material import Material  # noqa: E402
+from beqforge import BiquadSpec  # noqa: E402
+from beqforge.filters import Realisation, unstable_sections  # noqa: E402
+from beqforge.verify import device_waveform  # noqa: E402
+from beqforge.material import Material  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

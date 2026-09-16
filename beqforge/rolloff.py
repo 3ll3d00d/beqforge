@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import optimize
 
-from beqanalyser.design import Alignment, HighPass
+from beqforge import Alignment, HighPass
 
 logger = logging.getLogger(__name__)
 

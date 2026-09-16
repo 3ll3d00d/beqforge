@@ -20,15 +20,15 @@ from typing import Literal
 
 import numpy as np
 
-from beqanalyser.design import (
+from beqforge import (
     DESIGN_GRID,
     Alignment,
     BiquadSpec,
     ExactInversionUnavailable,
     HighPass,
 )
-from beqanalyser.design.extraction import Envelopes
-from beqanalyser.design.filters import (
+from beqforge.extraction import Envelopes
+from beqforge.filters import (
     Realisation,
     biquad_sos,
     correction_band_hz,
@@ -39,8 +39,8 @@ from beqanalyser.design.filters import (
     magnitude_db,
     residual_db,
 )
-from beqanalyser.design.identify import Identification
-from beqanalyser.design.rolloff import attenuation_db
+from beqforge.identify import Identification
+from beqforge.rolloff import attenuation_db
 
 logger = logging.getLogger(__name__)
 

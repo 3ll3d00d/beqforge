@@ -7,10 +7,10 @@ import json
 import numpy as np
 import pytest
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID
-from beqanalyser.design.accept import assess
-from beqanalyser.design.beqd import _section, export
-from beqanalyser.design.filters import (
+from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge.accept import assess
+from beqforge.beqd import _section, export
+from beqforge.filters import (
     Realisation,
     biquad_sos,
     magnitude_db,
@@ -20,7 +20,7 @@ from beqanalyser.design.filters import (
     _Escalation,
     FitRequest,
 )
-from beqanalyser.design.verify import Correction, verify
+from beqforge.verify import Correction, verify
 
 FRAGILE = BiquadSpec(
     "low_shelf", 6.137080501313293, 20.453528341353397, 1.7655313695442572
@@ -103,7 +103,7 @@ def test_fitter_fallback_keeps_failed_candidate_for_diagnosis():
 def test_pipeline_records_the_parameters_it_judges(monkeypatch):
     from types import SimpleNamespace
 
-    from beqanalyser.design import pipeline, record
+    from beqforge import pipeline, record
 
     original = [BiquadSpec("low_shelf", 25.1378, 10.34567, 0.707123)]
     published = publication_filters(original)

@@ -173,14 +173,10 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-beq_composites.csv
-database.bin
-database.bin.sha256
-*.npy
 data/
 
 # generated debug charts (PNGs, regenerated per run)
 charts/
 
-# generated design/ output — .beq exports, the correction ledger, anything under --out/--charts-dir
+# generated output — .beq exports, the correction ledger, anything under --out/--charts-dir
 out/

@@ -24,8 +24,8 @@ from pathlib import Path
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqanalyser.design import beqd, record  # noqa: E402
-from beqanalyser.design.charts import render_cached  # noqa: E402
+from beqforge import beqd, record  # noqa: E402
+from beqforge.charts import render_cached  # noqa: E402
 
 logger = logging.getLogger("replay")
 

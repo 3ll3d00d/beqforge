@@ -20,8 +20,8 @@ sys.path.insert(
 
 from p14_jacobian import magnitude_jacobian  # noqa: E402
 
-from beqanalyser.design import BiquadSpec  # noqa: E402
-from beqanalyser.design.filters import biquad_sos, magnitude_db  # noqa: E402
+from beqforge import BiquadSpec  # noqa: E402
+from beqforge.filters import biquad_sos, magnitude_db  # noqa: E402
 
 FS = 96000.0
 GRID = np.logspace(math.log10(3.0), math.log10(400.0), 200)

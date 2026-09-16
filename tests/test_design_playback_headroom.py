@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID, pipeline, record
-from beqanalyser.design.filters import Realisation, biquad_sos, magnitude_db
-from beqanalyser.design.material import Material, PlaybackParams, bass_managed_sum
+from beqforge import BiquadSpec, DESIGN_GRID, pipeline, record
+from beqforge.filters import Realisation, biquad_sos, magnitude_db
+from beqforge.material import Material, PlaybackParams, bass_managed_sum
 from tests.test_design_device_rate import programme, reference
 from tools.design_beq import _headroom
 from tools.render_ledger import title_entry
@@ -95,7 +95,7 @@ def test_output_gain_changes_clipping_cost_but_not_peak_filter_gain(monkeypatch)
     assert low.offset_db < 0
     assert high.offset_db == pytest.approx(low.offset_db - 6, abs=1e-10)
     from tests.test_design_playback import material as broadband
-    from beqanalyser.design.diagnose import Diagnosis
+    from beqforge.diagnose import Diagnosis
 
     monkeypatch.setattr(pipeline, "judged_band_hz", lambda *args: (5, 200))
     candidate = pipeline._judge(
@@ -156,7 +156,7 @@ def test_record_and_ledger_preserve_assumptions_without_upgrading_legacy(
     monkeypatch, tmp_path
 ):
     from tests.test_design_playback import material
-    from beqanalyser.design.diagnose import Diagnosis
+    from beqforge.diagnose import Diagnosis
 
     model = PlaybackParams(crossover_hz=120, sub_lowpass_hz=None, sub_gain_db=6)
     params = pipeline.PipelineParams(playback=model, realisation=Realisation(fs=48000))

@@ -11,16 +11,16 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, "/home/matt/dev/github/3ll3d00d/beqanalyser")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import beqanalyser.design.filters as F  # noqa: E402
+import beqforge.filters as F  # noqa: E402
 import surrogate  # noqa: E402
 
 F._fit_structure = surrogate.surrogate_structure
 
-from beqanalyser.design import record  # noqa: E402
-from beqanalyser.design.material import load  # noqa: E402
-from beqanalyser.design.pipeline import PipelineParams, run  # noqa: E402
+from beqforge import record  # noqa: E402
+from beqforge.material import load  # noqa: E402
+from beqforge.pipeline import PipelineParams, run  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 out = Path(sys.argv[1])

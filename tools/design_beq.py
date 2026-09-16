@@ -24,9 +24,9 @@ import numpy as np
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqanalyser.design.material import load  # noqa: E402
-from beqanalyser.design.filters import Realisation  # noqa: E402
-from beqanalyser.design.pipeline import (  # noqa: E402
+from beqforge.material import load  # noqa: E402
+from beqforge.filters import Realisation  # noqa: E402
+from beqforge.pipeline import (  # noqa: E402
     STRATEGIES,
     PipelineParams,
     Report,
@@ -364,7 +364,7 @@ def main() -> int:
                 f"have {', '.join(sorted(STRATEGIES))}"
             )
         strategies = tuple(chosen)
-    from beqanalyser.design.material import PlaybackParams
+    from beqforge.material import PlaybackParams
 
     try:
         lowpass = (
@@ -415,7 +415,7 @@ def main() -> int:
         if abs(channel.passband_share) >= CHART_RELEVANCE_SHARE
     ]
     if args.charts:
-        from beqanalyser.design.charts import render
+        from beqforge.charts import render
 
         out = args.charts / material.name
         for candidate in report.candidates:
@@ -430,7 +430,7 @@ def main() -> int:
         print(f"\n  charts written to {out}/")
 
     if not args.no_record:
-        from beqanalyser.design import record
+        from beqforge import record
 
         curves = record.curves_from(
             material,

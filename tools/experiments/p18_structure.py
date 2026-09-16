@@ -19,7 +19,7 @@ get fitted.
 import time
 
 
-import beqanalyser.design.filters as F
+import beqforge.filters as F
 import greedy as greedy_module
 
 

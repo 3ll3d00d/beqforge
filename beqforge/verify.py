@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy import fft, signal
 
-from beqanalyser.design import DESIGN_GRID, BiquadSpec
-from beqanalyser.design.diagnose import DiagnoseParams, plateau_reference
-from beqanalyser.design.filters import (
+from beqforge import DESIGN_GRID, BiquadSpec
+from beqforge.diagnose import DiagnoseParams, plateau_reference
+from beqforge.filters import (
     Realisation,
     biquad_sos,
     magnitude_db,
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 if (
     TYPE_CHECKING
 ):  # `accept` imports `Correction` from here, so this stays one-directional
-    from beqanalyser.design.accept import AcceptParams
+    from beqforge.accept import AcceptParams
 
 
 def device_error_db(
@@ -335,7 +335,7 @@ class Correction:
         `accept` on a candidate whose target was clipped to less than the full deficit, rather
         than warning on a correction that did exactly what the evidence licensed.
         """
-        from beqanalyser.design.accept import AcceptParams
+        from beqforge.accept import AcceptParams
 
         params = params or AcceptParams()
         spread_margin_db = params.spread_margin_db

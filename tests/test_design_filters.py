@@ -10,15 +10,15 @@ import math
 import numpy as np
 import pytest
 
-from beqanalyser.design import (
+from beqforge import (
     BIQUAD_BUDGET,
     Alignment,
     BiquadSpec,
     ExactInversionUnavailable,
     HighPass,
 )
-import beqanalyser.design.filters as F
-from beqanalyser.design.filters import (
+import beqforge.filters as F
+from beqforge.filters import (
     Realisation,
     biquad_sos,
     correction_band_hz,
@@ -629,7 +629,7 @@ def test_placement_reaches_far_up_and_not_at_all_down() -> None:
     once placement stopped being a fixed literal: its sections fell to 7.7 Hz and drifted 5.04 dB
     under publication rounding against a 3.0 limit.
     """
-    from beqanalyser.design.filters import WIDEN_OCTAVES, correction_band_hz
+    from beqforge.filters import WIDEN_OCTAVES, correction_band_hz
 
     # a correction living over 8-15 Hz, with an evidence floor at 5
     target = np.where((FREQS >= 8.0) & (FREQS <= 15.0), 10.0, 0.0)

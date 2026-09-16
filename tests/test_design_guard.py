@@ -15,14 +15,14 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design.diagnose import (
+from beqforge.diagnose import (
     DiagnoseParams,
     _octave_bands,
     band_tracking,
     diagnose,
 )
-from beqanalyser.design.extraction import extract
-from beqanalyser.design.pipeline import DESIGN_GRID, PipelineParams, flatten_targets
+from beqforge.extraction import extract
+from beqforge.pipeline import DESIGN_GRID, PipelineParams, flatten_targets
 from tests.test_design_diagnose import FS, high_passed, material_from, scened_noise
 
 PARAMS = DiagnoseParams()
@@ -176,7 +176,7 @@ def test_an_unmeasurable_band_terminates_the_search() -> None:
     """
     material = material_from({"C": masked_knee(-26.0), "LFE": masked_knee(-26.0, 60)})
     with mock.patch(
-        "beqanalyser.design.diagnose.band_tracking", return_value=float("nan")
+        "beqforge.diagnose.band_tracking", return_value=float("nan")
     ):
         result = diagnose(material)
     assert not np.isnan(result.noise_floor_hz), (

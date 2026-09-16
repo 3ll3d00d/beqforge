@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design.diagnose import (
+from beqforge.diagnose import (
     DiagnoseParams,
     band_slope,
     band_tracking,
@@ -13,7 +13,7 @@ from beqanalyser.design.diagnose import (
     steepest_slope,
     stratified_response,
 )
-from beqanalyser.design.material import Material
+from beqforge.material import Material
 
 FS = 1000.0
 DURATION_S = 600.0
@@ -86,7 +86,7 @@ def test_steepest_slope_finds_a_wall_a_band_slope_misses() -> None:
 
 
 def material_from(channels: dict[str, np.ndarray]) -> Material:
-    from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN
+    from beqforge.material import LFE_GAIN, MAIN_GAIN
 
     mix = sum(
         (LFE_GAIN if name == "LFE" else MAIN_GAIN) * data
@@ -172,7 +172,7 @@ def test_the_filter_floor_is_searched_down_from_the_passband() -> None:
     )
     result = diagnose(material)
     # The combined source changes shape across strata despite the fixed LFE filter.
-    from beqanalyser.design.diagnose import plateau_reference
+    from beqforge.diagnose import plateau_reference
 
     _, plateau = plateau_reference(result.mix_db, result.freqs, PARAMS)
     assert result.filter_floor_hz <= plateau[0]
@@ -211,7 +211,7 @@ def test_the_passband_envelope_is_the_same_however_it_is_obtained() -> None:
     Both have to be the same number, or hoisting it changed the measurement rather than
     just when it was taken.
     """
-    from beqanalyser.design.diagnose import band_tracking, scene_envelope
+    from beqforge.diagnose import band_tracking, scene_envelope
 
     samples = scened_noise(7, int(FS * 120.0))
     params = DiagnoseParams()
@@ -232,7 +232,7 @@ def test_the_passband_envelope_is_the_same_however_it_is_obtained() -> None:
 
 def test_shares_are_the_same_whether_or_not_the_spectra_are_supplied() -> None:
     """`diagnose` already has every channel's spectrum; taking it twice was half its Welch."""
-    from beqanalyser.design.diagnose import mean_spectrum, mix_shares
+    from beqforge.diagnose import mean_spectrum, mix_shares
 
     material = material_from(
         {
@@ -258,7 +258,7 @@ def test_the_moving_average_matches_the_convolution_it_replaces() -> None:
     the prefix sum accumulates rounding over the whole signal where the convolution accumulates
     it over one window. The bound here is what that costs on a realistic length.
     """
-    from beqanalyser.design.diagnose import _moving_average
+    from beqforge.diagnose import _moving_average
 
     rng = np.random.default_rng(0)
     for length, width in ((10_000, 400), (250_000, 4_000)):
@@ -270,7 +270,7 @@ def test_the_moving_average_matches_the_convolution_it_replaces() -> None:
 
 
 def test_the_moving_average_handles_degenerate_widths() -> None:
-    from beqanalyser.design.diagnose import _moving_average
+    from beqforge.diagnose import _moving_average
 
     values = np.arange(5.0)
     assert np.array_equal(_moving_average(values, 1), values)

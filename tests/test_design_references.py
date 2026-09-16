@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from beqanalyser.design.diagnose import (
+from beqforge.diagnose import (
     DiagnoseParams,
     REFERENCE_POINTS,
     _trim_to_flat_subwindow,
@@ -117,10 +117,10 @@ def test_reference_level_is_median_of_selected_log_region():
 
 def test_construction_and_verification_share_reference(monkeypatch):
     import importlib
-    from beqanalyser.design import pipeline
-    from beqanalyser.design.material import Material
+    from beqforge import pipeline
+    from beqforge.material import Material
 
-    verification = importlib.import_module("beqanalyser.design.verify")
+    verification = importlib.import_module("beqforge.verify")
     freqs = np.linspace(0.25, 500, 2000)
     curve = np.where(freqs < 30, -12.0, 0.0)
     curve[freqs > 120] = -20.0
@@ -130,13 +130,13 @@ def test_construction_and_verification_share_reference(monkeypatch):
         pipeline, "priced_by_evidence", lambda target, *args: (target, [])
     )
     material = Material("reference", 1000, np.ones(5000), {}, "complete_programme")
-    from beqanalyser.design.diagnose import Diagnosis
+    from beqforge.diagnose import Diagnosis
 
     diagnosis = Diagnosis(freqs, curve, {})
     proposals = pipeline.flatten_targets(
         material, diagnosis, None, None, pipeline.PipelineParams()
     )
-    from beqanalyser.design import BiquadSpec
+    from beqforge import BiquadSpec
 
     correction = verification.verify(
         [BiquadSpec("low_shelf", 30, 0, 0.707)], material.mono_mix, 1000

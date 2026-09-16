@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import optimize, signal
 
-from beqanalyser import HighShelf, LowShelf, PeakingEQ
-from beqanalyser.design import (
+from beqforge.biquad import HighShelf, LowShelf, PeakingEQ
+from beqforge import (
     Alignment,
     BiquadSpec,
     ExactInversionUnavailable,
@@ -197,11 +197,10 @@ def _sos_from_parameters(
     an array. Once per published cascade that is free; ten million times a run it is a fifth of
     the cost function.
 
-    The formulae are `beqanalyser/__init__.py`'s, and that is where they are documented and
-    where they are authoritative — AGENTS.md's warning that the RBJ formulae exist twice and
-    must be fixed together now covers three copies rather than two. The test asserting the two
-    agree exactly is what keeps that honest, and the rounding of `gain` to three decimals is
-    reproduced because `BiquadWithQGain` does it and the coefficients would otherwise differ.
+    The formulae are `biquad.py`'s, and that is where they are documented and where they are
+    authoritative — this is a second copy, kept honest by the test asserting the two agree
+    exactly. The rounding of `gain` to three decimals is reproduced because `BiquadWithQGain`
+    does it and the coefficients would otherwise differ.
     """
     rows = np.asarray(params, dtype=np.float64).reshape(shelves + peaks, 3)
     out = np.empty((shelves + peaks, 6), dtype=np.float64)

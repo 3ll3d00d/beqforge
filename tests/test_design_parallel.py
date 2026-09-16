@@ -10,7 +10,7 @@ import math
 
 import numpy as np
 
-from beqanalyser.design import filters as F
+import beqforge.filters as F
 
 
 def shelf_target() -> tuple[np.ndarray, np.ndarray]:

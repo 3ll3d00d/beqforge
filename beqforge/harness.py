@@ -20,9 +20,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
-from beqanalyser import PeakingEQ
-from beqanalyser.design import Alignment, HighPass
-from beqanalyser.design.filters import high_pass_sos
+from beqforge.biquad import PeakingEQ
+from beqforge import Alignment, HighPass
+from beqforge.filters import high_pass_sos
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class EvidenceCase:
     coverage: str = "complete_programme"
 
     def material(self):
-        from beqanalyser.design.material import LFE_GAIN, Material
+        from beqforge.material import LFE_GAIN, Material
 
         samples = self.content + self.noise
         return Material(
@@ -241,8 +241,8 @@ def score_evidence_case(case: EvidenceCase, report, params) -> dict:
     False acceptance means *any* selected intervention on a constructed negative, even if
     the output carefully qualifies its claims. Recovery truth never enters selection.
     """
-    from beqanalyser.design.diagnose import mean_spectrum
-    from beqanalyser.design.filters import biquad_sos, magnitude_db, publication_filters
+    from beqforge.diagnose import mean_spectrum
+    from beqforge.filters import biquad_sos, magnitude_db, publication_filters
 
     selected = report.accepted
     negative = case.injected is None

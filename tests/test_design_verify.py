@@ -8,10 +8,10 @@ uses: a correct rolloff correction leaves the low end flat, or mildly rising at 
 import numpy as np
 import pytest
 
-from beqanalyser.design import Alignment, BiquadSpec, HighPass
-from beqanalyser.design.filters import invert_to_shelves
-from beqanalyser.design.harness import SyntheticProfile, apply_high_pass, synthesise
-from beqanalyser.design.verify import Correction, verify
+from beqforge import Alignment, BiquadSpec, HighPass
+from beqforge.filters import invert_to_shelves
+from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
+from beqforge.verify import Correction, verify
 
 FS = 1000.0
 
@@ -117,7 +117,7 @@ def test_the_smoke_test_takes_its_thresholds_from_the_acceptance_model() -> None
     """
     import dataclasses
 
-    from beqanalyser.design.accept import AcceptParams
+    from beqforge.accept import AcceptParams
 
     hot = _flat(2.5)
     assert not any("above the shape asked for" in c for c in hot.concerns())

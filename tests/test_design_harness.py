@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import Alignment, HighPass
-from beqanalyser.design.filters import high_pass_sos, magnitude_db
-from beqanalyser.design.harness import (
+from beqforge import Alignment, HighPass
+from beqforge.filters import high_pass_sos, magnitude_db
+from beqforge.harness import (
     SyntheticProfile,
     apply_high_pass,
     injection_sweep,
@@ -108,7 +108,7 @@ def test_material_round_trips_through_the_extractor(tmp_path) -> None:
     """`tools/extract.py` is how material arrives; the loader must reproduce §2's shapes."""
     import subprocess
 
-    from beqanalyser.design.material import load
+    from beqforge.material import load
 
     source = tmp_path / "probe.wav"
     subprocess.run(

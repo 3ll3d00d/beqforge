@@ -6,18 +6,18 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID, pipeline, record
-from beqanalyser.design.accept import assess
-from beqanalyser.design.diagnose import Diagnosis, plateau_reference, DiagnoseParams
-from beqanalyser.design.filters import Realisation, biquad_sos, magnitude_db
-from beqanalyser.design.material import (
+from beqforge import BiquadSpec, DESIGN_GRID, pipeline, record
+from beqforge.accept import assess
+from beqforge.diagnose import Diagnosis, plateau_reference, DiagnoseParams
+from beqforge.filters import Realisation, biquad_sos, magnitude_db
+from beqforge.material import (
     Material,
     PlaybackParams,
     bass_managed_sum,
     MAIN_GAIN,
     LFE_GAIN,
 )
-from beqanalyser.design.verify import verify, device_waveform, _mean_db
+from beqforge.verify import verify, device_waveform, _mean_db
 
 
 def material(phase=0.0):

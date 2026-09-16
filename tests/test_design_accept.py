@@ -8,14 +8,14 @@ construct that case directly rather than relying on real material to produce it.
 import numpy as np
 import pytest
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.accept import (
+from beqforge import BiquadSpec
+from beqforge.accept import (
     AcceptParams,
     assess,
     corrected_extent_hz,
     worst_gradient,
 )
-from beqanalyser.design.verify import Correction
+from beqforge.verify import Correction
 
 FREQS = np.logspace(np.log10(4.0), np.log10(60.0), 240)
 BAND = (5.0, 45.0)
@@ -157,7 +157,7 @@ def test_spread_is_judged_against_the_material_not_a_constant() -> None:
     All three real titles depart from a smooth trend by 5.8-6.7 dB, so an absolute limit near
     6 dB sits on the floor of what is achievable and fails correct answers.
     """
-    from beqanalyser.design.accept import spectral_roughness
+    from beqforge.accept import spectral_roughness
 
     def wobble(f):
         return 3.2 * np.sin(np.log2(f / 5.0) * 4.0)
@@ -180,8 +180,8 @@ def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
     """A cancelling cascade can measure well at the optimiser's exact output and badly once
     published. Two shelves that do not fight each other must stay tight under the same jitter.
     """
-    from beqanalyser.design.filters import drift_distribution
-    from beqanalyser.design.filters import Realisation
+    from beqforge.filters import drift_distribution
+    from beqforge.filters import Realisation
 
     grid = np.logspace(np.log10(3.0), np.log10(400.0), 400)
     realisation = Realisation()
@@ -217,7 +217,7 @@ def test_a_turnover_is_rejected_though_the_overall_tilt_looks_fine() -> None:
     14 dB across the band, which *is* a fall of 4.41 dB/octave toward the bottom, and the
     candidate leaving 4.19 there was being rejected for very slightly improving on it.
     """
-    from beqanalyser.design.accept import turnover_db_per_octave
+    from beqforge.accept import turnover_db_per_octave
 
     # peaks near 18 Hz, falls away below it, and falls again above it steeply enough that a
     # single fit across the whole band nets out to almost nothing
@@ -259,7 +259,7 @@ def test_a_turnover_is_rejected_though_the_overall_tilt_looks_fine() -> None:
 
 
 def test_a_monotone_correction_has_no_turnover() -> None:
-    from beqanalyser.design.accept import turnover_db_per_octave
+    from beqforge.accept import turnover_db_per_octave
 
     flat = correction(lambda f: -13.0, lambda f: -1.0 - 0.4 * np.log2(f / 5.0))
     slope, _, _ = turnover_db_per_octave(flat, AcceptParams())
@@ -268,7 +268,7 @@ def test_a_monotone_correction_has_no_turnover() -> None:
 
 def test_under_correction_is_not_reported_as_a_turnover() -> None:
     """A peak at the band's top edge is plain under-correction, which tilt already reports."""
-    from beqanalyser.design.accept import turnover_db_per_octave
+    from beqforge.accept import turnover_db_per_octave
 
     sagging = correction(lambda f: -16.0, lambda f: 2.0 - 2.5 * np.log2(45.0 / f))
     slope, _, _ = turnover_db_per_octave(sagging, AcceptParams())
@@ -343,7 +343,7 @@ def test_flatness_does_not_re_charge_a_correction_for_its_tilt() -> None:
     judgement the tilt clause had already made — and on material with real wobble the two
     together could reject a correction neither objected to on its own.
     """
-    from beqanalyser.design.accept import corrected_wobble, spectral_roughness
+    from beqforge.accept import corrected_wobble, spectral_roughness
 
     smooth_rise = correction(lambda f: -13.0, lambda f: -1.7 * np.log2(f / 15.0))
     assert smooth_rise.spread_db > 4.0, "the tilt alone should span several dB"
@@ -366,7 +366,7 @@ def test_the_turnover_peak_is_located_on_a_smoothed_curve() -> None:
     a raw `argmax` locates a bin rather than a peak. On the third title's corrected curve the
     raw argmax read the turnover as +0.00 dB/oct and the smoothed one as +1.70.
     """
-    from beqanalyser.design.accept import turnover_db_per_octave
+    from beqforge.accept import turnover_db_per_octave
 
     # a genuine turnover: rising to a peak at ~18 Hz, then falling away below it
     shape = curve(lambda f: -4.0 * abs(np.log2(f / 18.0)))
@@ -437,7 +437,7 @@ def test_the_material_baseline_survives_a_peak_at_the_band_s_top_edge() -> None:
     Nocturnal Animals' restored candidate was rejected on that reading, at 2.31 against a
     material that falls 5.27 dB/octave over the same segment.
     """
-    from beqanalyser.design.accept import turnover_db_per_octave
+    from beqforge.accept import turnover_db_per_octave
 
     # material rising monotonically to the top of the band: its own argmax is the last bin
     rising = correction(
@@ -579,8 +579,8 @@ def test_device_stability_is_required_even_when_the_corrected_shape_passes(
 ) -> None:
     from scipy import signal
 
-    from beqanalyser.design.filters import Realisation, biquad_sos
-    from beqanalyser.design.verify import verify
+    from beqforge.filters import Realisation, biquad_sos
+    from beqforge.verify import verify
 
     filters = [BiquadSpec("low_shelf", corner_hz, 20.0, 0.7)]
     device = Realisation()

@@ -5,16 +5,16 @@ import importlib
 import numpy as np
 import pytest
 
-from beqanalyser.design import BiquadSpec, DESIGN_GRID
-from beqanalyser.design.diagnose import (
+from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge.diagnose import (
     DiagnoseParams,
     Diagnosis,
     plateau_reference,
     smooth_unexcluded,
     unexcluded,
 )
-from beqanalyser.design.material import Material
-from beqanalyser.design import pipeline
+from beqforge.material import Material
+from beqforge import pipeline
 
 BANDS = ((65.0, 75.0), (90.0, 95.0))
 
@@ -41,7 +41,7 @@ def test_multiple_exclusions_split_plateau_without_moving_level():
 def test_excluded_peak_cannot_move_flatten_target_judged_extent_or_verification(
     monkeypatch,
 ):
-    verification = importlib.import_module("beqanalyser.design.verify")
+    verification = importlib.import_module("beqforge.verify")
     material = Material("omissions", 1000, np.ones(5000), {}, "complete_programme")
     params = pipeline.PipelineParams(exclude_bands_hz=BANDS)
     monkeypatch.setattr(
@@ -85,13 +85,13 @@ def test_smoothing_does_not_bridge_excluded_intervals():
 def test_no_reference_and_fragmented_judgement_are_explicit():
     freqs, values = spectrum(0)
     assert np.isnan(plateau_reference(values, freqs, DiagnoseParams(), ((4, 200),))[0])
-    verification = importlib.import_module("beqanalyser.design.verify")
+    verification = importlib.import_module("beqforge.verify")
     with pytest.raises(ValueError, match="fragment"):
         verification.verify([], np.ones(5000), 1000, exclude_bands_hz=((12, 20),))
 
 
 def test_excluded_power_cannot_choose_scenes_or_coherence(monkeypatch):
-    extraction = importlib.import_module("beqanalyser.design.extraction")
+    extraction = importlib.import_module("beqforge.extraction")
     freqs = np.arange(5.0, 151.0)
     rng = np.random.default_rng(14)
     power = np.exp(rng.normal(size=(len(freqs), 100)))
@@ -157,7 +157,7 @@ def test_sub_bin_exclusion_still_splits_reference():
 
 def test_counterfactual_does_not_restore_an_excluded_feature():
     from dataclasses import replace
-    from beqanalyser.design.diagnose import ChannelDiagnosis, mean_spectrum
+    from beqforge.diagnose import ChannelDiagnosis, mean_spectrum
 
     rng = np.random.default_rng(80)
     samples = rng.normal(size=10000)

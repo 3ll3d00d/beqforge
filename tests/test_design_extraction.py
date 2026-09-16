@@ -18,10 +18,10 @@ import dataclasses
 import numpy as np
 import pytest
 
-from beqanalyser.design import Alignment, HighPass
-from beqanalyser.design.extraction import ExtractionParams, extract
-from beqanalyser.design.filters import high_pass_sos, magnitude_db
-from beqanalyser.design.harness import SyntheticProfile, apply_high_pass, synthesise
+from beqforge import Alignment, HighPass
+from beqforge.extraction import ExtractionParams, extract
+from beqforge.filters import high_pass_sos, magnitude_db
+from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
 FS = 1000.0
 RECOVERY_BAND = (8.0, 63.0)
@@ -168,7 +168,7 @@ def test_every_analysed_bin_is_priced_against_its_own_evidence() -> None:
 
 def test_chunking_the_bootstrap_cannot_change_what_it_returns() -> None:
     """Memory bound only: the replicate indices are shared across bins by construction."""
-    from beqanalyser.design import extraction
+    from beqforge import extraction
 
     samples = synthesise(
         SyntheticProfile(duration_s=300.0, event_rate_hz=0.08), FS, seed=11

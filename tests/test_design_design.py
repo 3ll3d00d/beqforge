@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 
-from beqanalyser.design import DESIGN_GRID, Alignment, HighPass
-from beqanalyser.design.design import DesignParams, design
-from beqanalyser.design.extraction import Envelopes
-from beqanalyser.design.identify import Identification
-from beqanalyser.design.rolloff import DB_PER_OCTAVE_PER_ORDER, RolloffFit
+from beqforge import DESIGN_GRID, Alignment, HighPass
+from beqforge.design import DesignParams, design
+from beqforge.extraction import Envelopes
+from beqforge.identify import Identification
+from beqforge.rolloff import DB_PER_OCTAVE_PER_ORDER, RolloffFit
 
 
 def identified_rolloff() -> Identification:
@@ -51,9 +51,9 @@ def test_exact_inversion_is_used_only_when_the_evidence_licenses_it(ceiling, met
 def test_uncertain_bins_withhold_boost_without_introducing_cuts(route):
     from dataclasses import replace
 
-    from beqanalyser.design.design import _fitted_target, _noise_ceiling
-    from beqanalyser.design.diagnose import Diagnosis
-    from beqanalyser.design.pipeline import PipelineParams, priced_by_evidence
+    from beqforge.design import _fitted_target, _noise_ceiling
+    from beqforge.diagnose import Diagnosis
+    from beqforge.pipeline import PipelineParams, priced_by_evidence
 
     envelopes = envelopes_with_margin(2.0)
     uncertain = DESIGN_GRID < 15.0

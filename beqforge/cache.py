@@ -47,12 +47,12 @@ from typing import Any
 
 import numpy as np
 
-from beqanalyser.design import Alignment, BiquadSpec, HighPass
-from beqanalyser.design.diagnose import ChannelDiagnosis, Diagnosis
-from beqanalyser.design.extraction import Envelopes
-from beqanalyser.design.identify import Identification
-from beqanalyser.design.material import Material
-from beqanalyser.design.rolloff import RolloffFit
+from beqforge import Alignment, BiquadSpec, HighPass
+from beqforge.diagnose import ChannelDiagnosis, Diagnosis
+from beqforge.extraction import Envelopes
+from beqforge.identify import Identification
+from beqforge.material import Material
+from beqforge.rolloff import RolloffFit
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,12 @@ SCHEMA = 2
 """Bumped when a stored field changes meaning. A mismatch is a miss, never an error."""
 
 ANALYSIS_MODULES = (
-    "design/__init__.py",
-    "design/diagnose.py",
-    "design/extraction.py",
-    "design/identify.py",
-    "design/material.py",
-    "design/rolloff.py",
+    "__init__.py",
+    "diagnose.py",
+    "extraction.py",
+    "identify.py",
+    "material.py",
+    "rolloff.py",
 )
 """What `diagnose`, `extract` and `identify_rolloff` are computed by.
 
@@ -75,18 +75,17 @@ analysis valid across an afternoon's work on the fitter.
 """
 
 PARAMETRIC_MODULES = ANALYSIS_MODULES + (
-    "__init__.py",
-    "design/design.py",
-    "design/filters.py",
-    "design/pipeline.py",
+    "biquad.py",
+    "design.py",
+    "filters.py",
+    "pipeline.py",
 )
 """What a parametric proposal is computed by — the analysis, plus the inversion and the fit.
 
-`__init__.py` here is the **package root**, not `design/__init__.py`. `filters.py` imports
-`LowShelf`, `HighShelf` and `PeakingEQ` from it, so the RBJ formulae that produce every
-published cascade live outside `design/` entirely. Both this stage and the record source
-fingerprint include them. The analysis does not depend on them and stays reusable when
-only the RBJ arithmetic or fitting changes.
+`biquad.py` is here because `filters.py` imports `LowShelf`, `HighShelf` and `PeakingEQ` from
+it — the RBJ formulae that produce every published cascade. Both this stage and the record
+source fingerprint include it. The analysis does not depend on it and stays reusable when only
+the RBJ arithmetic or fitting changes.
 
 `pipeline.py` is here because `parametric_targets` lives in it and builds the `DesignParams`.
 It over-invalidates — editing `counterfactual_target` drops a parametric proposal that did not
@@ -95,7 +94,7 @@ depend on it — and that is the right direction to be wrong in.
 
 
 def _package_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent
 
 
 def digest_of(modules: tuple[str, ...]) -> str:

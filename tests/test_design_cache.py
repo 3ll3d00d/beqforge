@@ -15,14 +15,14 @@ import math
 import numpy as np
 import pytest
 
-from beqanalyser.design import Alignment, BiquadSpec, HighPass
-from beqanalyser.design import cache as C
-from beqanalyser.design.diagnose import ChannelDiagnosis, Diagnosis, DiagnoseParams
-from beqanalyser.design.extraction import Envelopes, ExtractionParams
-from beqanalyser.design.identify import Identification, IdentifyParams
-from beqanalyser.design.material import Material
-from beqanalyser.design.pipeline import STRATEGIES, Proposal
-from beqanalyser.design.rolloff import RolloffFit
+from beqforge import Alignment, BiquadSpec, HighPass
+from beqforge import cache as C
+from beqforge.diagnose import ChannelDiagnosis, Diagnosis, DiagnoseParams
+from beqforge.extraction import Envelopes, ExtractionParams
+from beqforge.identify import Identification, IdentifyParams
+from beqforge.material import Material
+from beqforge.pipeline import STRATEGIES, Proposal
+from beqforge.rolloff import RolloffFit
 
 
 def material(seed: int = 0) -> Material:
@@ -224,22 +224,22 @@ def test_the_module_sets_name_what_each_stage_is_computed_by() -> None:
     """The key's correctness argument, asserted rather than left to a comment.
 
     A module a stage can reach and that is not listed leaves a stale answer looking fresh.
-    `filters.py` reaches the *package root* for its RBJ classes, which is why the parametric
-    set carries a bare `__init__.py` as well as `design/__init__.py`.
+    `filters.py` reaches `biquad.py` for its RBJ classes, which is why the parametric set
+    carries it in addition to everything the analysis reaches.
     """
     assert set(C.ANALYSIS_MODULES) == {
-        "design/__init__.py",
-        "design/diagnose.py",
-        "design/extraction.py",
-        "design/identify.py",
-        "design/material.py",
-        "design/rolloff.py",
+        "__init__.py",
+        "diagnose.py",
+        "extraction.py",
+        "identify.py",
+        "material.py",
+        "rolloff.py",
     }
     assert set(C.PARAMETRIC_MODULES) >= set(C.ANALYSIS_MODULES) | {
-        "__init__.py",
-        "design/design.py",
-        "design/filters.py",
-        "design/pipeline.py",
+        "biquad.py",
+        "design.py",
+        "filters.py",
+        "pipeline.py",
     }
     for name in C.ANALYSIS_MODULES + C.PARAMETRIC_MODULES:
         assert (C._package_root() / name).is_file(), name

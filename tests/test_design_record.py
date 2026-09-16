@@ -24,7 +24,7 @@ import math
 
 import pytest
 
-from beqanalyser.design import beqd, record
+from beqforge import beqd, record
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def test_metadata_does_not_trip_their_loader(tmp_path, a_record) -> None:
     for signal in _written(tmp_path, a_record):
         if "metadata" in signal:
             assert signal["metadata"]["src"] == ""
-            assert "beqanalyser" in signal["metadata"]
+            assert "beqforge" in signal["metadata"]
 
 
 def test_an_unknown_filter_type_is_refused_rather_than_guessed(
@@ -274,7 +274,7 @@ def test_ledger_entry_for_no_candidate_is_strict_json(a_record):
 
 @pytest.fixture
 def replay_document(tmp_path, a_record):
-    from beqanalyser.design.pipeline import PipelineParams
+    from beqforge.pipeline import PipelineParams
 
     material = tmp_path / "demo.npz"
     material.write_bytes(b"original material")

@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from beqanalyser.design import DESIGN_GRID, BiquadSpec
-from beqanalyser.design.filters import (
+from beqforge import DESIGN_GRID, BiquadSpec
+from beqforge.filters import (
     Realisation,
     publication_filters,
     unstable_sections,
@@ -30,7 +30,7 @@ from beqanalyser.design.filters import (
     drift_distribution,
     magnitude_db,
 )
-from beqanalyser.design.verify import Correction
+from beqforge.verify import Correction
 
 logger = logging.getLogger(__name__)
 

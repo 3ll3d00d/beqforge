@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy import ndimage, signal
 
-from beqanalyser.design.material import Material
+from beqforge.material import Material
 
 if TYPE_CHECKING:
-    from beqanalyser.design.extraction import ExtractionParams
+    from beqforge.extraction import ExtractionParams
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +406,7 @@ def coherent_shares(
     material: Material,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Signed coherent contributions and temporal uncertainty. Cancellation may give >1 or <0."""
-    from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN
+    from beqforge.material import LFE_GAIN, MAIN_GAIN
 
     spectra = {
         name: _spectral_blocks(samples, material.fs)[1]
@@ -570,7 +570,7 @@ def diagnose(
     }
     shares, share_errors = coherent_shares(material)
     _, mix_plateau = plateau_reference(mix_db, freqs, params)
-    from beqanalyser.design.extraction import ExtractionParams, extract
+    from beqforge.extraction import ExtractionParams, extract
 
     extraction_params = extraction_params or ExtractionParams()
     extraction_params = replace(

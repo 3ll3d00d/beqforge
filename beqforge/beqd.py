@@ -31,8 +31,8 @@ from typing import Any
 
 import numpy as np
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import (
+from beqforge import BiquadSpec
+from beqforge.filters import (
     Realisation,
     publication_filters,
     unstable_sections,
@@ -174,7 +174,7 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
                     # before anything else; an empty string fails that cleanly, where a
                     # missing key raises and is logged as an exception on every load
                     "src": "",
-                    "beqanalyser": {
+                    "beqforge": {
                         "accepted": bool(verdict["passed"]),
                         "failures": verdict["failures"],
                         "notes": verdict["notes"] + candidate["target_notes"],

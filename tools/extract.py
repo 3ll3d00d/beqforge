@@ -12,7 +12,7 @@ Writes `<name>.npz` holding `mono_mix`, per-channel arrays, `fs`, `coverage`, de
 `layout`, `source_layout` and `extraction_mapping` provenance. Unknown or missing layouts
 are refused: channel count alone cannot identify speakers. Legacy extractions need
 re-extraction or verification against their source; relabelling cannot repair a bad mix.
-Load it with `beqanalyser.design.material.load`.
+Load it with `beqforge.material.load`.
 
 One ffmpeg pass decodes every channel at 1 kHz and the mix is computed afterwards. `pan` and
 `aresample` are both linear, so mixing after decimation is equivalent to beqdesigner mixing
@@ -32,7 +32,7 @@ import numpy as np
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
+from beqforge.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
 
 logger = logging.getLogger("extract")
 

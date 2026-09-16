@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqanalyser.design import DESIGN_GRID
-from beqanalyser.design.diagnose import (
+from beqforge import DESIGN_GRID
+from beqforge.diagnose import (
     DiagnoseParams,
     coherent_shares,
     diagnose,
@@ -16,7 +16,7 @@ from beqanalyser.design.diagnose import (
     stratified_response,
     supported_mix_change,
 )
-from beqanalyser.design.pipeline import (
+from beqforge.pipeline import (
     PipelineParams,
     correction_evidence_score,
     counterfactual_target,
@@ -137,8 +137,8 @@ def test_level_invariance_cannot_distinguish_natural_colouring_from_mastering():
 
 
 def test_actual_noisy_channel_has_no_allowance_despite_clean_mix_events():
-    from beqanalyser.design.harness import evidence_cases
-    from beqanalyser.design.extraction import extract
+    from beqforge.harness import evidence_cases
+    from beqforge.extraction import extract
 
     case = next(evidence_cases(101))
     rng = np.random.default_rng(237)

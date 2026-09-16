@@ -32,9 +32,9 @@ from typing import Any
 
 import numpy as np
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import Realisation
-from beqanalyser.design.material import Material
+from beqforge import BiquadSpec
+from beqforge.filters import Realisation
+from beqforge.material import Material
 
 logger = logging.getLogger(__name__)
 
@@ -66,37 +66,37 @@ def _back(value: float | None) -> float:
 
 
 RECORD_SOURCE_FILES = (
-    "beqanalyser/__init__.py",
     "tools/extract.py",
     "tools/design_beq.py",
     "tools/replay.py",
     "tools/render_ledger.py",
     "tools/ledger_template.html",
 )
-"""Record/replay dependencies outside design/, relative to the repository root.
+"""Record/replay dependencies outside the `beqforge` package, relative to the repository root.
 
-The root package owns the RBJ arithmetic. The entry points extract material, configure runs,
-replay/export records and select/render ledger results; the template controls their display.
-All design modules are included separately, including newly added ones. This deliberately
-invalidates records on presentation edits too; a record claims what this code would produce.
+The entry points extract material, configure runs, replay/export records and select/render
+ledger results; the template controls their display. Every module under `beqforge/` — including
+`biquad.py`'s RBJ arithmetic — is included separately, including newly added ones. This
+deliberately invalidates records on presentation edits too; a record claims what this code would
+produce.
 
-Docs, tests, clustering-only modules, experiments and the standalone summariser are excluded
-from the content hash. Git revision/dirty status remains a conservative additional check, so
-an unrelated commit or the first dirty edit can still mark a record stale. Successive unrelated
-edits in an already-dirty tree do not change the content hash. Extracted data is fingerprinted
-separately by material_digest. This is a source fingerprint, not an installed-environment hash.
-Stage caches retain their narrower dependency lists in cache.py.
+Docs, tests, experiments and the standalone summariser are excluded from the content hash. Git
+revision/dirty status remains a conservative additional check, so an unrelated commit or the
+first dirty edit can still mark a record stale. Successive unrelated edits in an already-dirty
+tree do not change the content hash. Extracted data is fingerprinted separately by
+material_digest. This is a source fingerprint, not an installed-environment hash. Stage caches
+retain their narrower dependency lists in cache.py.
 """
 
 
 def _repository_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 def _source_paths(root: Path) -> tuple[Path, ...]:
     declared = {root / name for name in RECORD_SOURCE_FILES}
-    design_modules = set((root / "beqanalyser" / "design").rglob("*.py"))
-    return tuple(sorted(declared | design_modules))
+    package_modules = set((root / "beqforge").rglob("*.py"))
+    return tuple(sorted(declared | package_modules))
 
 
 def _source_digest() -> str:
@@ -404,9 +404,9 @@ def curves_from(
     filtered ones are the cross product and are what make a redraw exact rather than an
     approximation of what a magnitude model would have shown.
     """
-    from beqanalyser.design.charts import programme_levels_db
-    from beqanalyser.design.filters import unstable_sections
-    from beqanalyser.design.verify import device_waveform
+    from beqforge.charts import programme_levels_db
+    from beqforge.filters import unstable_sections
+    from beqforge.verify import device_waveform
 
     device = realisation or Realisation()
     fs = float(material.fs)

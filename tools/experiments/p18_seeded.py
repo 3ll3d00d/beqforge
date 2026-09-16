@@ -17,8 +17,8 @@ import time
 import numpy as np
 from scipy import optimize
 
-from beqanalyser.design import BiquadSpec
-from beqanalyser.design.filters import biquad_sos, magnitude_db
+from beqforge import BiquadSpec
+from beqforge.filters import biquad_sos, magnitude_db
 
 import greedy as greedy_module
 

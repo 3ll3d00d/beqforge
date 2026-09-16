@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import pytest
 
-from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN, load
+from beqforge.material import LFE_GAIN, MAIN_GAIN, load
 from tools.extract import channel_names, main
 
 

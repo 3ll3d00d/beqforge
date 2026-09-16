@@ -5,10 +5,10 @@ import math
 import numpy as np
 import pytest
 
-from beqanalyser.design import BiquadSpec, record
-from beqanalyser.design.accept import assess
-from beqanalyser.design.material import Material, bass_managed_sum
-from beqanalyser.design.pipeline import PipelineParams, required_gain_reduction_db
+from beqforge import BiquadSpec, record
+from beqforge.accept import assess
+from beqforge.material import Material, bass_managed_sum
+from beqforge.pipeline import PipelineParams, required_gain_reduction_db
 from tests.test_design_accept import correction
 from tools.design_beq import _headroom
 

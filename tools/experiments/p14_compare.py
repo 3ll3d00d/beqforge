@@ -8,8 +8,8 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-import beqanalyser.design.filters as F
-from beqanalyser.design.filters import Realisation
+import beqforge.filters as F
+from beqforge.filters import Realisation
 import surrogate
 
 GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)

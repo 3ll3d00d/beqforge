@@ -20,7 +20,7 @@ from scipy import signal
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqanalyser.design.material import Material, load  # noqa: E402
+from beqforge.material import Material, load  # noqa: E402
 
 BARS = " ▁▂▃▄▅▆▇█"
 

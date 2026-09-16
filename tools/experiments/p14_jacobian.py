@@ -37,7 +37,7 @@ The chain, for one section at evaluation frequency `f` with `w = 2*pi*f/fs`:
 
     ddB/dp = (10/ln10) * ( (d|N|^2/dp)/|N|^2 - (d|D|^2/dp)/|D|^2 )
 
-and `db_k/dp` comes from the RBJ formulae, which are quoted in `beqanalyser/__init__.py` on
+and `db_k/dp` comes from the RBJ formulae, which are quoted in `beqforge/biquad.py` on
 `PeakingEQ` and `LowShelf` and reproduced in the two functions below.
 
 **Verified against central differences** — see `tests/test_design_jacobian.py`. Hand-derived

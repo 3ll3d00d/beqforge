@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqanalyser.design.harness import evidence_cases, score_evidence_case  # noqa: E402
-from beqanalyser.design.pipeline import PipelineParams, run  # noqa: E402
+from beqforge.harness import evidence_cases, score_evidence_case  # noqa: E402
+from beqforge.pipeline import PipelineParams, run  # noqa: E402
 
 
 def main():

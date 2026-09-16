@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from beqanalyser.design import cache, record
+from beqforge import cache, record
 from tools import replay
 
 
@@ -42,7 +42,7 @@ def source_tree(tmp_path, monkeypatch):
         "fixture",
     )
     monkeypatch.setattr(record, "_repository_root", lambda: root)
-    monkeypatch.setattr(cache, "_package_root", lambda: root / "beqanalyser")
+    monkeypatch.setattr(cache, "_package_root", lambda: root / "beqforge")
     return root
 
 
@@ -67,7 +67,7 @@ def test_successive_rbj_edits_in_an_already_dirty_tree_are_distinct(source_tree)
     described = git(source_tree, "describe", "--always", "--dirty", "--abbrev=12")
     assert described.endswith("-dirty")
     revisions = [record._git_revision()]
-    rbj = source_tree / "beqanalyser" / "__init__.py"
+    rbj = source_tree / "beqforge" / "biquad.py"
     for edit in ("first RBJ edit", "second RBJ edit"):
         rbj.write_text(edit)
         assert (
@@ -87,10 +87,10 @@ def test_successive_rbj_edits_in_an_already_dirty_tree_are_distinct(source_tree)
 @pytest.mark.parametrize(
     "relative",
     [
-        "beqanalyser/design/filters.py",
-        "beqanalyser/design/accept.py",
-        "beqanalyser/design/charts.py",
-        "beqanalyser/design/beqd.py",
+        "beqforge/filters.py",
+        "beqforge/accept.py",
+        "beqforge/charts.py",
+        "beqforge/beqd.py",
         "tools/extract.py",
         "tools/design_beq.py",
         "tools/replay.py",
@@ -106,17 +106,21 @@ def test_record_arithmetic_and_presentation_dependencies_count(source_tree, rela
 
 def test_new_design_modules_and_removal_count(source_tree):
     before = record._source_digest()
-    module = source_tree / "beqanalyser/design/new_module.py"
+    module = source_tree / "beqforge/new_module.py"
     module.write_text("new arithmetic\n")
     assert record._source_digest() != before
     module.unlink()
     assert record._source_digest() == before
-    (source_tree / "beqanalyser/design/verify.py").unlink()
+    (source_tree / "beqforge/verify.py").unlink()
     assert record._source_digest() != before
 
 
 def test_missing_declared_dependency_cannot_silently_disappear(source_tree):
-    (source_tree / "beqanalyser/__init__.py").unlink()
+    # biquad.py is discovered via the beqforge/ rglob, not declared like the tools/
+    # entry points, so its removal is covered by test_new_design_modules_and_removal_count
+    # instead — this test is about a RECORD_SOURCE_FILES entry that stays listed even if
+    # deleted from disk.
+    (source_tree / "tools/extract.py").unlink()
     with pytest.raises(FileNotFoundError):
         record._source_digest()
 
@@ -128,7 +132,7 @@ def test_unrelated_edits_follow_the_documented_policy(source_tree):
     for relative in (
         "README.md",
         "tests/test_new.py",
-        "beqanalyser/analyser.py",
+        "docs/notes.md",
         "tools/experiments/new.py",
         "tools/summarise.py",
     ):
@@ -141,14 +145,14 @@ def test_unrelated_edits_follow_the_documented_policy(source_tree):
 def test_record_invalidation_does_not_evict_unaffected_analysis(source_tree):
     analysis = cache.digest_of(cache.ANALYSIS_MODULES)
     parametric = cache.digest_of(cache.PARAMETRIC_MODULES)
-    for relative in ("beqanalyser/__init__.py", "beqanalyser/design/filters.py"):
+    for relative in ("beqforge/biquad.py", "beqforge/filters.py"):
         (source_tree / relative).write_text("changed arithmetic\n")
         assert cache.digest_of(cache.ANALYSIS_MODULES) == analysis
         changed = cache.digest_of(cache.PARAMETRIC_MODULES)
         assert changed != parametric
         parametric = changed
     before = record._source_digest()
-    (source_tree / "beqanalyser/design/charts.py").write_text("changed chart\n")
+    (source_tree / "beqforge/charts.py").write_text("changed chart\n")
     assert record._source_digest() != before
     assert cache.digest_of(cache.ANALYSIS_MODULES) == analysis
     assert cache.digest_of(cache.PARAMETRIC_MODULES) == parametric
