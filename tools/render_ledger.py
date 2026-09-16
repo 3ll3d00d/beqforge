@@ -50,12 +50,19 @@ def _friendly_name(key: str) -> str:
     return key.replace("_", " ").title()
 
 
-def _featured_candidate(document: dict[str, Any]) -> dict[str, Any]:
-    """`document['accepted']`'s candidate, or the least-bad of the ones tried."""
+def _featured_candidate(document: dict[str, Any]) -> dict[str, Any] | None:
+    """`document['accepted']`'s candidate, the least-bad of the ones tried, or `None`.
+
+    `None` when no target ever cleared the pre-candidate blockers (§1's "no usable
+    contiguous mix plateau" and its siblings) — there is nothing to fit, so `candidates`
+    is empty rather than merely all-rejected.
+    """
     candidates = document["candidates"]
     accepted = document.get("accepted")
     if accepted is not None:
         return next(c for c in candidates if c["label"] == accepted)
+    if not candidates:
+        return None
     return min(
         candidates,
         key=lambda c: (
@@ -77,6 +84,32 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
     """One `TITLES` array entry, straight from a run record's own JSON."""
     key = document["material"]["name"]
     candidate = _featured_candidate(document)
+    if candidate is None:
+        return {
+            "headroom_summary": "unavailable — no candidate was ever constructed",
+            "headroom_assumptions": "No candidate reached the point a playback model applies to.",
+            "key": key,
+            "name": _friendly_name(key),
+            "material_path": document["fingerprint"]["material_path"],
+            "duration_s": document["material"]["duration_s"],
+            "status": "abstained",
+            "label": "none",
+            "sections": 0,
+            "candidate_count": 0,
+            "recovered": None,
+            "shaping": None,
+            "confidence": None,
+            "mv_adjust_db": None,
+            "offset_db": None,
+            "band": [float("nan"), float("nan")],
+            "filters": [],
+            "notes": [
+                {"text": text, "kind": "failure"}
+                for text in document.get("evidence_notes", [])
+            ],
+            "failures": [],
+            "has_channels": False,
+        }
     verdict = candidate["verdict"]
     notes = [
         {"text": text, "kind": _note_kind(text, "target")}
@@ -156,6 +189,10 @@ def render_title(
     entry = title_entry(document)
     out_dir = charts_dir / key
     render_cached(document, out_dir)
+    if entry["label"] == "none":
+        # Nothing was ever fitted, so `curves["filtered"]` is empty and no chart exists
+        # to redraw — there is no before/after to show, only the reasons in `entry["notes"]`.
+        return entry, {}
     slug = _slug(entry["label"])
     files = {
         f"{key}_mono.png": f"{key}/{slug}_mono.png",

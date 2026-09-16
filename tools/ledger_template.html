@@ -311,7 +311,7 @@
         <span class="card-title">${t.name}</span>
         <span class="status-pill" style="color:${statusColor};background:${statusBg}">${t.status}</span>
       </div>
-      <div class="card-label">${t.label} · ${t.sections} section${t.sections === 1 ? "" : "s"}</div>
+      <div class="card-label">${t.label === "none" ? "no candidate constructed" : `${t.label} · ${t.sections} section${t.sections === 1 ? "" : "s"}`}</div>
       <div class="bar-row">
         <span class="lbl">recover</span>
         <span class="bar-track"><span class="bar-fill" style="width:${(t.recovered ?? 0) * 100}%"></span></span>
@@ -341,6 +341,11 @@
 
     const noteItems = t.notes.map(n => `<li class="${n.kind}">${n.text}</li>`).join("");
     const failureItems = t.failures.map(f => `<li class="failure">${f}</li>`).join("");
+    const hasCandidate = t.label !== "none";
+    const bandText = Number.isFinite(t.band[0]) && Number.isFinite(t.band[1])
+      ? `over ${t.band[0].toFixed(1)}&ndash;${t.band[1].toFixed(1)} Hz`
+      : "no band was ever judged";
+    const gainText = t.mv_adjust_db == null ? "n/a" : `+${t.mv_adjust_db.toFixed(1)} dB`;
 
     const statusColor = t.status === "accepted" ? "var(--good)" : "var(--warn)";
     section.innerHTML = `
@@ -358,7 +363,7 @@
         <div class="metric">
           <div class="lbl">recovered fraction</div>
           <div class="big tnum">${fmtFrac(t.recovered)}</div>
-          <div class="sub">over ${t.band[0].toFixed(1)}&ndash;${t.band[1].toFixed(1)} Hz</div>
+          <div class="sub">${bandText}</div>
         </div>
         <div class="metric">
           <div class="lbl">evidence score (uncalibrated)</div>
@@ -367,12 +372,13 @@
         </div>
         <div class="metric">
           <div class="lbl">peak filter gain</div>
-          <div class="big tnum">+${t.mv_adjust_db.toFixed(1)} dB</div>
+          <div class="big tnum">${gainText}</div>
           <div class="sub">${t.headroom_summary}</div>
           <details><summary>Playback assumptions</summary>${t.headroom_assumptions}</details>
         </div>
       </div>
 
+      ${hasCandidate ? `
       <div class="charts" style="${t.has_channels ? "" : "grid-template-columns:1fr"}">
         <figure>
           <img src="${t.key}_mono.png" alt="${t.name} — summed mono mix, peak and average, before/after ${t.label}" loading="lazy">
@@ -389,7 +395,11 @@
         <caption>published cascade — ${t.label}</caption>
         <thead><tr><th>type</th><th>freq</th><th>gain</th><th>Q</th></tr></thead>
         <tbody>${rows}</tbody>
-      </table>
+      </table>` : `
+      <p style="color:var(--ink-muted);font-size:0.88rem;margin:4px 0 18px">
+        No candidate was ever constructed — every target was blocked before fitting began.
+        See the reasons below.
+      </p>`}
 
       ${failureItems ? `<ul class="notes">${failureItems}</ul>` : ""}
       ${noteItems ? `<ul class="notes">${noteItems}</ul>` : ""}

@@ -36,6 +36,11 @@ from beqanalyser.design.pipeline import (  # noqa: E402
 RULE = "=" * 78
 DECADES = (5, 8, 10, 13, 16, 20, 25, 31, 40, 50, 63)
 
+CHART_RELEVANCE_SHARE = 0.05
+"""Presentation-only: a channel needs this much |signed contribution| to earn its own
+chart trace and stored curve. Not a restoration-eligibility gate — those were removed
+from `DiagnoseParams` (R4/R5); this just keeps a near-silent channel off the picture."""
+
 
 def _row(label: str, values: list[str]) -> str:
     return f"  {label:<14s}" + "".join(f"{v:>8s}" for v in values)
@@ -407,7 +412,7 @@ def main() -> int:
     relevant = [
         name
         for name, channel in report.diagnosis.channels.items()
-        if channel.passband_share >= params.diagnose.min_passband_share
+        if abs(channel.passband_share) >= CHART_RELEVANCE_SHARE
     ]
     if args.charts:
         from beqanalyser.design.charts import render

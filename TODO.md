@@ -13,6 +13,47 @@ AGENTS.md remain in git history if a future decision needs to see the original w
 
 ## Automated design (`beqanalyser/design/`)
 
+### Just found: the first real-title rerun since R1-R12 landed (16 September 2026)
+
+Rerunning all eight titles surfaced two crashes (fixed below) and a result none of R1-R12's
+own validation had exercised: **only 4 of 8 titles now accept, down from 8 of 8.** Full
+before/after is on the published Correction Ledger artifact. Two fixes, already applied:
+
+* `tools/design_beq.py` computed a `relevant`-channels list using
+  `params.diagnose.min_passband_share`, a field R4/R5 deleted from `DiagnoseParams` — crashed
+  every run, `--charts` or not, since it also feeds the record's stored curves. Replaced with a
+  local, presentation-only `CHART_RELEVANCE_SHARE` constant; it does not feed any decision.
+* `tools/render_ledger.py`/`ledger_template.html` assumed every record has at least one
+  candidate (even a rejected one) to feature. R1's blockers can now stop a title before any
+  target is built at all, leaving `candidates: []` — a case eight-for-eight prior runs never
+  exercised. Both now render a "no candidate was ever constructed" state instead of crashing or
+  linking a 404 image.
+
+**Open finding, not yet fixed or explained: R8's plateau discovery (`reference_tolerance_db`
+3.0, `reference_max_slope_db_per_octave` 3.0, `reference_min_octaves` 1/3) finds no usable mix
+plateau at all on 3 of 8 titles — Blazing Saddles, Tron and Test 71 — each landing on "no usable
+contiguous mix plateau; restoration withheld".** This is the first time R8 has run against real
+titles rather than its synthetic/constructed fixtures (its own review entry says so explicitly).
+What makes this worth flagging rather than accepting quietly: Tron and Test 71 were the *two
+highest-confidence* results in the entire prior eight-title set (0.86 and 0.61 under the old
+score) — not marginal cases. A fourth title, Nocturnal Animals, separately now abstains on the
+`min_judge_octaves` guard (judged band collapsed to 0.5 octaves under the tighter, more accurate
+boundary) — that one looks like the guard correctly doing its job on a title that was always
+borderline (§13.4's own calibration used exactly this title). The plateau failures look
+different in kind: manual inspection of Tron's raw spectrum shows real structure (an LFE
+channel carrying 82-100% of the coherent low-frequency contribution, an unambiguous wall shape)
+with no obviously-implausible reason a reference shouldn't exist somewhere in it — but nothing
+in 4-200 Hz stays within 3 dB of the 90th percentile for a third of an octave at ≤3 dB/octave of
+trend. Two live possibilities, not distinguished yet: (a) real bass-heavy programme material is
+genuinely rougher than any fixture R8 was validated against, and the defaults need
+recalibrating against measurement rather than the synthetic cases that produced them, or (b)
+there's a real defect in the discovery algorithm this investigation didn't find. **Do not loosen
+`reference_tolerance_db`/`reference_max_slope_db_per_octave` to make these titles pass again
+without measuring why first** — that is exactly the "tune to preserve accepted titles" move the
+review process exists to prevent. Next step: plot Tron's raw mean spectrum against the
+discovery's intermediate `discovery`/`within` arrays and see which constraint is actually
+binding before touching a number.
+
 ### Do next — cheap: replaces a known-wrong constant with a measurement `diagnose` already makes
 
 1. **Derive `restore_caps_db` (currently a sweep of 25/35/45/50 dB) from `filter_floor_hz`
@@ -104,6 +145,11 @@ Deprioritised: `flatten` and `counterfactual` have produced every accepted filte
   because it's what lets a chart be read against a published catalogue one — a high
   percentile (99.9th) would remove the bias and break that comparison. Not affecting any
   decision path: `extraction.py`'s peak envelope is a 95th-percentile, not a maximum.
+* Cosmetic, low priority: many docstrings/comments across `beqanalyser/design/` and `tests/`
+  still cite bare section numbers (`§2.1`, `§14.2`, ...) left over from the retired
+  `AUTOMATED_DESIGN.md`. Only references naming the file by name were repointed when it was
+  removed; the bare numbers don't point anywhere now. Harmless — each citation sits next to a
+  self-contained explanation — but worth a pass to either drop them or repoint them at AGENTS.md.
 
 ### Standing validation-gap caveats (not action items — just don't forget them)
 
