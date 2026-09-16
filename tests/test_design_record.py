@@ -241,3 +241,64 @@ def test_ledger_preserves_unavailable_headroom(a_record):
         required_offset_db=None, recovered_fraction=None, shaping_fraction=None
     )
     assert title_entry(a_record)["offset_db"] is None
+
+
+@pytest.fixture
+def replay_document(tmp_path, a_record):
+    from beqanalyser.design.pipeline import PipelineParams
+
+    material = tmp_path / "demo.npz"
+    material.write_bytes(b"original material")
+    params = PipelineParams(strategies=("flatten",), exclude_bands_hz=((12.0, 14.0),))
+    a_record["fingerprint"] = record.Fingerprint(
+        schema=record.SCHEMA,
+        material_sha256=record.material_digest(material),
+        material_path=str(material),
+        params=repr(params),
+        revision=record._git_revision(),
+        written_at="2026-01-01T00:00:00+00:00",
+    ).to_json()
+    a_record["material"]["duration_s"] = 60.0
+    candidate = a_record["candidates"][0]
+    candidate["correction"] = {"band_hz": (5.0, 45.0)}
+    candidate["verdict"].update(
+        required_offset_db=0.0, recovered_fraction=None, shaping_fraction=None
+    )
+    return a_record
+
+
+@pytest.mark.parametrize("reader", ["replay", "ledger"])
+@pytest.mark.parametrize("changed", [None, "material", "revision", "schema"])
+def test_replay_uses_recorded_parameters_but_still_checks_provenance(
+    tmp_path, monkeypatch, replay_document, reader, changed
+):
+    from pathlib import Path
+
+    from tools import render_ledger, replay
+
+    fingerprint = replay_document["fingerprint"]
+    if changed == "material":
+        Path(fingerprint["material_path"]).write_bytes(b"different material")
+    elif changed == "revision":
+        fingerprint["revision"] = "old revision"
+    elif changed == "schema":
+        fingerprint["schema"] += 1
+    path = tmp_path / "demo.run.json.gz"
+    with gzip.open(path, "wt") as handle:
+        json.dump(replay_document, handle)
+    charts = tmp_path / "charts"
+    rendered = []
+
+    def render(document, destination):
+        rendered.append(document)
+        return []
+
+    if reader == "replay":
+        monkeypatch.setattr(replay, "render_cached", render)
+        monkeypatch.setattr(replay.sys, "argv", ["replay", str(path), "--charts", str(charts)])
+        assert replay.main() == (0 if changed is None else 2)
+    else:
+        monkeypatch.setattr(render_ledger, "render_cached", render)
+        result = render_ledger.render_title(path, charts, force=False)
+        assert (result is not None) == (changed is None)
+    assert bool(rendered) == (changed is None)

@@ -51,8 +51,9 @@ accepted, 1 when abstaining was the correct output — neither is an error. Key 
 
 **`tools/replay.py data/FILM.run.json.gz`** — redraws from the record alone, without touching
 the extraction. `--charts DIR` for the pictures, `--beq PATH` to export a beqdesigner project.
-Refuses on a record the current code no longer matches — different parameters, or the working
-tree has moved on — and says why; `--force` draws it anyway.
+Uses the configuration recorded with the run, including exclusions and strategy selection.
+Refuses if the schema, code or available source material has changed, and says why; `--force`
+draws it anyway.
 
 **`tools/render_ledger.py [RECORDS...]`** — every `data/*.run.json.gz` by default, or specific
 ones named on the command line. `--charts-dir DIR` (default `out/ledger`) is where charts are

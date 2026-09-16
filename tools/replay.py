@@ -10,8 +10,8 @@ existed it cost a full rerun, or worse, a set of cascades typed back in by hand 
 silently stale across two behaviour changes.
 
 **Staleness is reported, never assumed away.** The record carries the material's hash, the
-non-default parameters and the working tree's revision. If any has moved, this says so before
-it draws anything, and `--force` is required to go ahead. A picture redrawn from a stale record
+parameters and the working tree's revision. Replay uses the recorded configuration. If the
+schema, code or available material has changed, `--force` is required to go ahead. A picture redrawn from a stale record
 looks exactly as current as one that is not, which is the whole reason for the check.
 """
 
@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqanalyser.design import beqd, record  # noqa: E402
 from beqanalyser.design.charts import render_cached  # noqa: E402
-from beqanalyser.design.pipeline import PipelineParams  # noqa: E402
 
 logger = logging.getLogger("replay")
 
@@ -74,7 +73,7 @@ def main() -> int:
 
     material_path = Path(fingerprint.material_path)
     digest = record.material_digest(material_path) if material_path.is_file() else None
-    reasons = record.stale_against(fingerprint, PipelineParams(), digest)
+    reasons = record.stale_against(fingerprint, material_sha256=digest)
     if reasons:
         print(
             "\n  STALE — this record no longer describes what this code would produce:"

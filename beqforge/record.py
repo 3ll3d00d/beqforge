@@ -178,10 +178,13 @@ class Fingerprint:
 
 def stale_against(
     fingerprint: Fingerprint,
-    params: object,
+    params: object | None = None,
     material_sha256: str | None = None,
 ) -> list[str]:
     """Why this record cannot be trusted for the run being asked for, or an empty list.
+
+    Omit `params` when replaying the recorded result: its configuration is already fixed.
+    Pass parameters only when comparing against an explicitly requested new run.
 
     Returned rather than raised, because "the code moved on" is a thing the caller may
     legitimately choose to look at anyway, while "different material" almost never is. The
@@ -192,7 +195,7 @@ def stale_against(
         reasons.append(f"written against schema {fingerprint.schema}, this is {SCHEMA}")
     if material_sha256 is not None and fingerprint.material_sha256 != material_sha256:
         reasons.append("the material has changed since it was written")
-    if fingerprint.params != repr(params):
+    if params is not None and fingerprint.params != repr(params):
         reasons.append(f"parameters differ: recorded {fingerprint.params}")
     current = _git_revision()
     if fingerprint.revision != current:

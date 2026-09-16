@@ -37,7 +37,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqanalyser.design import record  # noqa: E402
 from beqanalyser.design.charts import _slug, render_cached  # noqa: E402
-from beqanalyser.design.pipeline import PipelineParams  # noqa: E402
 
 logger = logging.getLogger("render_ledger")
 
@@ -146,7 +145,7 @@ def render_title(
     fingerprint = record.Fingerprint.from_json(document["fingerprint"])
     material_path = Path(fingerprint.material_path)
     digest = record.material_digest(material_path) if material_path.is_file() else None
-    reasons = record.stale_against(fingerprint, PipelineParams(), digest)
+    reasons = record.stale_against(fingerprint, material_sha256=digest)
     key = document["material"]["name"]
     if reasons and not force:
         logger.warning(f"{key}: STALE, skipping ({'; '.join(reasons)})")
