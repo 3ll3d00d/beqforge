@@ -243,6 +243,35 @@ def test_ledger_preserves_unavailable_headroom(a_record):
     assert title_entry(a_record)["offset_db"] is None
 
 
+def test_ledger_entry_for_no_candidate_is_strict_json(a_record):
+    """`NaN` is not JSON — `json.dumps` emits it anyway, and a browser's `JSON.parse` throws
+    on it, which silently kills the whole page's rendering script, not just one title's entry.
+
+    Reproduced: the "no candidate was ever constructed" fallback (R1 can block a title before
+    any target is built, leaving `candidates: []`) once filled its missing band with
+    `float("nan")` instead of `None`, and the resulting page rendered nothing at all — not an
+    empty entry, the entire ledger, because one bad title's JSON broke `JSON.parse` for all of
+    them. `record.py`'s own convention (`_json_float`) is `None`, which round-trips as `null`;
+    this pins the ledger to the same rule.
+    """
+    from tools.render_ledger import title_entry
+
+    a_record["fingerprint"] = {"material_path": "data/demo.npz"}
+    a_record["material"]["duration_s"] = 60.0
+    a_record["accepted"] = None
+    a_record["candidates"] = []
+    a_record["evidence_notes"] = ["no usable contiguous mix plateau; restoration withheld"]
+
+    entry = title_entry(a_record)
+    assert entry["status"] == "abstained"
+    assert entry["band"] == [None, None]
+
+    def reject(x):
+        raise ValueError(f"non-finite constant in ledger entry: {x}")
+
+    json.loads(json.dumps(entry), parse_constant=reject)
+
+
 @pytest.fixture
 def replay_document(tmp_path, a_record):
     from beqanalyser.design.pipeline import PipelineParams

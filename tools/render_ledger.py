@@ -101,7 +101,7 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
             "confidence": None,
             "mv_adjust_db": None,
             "offset_db": None,
-            "band": [float("nan"), float("nan")],
+            "band": [None, None],  # NaN is not JSON; None round-trips as null (record.py)
             "filters": [],
             "notes": [
                 {"text": text, "kind": "failure"}
