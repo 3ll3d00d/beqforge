@@ -120,7 +120,8 @@ def programme_levels_db(
     = −2.5 dB under its own mean and a maximum over N of them sits at `10*log10(ln N + gamma)`
     above it — +9.3 dB for a two-hour title, on stationary noise carrying no events at all.
     Over the ~8 frames in a second that term is ~0.0 dB, so what the curve shows is the moment
-    rather than the estimator. `peak` keeps its bias; see AUTOMATED_DESIGN.md §12.
+    rather than the estimator. `peak` keeps its bias deliberately — TODO.md has the open question
+    of whether a high percentile should replace it, and why nothing has yet.
 
     Found in two passes because the first is the expensive one. The coarse hop locates the
     loudest frame over the whole programme; only its neighbourhood is re-framed at

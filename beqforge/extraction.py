@@ -1,4 +1,4 @@
-"""Reducing a signal to the envelopes identification fits — AUTOMATED_DESIGN.md §3.2-§3.4.
+"""Reducing a signal to the envelopes identification fits.
 
 The spectrogram a human reads by eye, reduced to three curves against frequency:
 

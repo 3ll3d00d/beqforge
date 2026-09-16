@@ -1,4 +1,4 @@
-"""Synthetic ground truth — AUTOMATED_DESIGN.md §6.1 and build step 1.
+"""Synthetic ground truth.
 
 Two constructions, because the catalogue supplies 15,208 positives and zero negatives:
 

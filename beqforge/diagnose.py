@@ -2,7 +2,8 @@
 
 Level invariance is neither necessary nor sufficient for a mastering filter. Tracking can
 come from stopband leakage. Quiet-frame contrast can price a correction only under the
-noise-proxy assumptions in DESIGN_EVIDENCE.md. None identifies an unknown source spectrum.
+noise-proxy assumptions in AGENTS.md's "Evidence and confidence" notes. None identifies an
+unknown source spectrum.
 """
 
 import logging

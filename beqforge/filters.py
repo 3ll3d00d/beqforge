@@ -1,6 +1,6 @@
 """High-pass synthesis and inversion to a publishable biquad cascade.
 
-The output stage of AUTOMATED_DESIGN.md §5. Two routes to the same target:
+The output stage. Two routes to the same target:
 
 * `invert_to_shelves` — closed form, exact, when the protective filter shares the identified
   rolloff's alignment and order. An RBJ low shelf is a biquad with zeros at `f*sqrt(A)` and

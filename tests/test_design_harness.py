@@ -1,4 +1,4 @@
-"""The synthetic ground truth of AUTOMATED_DESIGN.md §6.1.
+"""The synthetic ground truth.
 
 The harness has to be trustworthy before anything scored against it means much, so these
 check the two properties the plan actually relies on: that a constructed negative really does

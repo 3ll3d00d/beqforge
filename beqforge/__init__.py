@@ -1,7 +1,8 @@
 """Automated BEQ filter design — deriving a filter from content.
 
-A separate capability from the clustering pipeline; see AUTOMATED_DESIGN.md. Nothing here
-imports from the catalogue side of the package beyond the RBJ biquad classes.
+A separate capability from the clustering pipeline; see AGENTS.md's "Working on design/" for
+what it does and TODO.md for what's still open. Nothing here imports from the catalogue side
+of the package beyond the RBJ biquad classes.
 """
 
 import math

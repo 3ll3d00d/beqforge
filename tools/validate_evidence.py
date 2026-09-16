@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run the predeclared R4/R5 final-selection protocol; see DESIGN_EVIDENCE.md."""
+"""Run the predeclared final-selection protocol; see AGENTS.md's "Evidence and confidence"
+notes and evidence_validation.json for the results this produced."""
 
 import argparse
 import json

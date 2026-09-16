@@ -1,4 +1,4 @@
-"""Applying a design and measuring what it did — AUTOMATED_DESIGN.md §6.2.
+"""Applying a design and measuring what it did.
 
 The residual only says the cascade matches the target it was given. It cannot say the target
 was right. This applies the filter to the signal and measures the corrected low end, which is
@@ -205,7 +205,7 @@ class Correction:
         priced_target_db: np.ndarray | None,
         target_tilt_db_per_octave: float = 0.0,
     ) -> np.ndarray:
-        """What the correction was actually asked to achieve — AUTOMATED_DESIGN.md §14.2.
+        """What the correction was actually asked to achieve (AGENTS.md, "judged against intent").
 
         `before_db + priced_target_db`, plus the house curve on top of it (inert while
         nothing builds a house curve into a target — `target_tilt_db_per_octave` defaults to
@@ -403,8 +403,7 @@ def verify(
     not the job and including it would penalise a correct filter.
 
     The reference used to be a single fixed point, `before`/`after` each anchored to their own
-    value at 40 Hz — AUTOMATED_DESIGN.md §6.2 already named this "should be derived, not
-    defaulted" and it stayed defaulted regardless. On Predator that single point sits on the
+    value at 40 Hz — a fixed point that was long known to be wrong before it was fixed. On Predator that single point sits on the
     shoulder of a local bump 1.7-2.3 dB above the mix's own plateau, which read as `level_db`
     running 4 dB under reference when the corrected curve was in fact flat within 2 dB of it —
     a shape that passed R1 everywhere else and failed only because the ruler had a bump in it.

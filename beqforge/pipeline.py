@@ -185,7 +185,7 @@ class PipelineParams:
     under-corrected; corrected level -9.6 dB is outside -3..+8" is not a section-count
     problem. Every other candidate hit its identical wall at whatever section count it tried.
     Cost was not proportionate to that answer: 997 s against 70 s, 265 optimiser runs against
-    40, for the same abstention — PERFORMANCE.md §1.1's "`max_sections=5` would roughly
+    40, for the same abstention — the estimate that "`max_sections=5` would roughly
     double a run" was, if anything, optimistic about 10.
 
     Reverted rather than left at 10 and merely undocumented: a search-cost ceiling that costs
@@ -239,7 +239,7 @@ class PipelineParams:
     order of magnitude between seeds" — but that was measured on the *parametric* route's
     targets, a high-order rolloff terminated by a much lower-order protective filter spanning
     100 dB. The targets that produce every accepted filter are `flatten`'s, and on those a
-    second seed bought little enough to be measurable: see PERFORMANCE.md P13. That was
+    second seed bought little enough to be measurable (AGENTS.md's performance notes). That was
     measured when `flatten`'s targets were held under 26 dB by a fixed dial; `confidence_z`
     lets a well-supported title's target run past that, and single-seed fitting has not been
     re-measured against the larger, less "gentle" targets that implies — worth checking

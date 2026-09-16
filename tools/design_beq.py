@@ -3,8 +3,8 @@
 
     uv run python tools/design_beq.py data/FILM.npz
 
-Runs the process of AUTOMATED_DESIGN.md §6.4 end to end — per-channel decomposition, target
-derivation, candidate designs, acceptance — and prints the evidence alongside the answer. The
+Runs the acceptance process end to end — per-channel decomposition, target derivation,
+candidate designs, acceptance — and prints the evidence alongside the answer. The
 commentary is the point: a residual says a cascade matched the target it was handed, never
 that the target was right, so a result without its reasoning is not a result.
 

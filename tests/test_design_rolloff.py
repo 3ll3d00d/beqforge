@@ -1,4 +1,4 @@
-"""The parametric rolloff model — AUTOMATED_DESIGN.md §3.5, build step 2.
+"""The parametric rolloff model.
 
 The question the build order posed: is a free-slope model good enough, or does identification
 need a discrete set of candidate alignments? These answer it. The model turns out to reproduce

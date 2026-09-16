@@ -1,4 +1,4 @@
-"""The parametric rolloff model — AUTOMATED_DESIGN.md §3.5.
+"""The parametric rolloff model.
 
 Attenuation as a soft hinge in log-frequency/dB: flat above the corner, a straight line of
 `slope` dB/octave below it, with `knee` controlling how abruptly the two meet.

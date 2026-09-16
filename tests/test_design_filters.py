@@ -1,4 +1,4 @@
-"""The output stage of AUTOMATED_DESIGN.md §5.
+"""The output stage.
 
 The closed-form claim is the load-bearing one: when the protective filter shares the rolloff's
 alignment and order, the exact inverse *is* a low shelf cascade. These pin that down.

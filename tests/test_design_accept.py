@@ -1,4 +1,4 @@
-"""The acceptance model of AUTOMATED_DESIGN.md §6.4.
+"""The acceptance model.
 
 R1's cliff clause is the one worth pinning down. Every aggregate the pipeline already had —
 spread, tilt, level — scores a notch-filling design well, and the design is wrong. These tests

@@ -1,4 +1,7 @@
-"""Separating the rolloff from the content it sits in — AUTOMATED_DESIGN.md §3.5-§3.6.
+"""Separating the rolloff from the content it sits in.
+
+Diagnostic and confidence only — not on the path to a target; see AGENTS.md's "Working on
+design/" for why `flatten`/`counterfactual` invert the measured response directly instead.
 
 Fits `E(f) = N(f) + A(f)`: a smooth natural envelope plus the soft-hinge attenuation of
 `rolloff.py`. `N` is what film bass content does on its own; `A` is what was done to it.

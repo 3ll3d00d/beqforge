@@ -1,4 +1,4 @@
-"""Detection as the model comparison of AUTOMATED_DESIGN.md §3.6.
+"""Detection as a model comparison.
 
 The question is not "does adding an attenuation term reduce the residual" — it always does,
 `A` has three free parameters — but "does it buy more than letting the natural envelope curve

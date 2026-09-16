@@ -1,7 +1,8 @@
-"""Turning an identified rolloff into a publishable filter — AUTOMATED_DESIGN.md §4-§5.
+"""Turning an identified rolloff into a publishable filter.
 
-Inversion is preference (§1): identification says what was done, this says how far to undo it
-and exposes the choices as dials rather than making them silently.
+Inversion is preference: identification says what was done, this says how far to undo it
+and exposes the choices as dials rather than making them silently. See AGENTS.md's "Working
+on design/" for the shipped model and TODO.md for what's still open.
 
 Two routes, matching the contract's `method`:
 

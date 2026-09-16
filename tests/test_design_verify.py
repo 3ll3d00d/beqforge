@@ -1,4 +1,4 @@
-"""Applying the design and measuring what it did — AUTOMATED_DESIGN.md §6.2.
+"""Applying the design and measuring what it did.
 
 The residual says the cascade matches the target it was handed. It cannot say the target was
 right. This is the check that catches the difference, and the criterion is the one a person

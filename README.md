@@ -9,10 +9,9 @@ then fits realisable IIR filters to those composites.
 **A second, separate capability lives in `beqanalyser/design/`**: deriving a BEQ filter from a film's
 audio rather than summarising existing ones. It shares nothing with the clustering pipeline below except
 the biquad classes. It derives a target three ways, fits each, and judges them against an acceptance
-model — printing the evidence beside the answer, and abstaining when nothing measures up. See
-[AUTOMATED_DESIGN.md](AUTOMATED_DESIGN.md), whose §0 records how far it has actually got and what is
-still unevidenced. [PERFORMANCE.md](PERFORMANCE.md) covers where its runtime goes and what has been done
-about it — a run is ~40-80 s a title, down 7.18x, with every accepted filter unchanged.
+model — printing the evidence beside the answer, and abstaining when nothing measures up. A run is
+~40-80 s a title. See [AGENTS.md](AGENTS.md)'s "Working on `design/`" for how it works and why, and
+[TODO.md](TODO.md) for what's still open and unevidenced.
 
 ### Running the design pipeline manually
 
@@ -43,7 +42,7 @@ accepted, 1 when abstaining was the correct output — neither is an error. Key 
 | flag | effect |
 | --- | --- |
 | `--strategy NAME` (repeatable) | run only the named strategies (`flatten`, `counterfactual`, `parametric`); default `all` |
-| `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual (AUTOMATED_DESIGN.md §3.1) |
+| `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual, see TODO.md |
 | `--charts DIR` | write peak/average charts per candidate into `DIR/<name>/` |
 | `--record PATH` / `--no-record` | where to write the run record (default: `<material>.run.json.gz` alongside it), or skip writing one |
 | `--cache PATH` / `--fresh` / `--no-cache` | the stage cache: where to keep it (default: `<material>.cache.json.gz`), force a recompute and overwrite it, or use neither |

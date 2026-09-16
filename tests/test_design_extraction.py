@@ -1,4 +1,4 @@
-"""Reduction to envelopes — AUTOMATED_DESIGN.md §3.2-§3.4, build step 3.
+"""Reduction to envelopes.
 
 The property that matters is differential: apply a known high-pass and the change in the
 extracted envelope must be the filter's own response. That validates the whole chain —

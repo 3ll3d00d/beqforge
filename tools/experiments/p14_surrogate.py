@@ -186,7 +186,7 @@ def surrogate_structure(
                 weights = weights * np.maximum(magnitude, 1e-9)
                 weights /= weights.mean()
         # bounded: Nelder-Mead is otherwise free to leave the box, and BiquadSpec refuses a
-        # non-positive frequency or Q. Exactly the crash PERFORMANCE.md section 6 records in
+        # non-positive frequency or Q. Exactly the crash AGENTS.md's performance notes record in
         # `_fit_structure`, reproduced here on the first target tried.
         polished = optimize.minimize(
             cost,
