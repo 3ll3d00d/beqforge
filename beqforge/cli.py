@@ -15,6 +15,7 @@ _SUBCOMMANDS = {
     "summarise": "tools.summarise",
     "ledger": "tools.render_ledger",
     "validate": "tools.validate_evidence",
+    "serve-designer": "tools.designer_server",
 }
 
 

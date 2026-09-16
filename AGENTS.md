@@ -11,8 +11,12 @@ material → extraction → diagnose → target → fit → verify, and prints t
 answer, abstaining when nothing measures up. See "Working on `design/`" below for what it does
 and why, and [TODO.md](TODO.md) for what's still open.
 
-One entry point: `tools/design_beq.py`, also installed as `beqforge design` (`pip install
-beqforge` / `uv tool install beqforge`). No API, no service.
+One entry point for file-based use: `tools/design_beq.py`, also installed as `beqforge design`
+(`pip install beqforge` / `uv tool install beqforge`). The only other way in is
+`beqforge serve-designer`, an HTTP server implementing beqdesigner's `designer-interface.md`
+v1.0 §7.1 binding (`beqforge/designer.py` + `tools/designer_server.py`) — everything else here
+still holds: no other API, no other service, and the server is a thin transport around the same
+`beqforge.pipeline.run`, not a second implementation.
 
 ## Layout
 
@@ -36,7 +40,9 @@ beqforge` / `uv tool install beqforge`). No API, no service.
 | `beqforge/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
 | `beqforge/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
 | `beqforge/cli.py` | `beqforge <subcommand> ...` — the installed entry point. Strips the subcommand off argv and hands the rest to the matching script in `tools/` unchanged. |
+| `beqforge/designer.py` | The `design(request) -> response` adapter between beqdesigner's `designer-interface.md` v1.0 and `beqforge.pipeline.run` — request/response dataclasses, wire-format (de)serialisation and the field-by-field mapping onto `Report`/`Candidate`/`Verdict`. Pure and independently testable; no socket. |
 | `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures; writes a `.run.json.gz` record beside the material unless `--no-record`. |
+| `tools/designer_server.py` | `beqforge serve-designer` — the HTTP transport (`designer-interface.md` §7.1) around `beqforge/designer.py`. Server-wide flags for device realisation/strategies/exclusions; everything per-title comes from the request. |
 | `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
 | `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Requires an explicit supported channel layout; preserves layout provenance. Needs no beqdesigner. |
 | `tools/summarise.py` | Sanity-check an extraction before using it. |

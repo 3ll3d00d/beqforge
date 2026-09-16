@@ -56,8 +56,8 @@ redraw pictures from what `design_beq.py` already wrote, so they cost no rerun. 
 **`extract FILM.mkv --out data/`** — `--stream N` picks a non-default audio stream (default 0);
 `--name` overrides the output basename (default: the source filename's stem); `--excerpt`
 records the material as less than the complete programme (folded into the stage cache's key so
-an excerpt and the full programme never share a cached analysis, but nothing in `design`
-branches on it yet — that's `designer-interface.md`'s contract, not yet built here);
+an excerpt and the full programme never share a cached analysis; `design` abstains outright on
+an excerpt, per `designer-interface.md`'s `coverage` field);
 `--mono-only` drops the per-channel arrays and roughly halves the file, which is fine for the
 `flatten` strategy alone but starves `counterfactual` and the per-channel diagnosis of the
 channels they need. Without those channels, sub-feed headroom is reported as unavailable.
@@ -80,6 +80,10 @@ the configuration recorded with the run, including exclusions and strategy selec
 the schema, code or available source material has changed, and says why; `--force` draws it
 anyway.
 
+**`serve-designer`** — runs this pipeline as a live beqdesigner filter designer over HTTP,
+implementing `designer-interface.md` v1.0 §7.1 rather than working from a `.npz`/`--beq` export.
+See "beqdesigner integration" below.
+
 **`ledger [RECORDS...]`** — every `data/*.run.json.gz` by default, or specific ones named on the
 command line. `--charts-dir DIR` (default `out/ledger`) is where charts are redrawn and, unless
 `--out` says otherwise, where the page (`index.html`) is written alongside them;
@@ -87,6 +91,31 @@ command line. `--charts-dir DIR` (default `out/ledger`) is where charts are redr
 under --charts-dir}`, needed only when publishing the page somewhere other than opening it
 straight off disk. A stale record is skipped with a warning rather than failing the whole page;
 `--force` draws it anyway.
+
+## beqdesigner integration
+
+`beqforge serve-designer` runs this pipeline as a live, HTTP-bound filter designer for
+[`beqdesigner`](https://github.com/3ll3d00d/beqdesigner), implementing its
+`design/designer-interface.md` v1.0 contract (§7.1's HTTP binding) rather than the file-based
+`.npz` → `design` → `--beq` export flow above:
+
+```bash
+beqforge serve-designer --port 8420
+```
+
+beqdesigner registers it by URL on its side:
+
+```python
+from pipeline.designer.registry import register_designer
+from pipeline.designer.http_binding import http_designer
+register_designer('beqforge.v1', http_designer('http://host:8420/design'))
+```
+
+Device realisation, which strategies run and authored exclusions are server-wide flags (see
+`--help`); everything per-title — the audio itself, its coverage, an optional per-channel
+decomposition and bass-management model — arrives in the request. `beqforge/designer.py` is the
+pure `design(request) -> response` adapter, independently testable without a socket;
+`tools/designer_server.py` is the HTTP transport around it.
 
 ## How it works, and why
 
