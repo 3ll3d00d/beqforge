@@ -45,7 +45,6 @@ from beqanalyser.design.accept import (
     AcceptParams,
     Verdict,
     assess,
-    confidence_from_evidence,
 )
 from beqanalyser.design.design import DesignMethod, DesignParams, design
 from beqanalyser.design.diagnose import (
@@ -55,6 +54,7 @@ from beqanalyser.design.diagnose import (
     mean_spectrum,
     plateau_reference,
     smooth_unexcluded,
+    supported_mix_change,
     unexcluded,
 )
 from beqanalyser.design.extraction import ExtractionParams, extract
@@ -216,7 +216,7 @@ class PipelineParams:
 
     confidence_z: float = 1.645
     """How many bootstrap standard errors of margin a bin must clear before `flatten` trusts
-    it (§4.1) — one-sided ~95% at the default.
+    it (§4.1). This multiplier has no calibrated coverage guarantee.
 
     Replaces a flat `noise_margin_db`. That constant could not distinguish 1,300 loud frames
     drawn from hundreds of separate scenes from 11 that are each their own isolated instant —
@@ -373,16 +373,17 @@ class Candidate:
         """Legacy name for peak filter gain; never a master-volume/headroom requirement."""
         return self.peak_gain_db
 
+    correction_support_score: float = math.nan
+    """Boost-weighted relative precision of temporal contrast; uncalibrated.
+
+    Missing evidence is unavailable, not maximal. This measures the proposed correction,
+    not how much of an assumed original deficit it recovers or whether mastering caused it.
+    """
+
     @property
     def confidence(self) -> float:
-        """Uncalibrated evidence score, with fit quality excluded.
-
-        `confidence_from_evidence` on this candidate's own `verdict.recovered_fraction` and
-        `verdict.shaping_fraction` (§14.3). An ordinal within this run, not a calibrated
-        probability — see that function's docstring."""
-        return confidence_from_evidence(
-            self.verdict.recovered_fraction, self.verdict.shaping_fraction
-        )
+        """Compatibility alias for correction_support_score; no probability interpretation."""
+        return self.correction_support_score
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,6 +526,27 @@ def evidence_notes(envelopes, z: float) -> list[str]:
         for state in ("failure", "unavailable", "omitted")
         if np.any(states == state)
     ]
+
+
+def correction_evidence_score(target: np.ndarray, envelopes, z: float) -> float:
+    """Boost-weighted relative precision of temporal contrast, conditional on its assumptions.
+
+    Scale-free: recovering half a deficit is not half as credible. No request or missing
+    precision supplies no score; missing bins contribute zero. Not a probability, and not
+    a mastering classifier. Fit residual, recovered fraction and level invariance are absent.
+    """
+    weight = np.maximum(target, 0)
+    if not np.isfinite(weight).all() or weight.sum() <= 0:
+        return math.nan
+    margin = envelopes.margin_db
+    se = envelopes.margin_se_db
+    quality = np.zeros_like(margin)
+    if se is not None:
+        valid = np.isfinite(margin) & (margin > 0) & np.isfinite(se)
+        quality[valid] = np.clip(1 - z * se[valid] / margin[valid], 0, 1)
+        quality[envelopes.boost_ceiling(z) <= 0] = 0
+    on_grid = np.interp(DESIGN_GRID, envelopes.freqs, quality, left=0, right=0)
+    return float(np.sum(weight * on_grid) / weight.sum())
 
 
 def priced_by_evidence(
@@ -834,6 +856,16 @@ def counterfactual_target(
             np.clip(-np.minimum(response, 0.0), 0.0, restore_cap_db),
             0.0,
         )
+        # A quiet channel must earn its own lift before its increased contribution enters
+        # the coherent sum. A clean neighbour never lends its allowance to this channel.
+        boost = np.minimum(
+            boost,
+            diagnosis.channels[name].boost_allowance(
+                params.confidence_z, params.diagnose.tracking_floor
+            ),
+        )
+        if not np.any(boost > 0):
+            continue
         # restoration stops at this channel's own plateau, since that is what its response
         # was referenced to — a common cutoff would restore one channel into its passband
         # while stopping another short of its knee
@@ -847,10 +879,10 @@ def counterfactual_target(
         restored = restored + mix_gain * (lifted - samples)
 
     before = restoration.before_db
-    grid, after = mean_spectrum(restored, material.fs)
-    deficit = np.where(
-        unexcluded(grid, params.exclude_bands_hz), np.maximum(after - before, 0.0), 0.0
+    grid, deficit = supported_mix_change(
+        material.mono_mix, restored, material.fs, params.confidence_z
     )
+    deficit[~unexcluded(grid, params.exclude_bands_hz)] = 0.0
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
     target = smooth_unexcluded(target, DESIGN_GRID, params.exclude_bands_hz, 9)
     # Terminated where this title's own restored deficit closes, and tapered, exactly as
@@ -1014,7 +1046,7 @@ def run(
             logger.info(f"Identified {identification}")
     else:
         with timings.stage("diagnose"):
-            diagnosis = diagnose(material, params.diagnose)
+            diagnosis = diagnose(material, params.diagnose, params.extraction)
 
         with timings.stage("extract"):
             envelopes = extract(
@@ -1036,6 +1068,13 @@ def run(
             )
 
     limitations = evidence_notes(envelopes, params.confidence_z)
+    limitations.extend(
+        (
+            "mastering-rolloff support: unavailable from programme alone; spectral shape and level invariance are non-identifying features",
+            "correction support is conditional: quiet frames must represent additive stationary noise, loud frames independent programme events, and tracking must not be stopband leakage",
+            "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
+        )
+    )
     blockers = []
     mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
     mix_level, _ = plateau_reference(
@@ -1177,6 +1216,15 @@ def run(
                 )
             )
 
+    candidates = [
+        dataclasses.replace(
+            c,
+            correction_support_score=correction_evidence_score(
+                c.target_db, envelopes, params.confidence_z
+            ),
+        )
+        for c in candidates
+    ]
     logger.info(f"Fitting cost: {FIT_STATS}")
     return Report(
         material=material,

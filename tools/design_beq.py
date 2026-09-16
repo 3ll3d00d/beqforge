@@ -68,17 +68,25 @@ def show_channels(report: Report) -> None:
     print(_row("Hz", [str(p) for p in DECADES]))
     for name, channel in d.channels.items():
         print(_row(name, _at(d.freqs, channel.response_db)))
-    print("\n  Share of summed-mix power, %:")
+    print("\n  Signed coherent contributions, % (cancellation can give <0 or >100):")
     print(_row("Hz", [str(p) for p in DECADES]))
     for name, channel in d.channels.items():
         print(_row(name, _at(d.freqs, channel.share * 100.0)))
+    print("\n  Contribution block standard errors, percentage points (uncalibrated):")
+    for name, channel in d.channels.items():
+        if channel.share_se is not None:
+            print(_row(name, _at(d.freqs, channel.share_se * 100.0)))
     print()
     for channel in d.channels.values():
         print(f"  {channel}")
     if not d.filtered_channels:
-        print("\n  No channel shows a knee — the sum is the only available evidence.")
+        print(
+            "\n  No channel shows a steep knee; temporal evidence is still measured on every channel and the sum."
+        )
         return
-    print(f"\n  Filtered: {', '.join(d.filtered_channels)}")
+    print(
+        f"\n  Steep channel proposals (cause unknown): {', '.join(d.filtered_channels)}"
+    )
 
 
 def show_floors(report: Report) -> None:
@@ -86,41 +94,36 @@ def show_floors(report: Report) -> None:
     if not d.stratified:
         return
     print(RULE)
-    print("LEVEL INDEPENDENCE  (R2 — a filter's relative shape cannot vary with level)")
+    print("LEVEL INVARIANCE  (descriptive; source variation survives a fixed filter)")
     print(_row("Hz", [str(p) for p in DECADES]))
     for label, response in d.stratified.items():
         print(_row(label, _at(d.freqs, response)))
     if d.level_spread_db is not None:
         print(_row("spread", _at(d.freqs, d.level_spread_db)))
-    subject = max(d.channels, key=lambda n: d.channels[n].passband_share)
-    low, high = d.channels[subject].plateau_hz
+    print("\n  Measured on the coherent combined mix, relative to its own plateau.")
     print(
-        f"\n  Measured on {subject}, referenced to its {low:.1f}-{high:.1f} Hz plateau."
-    )
-    print(
-        f"  Level-independent down to {d.filter_floor_hz:.1f} Hz — below that the "
-        "attenuation\n  is not a fixed filter, so inverting it is shaping, not identification."
+        f"  Level invariance boundary: {d.filter_floor_hz:.1f} Hz. "
+        "Neither agreement nor disagreement identifies mastering attenuation."
     )
     floor = d.noise_floor_hz
     print(
-        "  Programme-correlated content continues to "
+        "  Mix envelope tracking continues to "
         + ("the bottom of the band." if np.isnan(floor) else f"{floor:.1f} Hz.")
-        + "  (R1's terminus)"
+        + "  (conditional; stopband leakage can also track)"
     )
 
 
 def show_identification(report: Report) -> None:
     print(RULE)
-    print("IDENTIFICATION")
+    print("ROLLOFF MODEL FIT (cause remains unknown)")
     if report.identification is None:
         print("  Sum-based: unavailable.")
     else:
         print(f"  Sum-based: {report.identification}")
     if report.diagnosis.filtered_channels:
         print(
-            "\n  A channel carries the rolloff, so the sum-based figure is reported for\n"
-            "  comparison only — where the two disagree the sum is the one that cannot\n"
-            "  see the filter (§3.1)."
+            "\n  Channel and sum features can differ because their contributions vary with\n"
+            "  frequency. Neither fit distinguishes mastering from natural source coloration."
         )
 
 
@@ -176,7 +179,7 @@ def show_candidates(report: Report) -> None:
         )
         print(
             f"      recovered {recovered} of the measured deficit "
-            f"(§14.1)   confidence {candidate.confidence:.2f} (§14.3)"
+            f"(§14.1)   conditional evidence score {candidate.confidence:.2f} (uncalibrated)"
         )
         print(f"      {v}")
         for note in (*candidate.target_notes, *v.notes):
@@ -202,7 +205,7 @@ def show_result(report: Report) -> None:
         f"\n  {accepted.label}    peak boost {accepted.peak_gain_db:+.1f} dB, "
         + _headroom(offset, accepted.headroom)
         + f"\n  recovered {recovered} of the measured deficit, "
-        f"confidence {accepted.confidence:.2f}\n"
+        f"conditional evidence score {accepted.confidence:.2f} (uncalibrated)\n"
     )
     for section in accepted.filters:
         print(

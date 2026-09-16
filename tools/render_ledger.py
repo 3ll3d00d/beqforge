@@ -85,6 +85,17 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
     ] + [
         {"text": text, "kind": _note_kind(text, "verdict")} for text in verdict["notes"]
     ]
+    contract = candidate.get("evidence_contract")
+    notes.append(
+        {
+            "text": (
+                "Conditional temporal evidence score; not mastering probability or correction completeness."
+                if contract == "conditional-temporal-v1"
+                else "Legacy score: completeness times level-invariance feature; no current evidence contract was recorded."
+            ),
+            "kind": "",
+        }
+    )
     headroom = candidate.get("headroom") or {}
     offset = verdict["required_offset_db"]
     legacy_headroom = (

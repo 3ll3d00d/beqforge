@@ -315,7 +315,7 @@ def test_the_judged_band_starts_at_the_measured_noise_floor() -> None:
 
 
 def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
-    """Not at `share_band_hz[1]`, which is a cross-channel yardstick and says so.
+    """The removed fixed share band must never set the target endpoint.
 
     That hard zero at 35 Hz made the whole strategy incapable on any title whose knee is higher
     — Blazing Saddles at 44.4 Hz and Alien at 34.4-48.1 Hz, two of the three that abstain. Their
@@ -333,7 +333,7 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
     assert live.size, "the fixture's LFE is high-passed; there should be a deficit"
     # the old rule put the last live point exactly at the share band's top edge
     assert DESIGN_GRID[live[-1]] != pytest.approx(
-        params.diagnose.share_band_hz[1], rel=0.02
+        35.0, rel=0.02
     )
     # tapered rather than cut: no single-point step at the top of the correction
     steps = np.abs(np.diff(target[: live[-1] + 1]))

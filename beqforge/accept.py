@@ -254,7 +254,7 @@ class Verdict:
     the cascade claims nothing below it. This is `assess`'s existing shaping-note dB — the
     boost claimed below the floor in excess of what the cascade already reached there —
     expressed as a fraction of the cascade's own peak gain so it is comparable across
-    candidates of different sizes; one of `confidence_from_evidence`'s two inputs."""
+    candidates of different sizes. A descriptive legacy feature, not causal shaping support."""
 
     device_error_db: float = math.nan
     """Worst dB the device's coefficient rounding adds, already inside `after_db`."""
@@ -501,7 +501,10 @@ def shaping_fraction(
 def confidence_from_evidence(
     recovered_fraction: float, shaping_fraction: float
 ) -> float:
-    """Uncalibrated evidence score, not a probability of a mastering filter.
+    """Legacy completeness-times-invariance score, retained for callers of old arithmetic.
+
+    New candidates use pipeline.correction_evidence_score; this function must not be used
+    to interpret temporal features as a causal mastering classifier.
 
     Missing components contribute zero support. A NaN floor cannot distinguish a successful
     check from an unavailable one; do not silently give either the maximum score.
@@ -536,8 +539,8 @@ def assess(
     to reach the bottom of the band.
 
     `filter_floor_hz` is R2's boundary, and it produces a *note* rather than a failure. Below
-    it the attenuation being inverted is not level-independent, so undoing it is shaping and
-    not identification — which lowers confidence without making the answer wrong.
+    it the mix response is not level-invariant. This descriptive feature neither proves nor
+    disproves mastering attenuation and does not enter the correction evidence score.
 
     `target_db` is the evidence-priced target the fitter was handed, on `DESIGN_GRID`, or
     `None` for a candidate with no target (the parametric route). The tilt, level and extent
@@ -749,7 +752,7 @@ def assess(
             notes.append(
                 f"{shaping:.1f} dB of the correction is claimed below "
                 f"{filter_floor_hz:.1f} Hz, where the attenuation stops being "
-                "level-independent — that part is shaping rather than identification (R2)"
+                "level-invariant; this shaping diagnostic does not identify the cause (R2)"
             )
 
     if max((abs(f.q) for f in filters), default=0.0) > 4.0:

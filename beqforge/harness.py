@@ -168,3 +168,119 @@ def injection_sweep(
                 yield HarnessCase(
                     f"{name}/{hp}", apply_high_pass(source, hp, fs), fs, hp
                 )
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceCase:
+    """Predeclared source/noise truth, kept out of the production pipeline."""
+
+    name: str
+    source: np.ndarray
+    content: np.ndarray
+    noise: np.ndarray
+    fs: int
+    injected: HighPass | None = None
+    coverage: str = "complete_programme"
+
+    def material(self):
+        from beqanalyser.design.material import LFE_GAIN, Material
+
+        samples = self.content + self.noise
+        return Material(
+            self.name, self.fs, LFE_GAIN * samples, {"LFE": samples}, self.coverage
+        )
+
+
+def evidence_cases(seed: int = 947, duration_s: float = 240) -> Iterator[EvidenceCase]:
+    """Frozen R5 protocol: development seed 101, held-out seed 947; no threshold tuning.
+
+    Natural colouring is intentionally observationally indistinguishable from filtering.
+    The negative is defined by source provenance, not by a detector's preferred spectrum.
+    """
+    fs = 1000
+    rng = np.random.default_rng(seed)
+    n = int(duration_s * fs)
+    scene = np.arange(n) // (4 * fs)
+    levels = np.where(scene % 3 == 0, 0.0, np.where(scene % 3 == 1, 0.06, 0.3))
+    source = rng.standard_normal(n) * levels
+    noise = rng.standard_normal(n) * 1e-5
+    hp = HighPass(Alignment.BUTTERWORTH, 4, 24.0)
+    natural = apply_high_pass(source, hp, fs)
+    coloured_noise = apply_high_pass(rng.standard_normal(n) * 0.01, hp, fs)
+    # Source emphasis varies with level; applying one fixed filter cannot remove this.
+    low = signal.sosfilt(signal.butter(2, 35, fs=fs, output="sos"), source)
+    varying = source + np.where(scene % 3 == 1, 5.0, 0.0) * low
+    steep = HighPass(Alignment.BUTTERWORTH, 12, 32.0)
+    yield EvidenceCase("broadband", source, source, noise, fs)
+    yield EvidenceCase("natural_bass_light", natural, natural, noise, fs)
+    yield EvidenceCase(
+        "stationary_coloured_noise", np.zeros(n), np.zeros(n), coloured_noise, fs
+    )
+    yield EvidenceCase("varying_source", varying, varying, noise, fs)
+    yield EvidenceCase(
+        "varying_filtered", varying, apply_high_pass(varying, hp, fs), noise, fs, hp
+    )
+    yield EvidenceCase(
+        "steep_leakage", source, apply_high_pass(source, steep, fs), noise, fs, steep
+    )
+    end = n // 3
+    yield EvidenceCase(
+        "excerpt",
+        varying[:end],
+        apply_high_pass(varying, hp, fs)[:end],
+        noise[:end],
+        fs,
+        hp,
+        "excerpt",
+    )
+
+
+def score_evidence_case(case: EvidenceCase, report, params) -> dict:
+    """Score the selected published device, never a detector or fit residual.
+
+    False acceptance means *any* selected intervention on a constructed negative, even if
+    the output carefully qualifies its claims. Recovery truth never enters selection.
+    """
+    from beqanalyser.design.diagnose import mean_spectrum
+    from beqanalyser.design.filters import biquad_sos, magnitude_db, publication_filters
+
+    selected = report.accepted
+    negative = case.injected is None
+    result = {
+        "name": case.name,
+        "negative": negative,
+        "excerpt": case.coverage == "excerpt",
+        "selected": None if selected is None else selected.label,
+        "false_acceptance": bool(negative and selected is not None),
+        "abstained": selected is None,
+        "recovery_rms_db": None,
+        "max_boost_noise_dominated_db": None,
+        "evidence_score": None
+        if selected is None
+        else selected.correction_support_score,
+        "candidate_failures": {c.label: c.verdict.failures for c in report.candidates},
+        "notes": list(report.evidence_notes),
+    }
+    if selected is None:
+        return result
+    freqs = np.geomspace(5, 2 * (case.injected.corner_hz if case.injected else 24), 200)
+    filters = publication_filters(selected.filters)
+    # Device response includes actual coefficient quantisation, the same object judged by run.
+    actual = magnitude_db(
+        params.realisation.quantise(biquad_sos(filters, params.realisation.fs)),
+        freqs,
+        params.realisation.fs,
+    )
+    if case.injected is not None:
+        _, transfer = signal.sosfreqz(
+            high_pass_sos(case.injected, case.fs), worN=freqs, fs=case.fs
+        )
+        inverse = -20 * np.log10(np.maximum(np.abs(transfer), 1e-30))
+        result["recovery_rms_db"] = float(np.sqrt(np.mean((actual - inverse) ** 2)))
+    axis, content = mean_spectrum(case.content, case.fs)
+    _, noise = mean_spectrum(case.noise, case.fs)
+    noisy = np.interp(freqs, axis, noise - content) > 0
+    result["max_boost_noise_dominated_db"] = (
+        float(np.max(actual[noisy])) if noisy.any() else 0.0
+    )
+    return result

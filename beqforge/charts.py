@@ -11,9 +11,8 @@ deliberately.
 
 Two diagnostic charts per candidate. The mono mix is the full-band target-construction domain;
 final verification measures the sub output and retains its raw spectra in the candidate record.
-the per-channel chart says where the mix's low end comes from, and carries only the channels
-that clear `min_passband_share` — a channel supplying 0.1% of the passband is noise on a plot
-as much as it is in the analysis.
+The per-channel chart shows the component spectra. Spectral level alone cannot decide
+whether a quiet channel would matter after restoration.
 
 The peak panel carries a third curve the catalogue does not plot: the loudest second of the
 programme. The peak envelope is a per-bin maximum over every frame, so it is a hull assembled

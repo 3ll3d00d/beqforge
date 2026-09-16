@@ -272,16 +272,16 @@ class Envelopes:
 
     @property
     def margin_db(self) -> np.ndarray:
-        """Content-to-noise margin per bin — how far the content sits above the floor."""
+        """Temporal peak–quiet contrast, not SNR; a common spectral gain cancels."""
         return self.peak_db - self.quiet_db
 
     @property
     def measurable(self) -> np.ndarray:
         """Bins where the peak envelope actually stands above the quiet one.
 
-        Where it does not, there is no content to measure — only floor — and any number
-        derived from the difference is noise. Fitting must weight these to zero rather than
-        treat a large negative as a deep rolloff.
+        Without positive contrast there is no supported peak-minus-quiet estimate. This
+        does not prove the signal contains only noise: quiet programme content may also
+        erase contrast. Fitting weights these bins to zero.
         """
         return (
             np.isfinite(self.peak_db)
@@ -293,7 +293,8 @@ class Envelopes:
     def content_db(self) -> np.ndarray:
         """Peak envelope with the quiet envelope removed in power.
 
-        Rumble is present in both, so differencing cancels it. `-inf` where the two meet,
+        This is a noise-subtracted estimate only if quiet frames contain representative
+        additive stationary noise and negligible programme content. `-inf` where the two meet,
         which is honest: the alternative is a plausible-looking large negative that reads as a
         rolloff and is nothing of the kind. Check `measurable` before using this.
         """

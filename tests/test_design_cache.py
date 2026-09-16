@@ -48,6 +48,11 @@ def analysis() -> C.Analysis:
         passband_share=0.81,
         is_filtered=True,
         plateau_hz=(25.8, 52.2),
+        share_se=rng.random(64),
+        tracking=rng.random(64),
+        level_spread_db=rng.random(64),
+        contrast_db=rng.random(64),
+        contrast_se_db=rng.random(64),
     )
     diagnosis = Diagnosis(
         freqs=freqs,
@@ -113,6 +118,14 @@ def test_analysis_round_trip_is_bit_identical(tmp_path) -> None:
     a, b = before.diagnosis.channels["LFE"], after.diagnosis.channels["LFE"]
     assert np.array_equal(a.response_db, b.response_db)
     assert np.array_equal(a.share, b.share)
+    for name in (
+        "share_se",
+        "tracking",
+        "level_spread_db",
+        "contrast_db",
+        "contrast_se_db",
+    ):
+        np.testing.assert_array_equal(getattr(a, name), getattr(b, name))
     assert (a.max_slope_db_per_octave, a.plateau_hz, a.is_filtered) == (
         b.max_slope_db_per_octave,
         b.plateau_hz,

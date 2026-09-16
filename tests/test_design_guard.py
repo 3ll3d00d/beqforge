@@ -125,8 +125,10 @@ def test_the_floors_are_measured_without_a_filtered_channel() -> None:
     material = material_from(
         {"C": masked_knee(-6.0), "LFE": masked_knee(-6.0, seed=60)}
     )
-    result = diagnose(material)
-    assert not result.filtered_channels, "expected no channel to clear the knee test"
+    from dataclasses import replace
+
+    result = diagnose(material, replace(PARAMS, knee_slope_db_per_octave=float("inf")))
+    assert not result.filtered_channels, "explicitly disable the proposal heuristic"
     assert not np.isnan(result.noise_floor_hz), "floors not measured without a knee"
     assert not np.isnan(result.filter_floor_hz)
 
@@ -275,4 +277,6 @@ def test_an_unbound_target_says_nothing() -> None:
 
     envelopes = envelopes_with_margin(100.0)
     proposals = flatten_targets(material, diagnosis, envelopes, None, PipelineParams())
-    assert proposals and not proposals[0].notes
+    assert proposals
+    assert not any("boost cap binds" in note for note in proposals[0].notes)
+    # The actual mix can stop tracking despite one constituent continuing below it.

@@ -56,7 +56,7 @@ from beqanalyser.design.rolloff import RolloffFit
 
 logger = logging.getLogger(__name__)
 
-SCHEMA = 1
+SCHEMA = 2
 """Bumped when a stored field changes meaning. A mismatch is a miss, never an error."""
 
 ANALYSIS_MODULES = (
@@ -193,6 +193,12 @@ def _channel(channel: ChannelDiagnosis) -> dict[str, Any]:
         "name": channel.name,
         "response_db": _pack(channel.response_db),
         "share": _pack(channel.share),
+        "share_se": _pack(channel.share_se),
+        "tracking": _pack(channel.tracking),
+        "level_spread_db": _pack(channel.level_spread_db),
+        "contrast_db": _pack(channel.contrast_db),
+        "contrast_se_db": _pack(channel.contrast_se_db),
+
         "max_slope_db_per_octave": _num(channel.max_slope_db_per_octave),
         "max_slope_hz": _num(channel.max_slope_hz),
         "passband_share": _num(channel.passband_share),
@@ -206,6 +212,12 @@ def _channel_back(raw: dict[str, Any]) -> ChannelDiagnosis:
         name=str(raw["name"]),
         response_db=_unpack(raw["response_db"]),
         share=_unpack(raw["share"]),
+        share_se=_unpack(raw.get("share_se")),
+        tracking=_unpack(raw.get("tracking")),
+        level_spread_db=_unpack(raw.get("level_spread_db")),
+        contrast_db=_unpack(raw.get("contrast_db")),
+        contrast_se_db=_unpack(raw.get("contrast_se_db")),
+
         max_slope_db_per_octave=_back(raw["max_slope_db_per_octave"]),
         max_slope_hz=_back(raw["max_slope_hz"]),
         passband_share=_back(raw["passband_share"]),

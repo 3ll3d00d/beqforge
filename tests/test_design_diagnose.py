@@ -1,11 +1,4 @@
-"""Per-channel diagnostics of AUTOMATED_DESIGN.md §3.1 and §6.4 R2.
-
-The level-independence test is the one with real content: it is the measurement that separates
-"a filter was applied" from "the content is quieter down there", and it is the only thing in
-the system that can make that distinction without a prior about what noise looks like. It is
-testable against synthetic ground truth because both cases can be *constructed* — unlike
-coherence (§11), which cannot.
-"""
+"""Per-channel spectral and temporal features; no causal mastering classification."""
 
 import numpy as np
 import pytest
@@ -47,8 +40,8 @@ def high_passed(samples: np.ndarray, corner_hz: float, order: int = 8) -> np.nda
     return signal.sosfilt(sos, samples)
 
 
-def test_a_fixed_filter_is_level_independent() -> None:
-    """The defining property: a linear filter's relative response cannot vary with level."""
+def test_common_envelope_source_remains_level_independent_after_filtering() -> None:
+    """This particular source has a common spectral envelope in every stratum."""
     signal_in = scened_noise(0, int(FS * DURATION_S))
     freqs, responses = stratified_response(
         high_passed(signal_in, 20.0), FS, PARAMS, REFERENCE_HZ
@@ -142,13 +135,8 @@ def test_diagnose_finds_the_filtered_channel_and_leaves_the_others() -> None:
     assert 8.0 < result.channels["LFE"].max_slope_hz < 22.0
 
 
-def test_a_steep_but_inaudible_channel_is_not_the_rolloff() -> None:
-    """The surrounds case: steep because they carry no bass, not because of a filter.
-
-    Both real titles have surrounds falling away at 24-34 dB/octave while supplying 1-2% of
-    passband power. Restoring one by tens of dB would invent content, so a slope alone must
-    not be enough to call a channel filtered.
-    """
+def test_original_quietness_does_not_gate_a_channel_proposal() -> None:
+    """An originally quiet channel must supply its own support if restored."""
     samples = int(FS * DURATION_S)
     quiet_surround = high_passed(scened_noise(11, samples), 22.0, order=10) * 0.03
     material = material_from(
@@ -161,8 +149,9 @@ def test_a_steep_but_inaudible_channel_is_not_the_rolloff() -> None:
     )
     result = diagnose(material)
     assert result.channels["Ls"].max_slope_db_per_octave > 20.0
-    assert result.channels["Ls"].passband_share < DiagnoseParams().min_passband_share
-    assert result.filtered_channels == ["LFE"]
+    assert result.channels["Ls"].passband_share < 0.05
+    assert result.filtered_channels == ["LFE", "Ls"]
+    assert np.max(result.channels["Ls"].boost_allowance(1.645, 0.5)) == 0
 
 
 def test_the_filter_floor_is_searched_down_from_the_passband() -> None:
@@ -182,8 +171,11 @@ def test_the_filter_floor_is_searched_down_from_the_passband() -> None:
         }
     )
     result = diagnose(material)
-    # a real filter is level-independent to the bottom of the band, not to 500 Hz
-    assert result.filter_floor_hz <= 10.0
+    # The combined source changes shape across strata despite the fixed LFE filter.
+    from beqanalyser.design.diagnose import plateau_reference
+
+    _, plateau = plateau_reference(result.mix_db, result.freqs, PARAMS)
+    assert result.filter_floor_hz <= plateau[0]
 
 
 def test_the_plateau_reference_follows_the_channel_not_a_constant() -> None:

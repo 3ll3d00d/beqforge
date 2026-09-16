@@ -238,7 +238,7 @@
   <h1>Correction Ledger</h1>
   <p class="dek">
     Every title's featured candidate, redrawn from its <code>.run.json.gz</code> record via
-    <code>tools/render_ledger.py</code> — no rerun. Recovered fraction and confidence are
+    <code>tools/render_ledger.py</code> — no rerun. Recovered fraction and the uncalibrated evidence score are
     explained below the fold before the numbers, not after.
   </p>
   <div class="runbar" id="runbar"><!-- filled by script --></div>
@@ -254,21 +254,22 @@
     <span class="formula">Σ priced target ÷ Σ max(&minus;before_db, 0)</span>
   </div>
   <div>
-    <h3>Confidence</h3>
-    <p>P(a real rolloff was applied here), fit quality excluded — an <b>ordinal</b>, not a
-      calibrated probability. There's no labelled corpus to calibrate against, so it's only
-      meaningful for ranking candidates within one run, not as a percentage chance.</p>
-    <span class="formula">recovered × (1 &minus; shaping)</span>
+    <h3>Evidence score (uncalibrated)</h3>
+    <p>Conditional precision of temporal peak–quiet contrast, weighted by requested boost.
+      Quiet frames must represent additive noise; tracking must not be leakage.
+      Neither assumption is proved by this score. Mastering causality remains unavailable.
+      Legacy records retain their original score and are labelled in their notes.</p>
+    <span class="formula">weighted max(1 &minus; z SE / contrast, 0)</span>
   </div>
   <div>
     <h3>Shaping fraction</h3>
-    <p>Share of the cascade's peak gain sitting below <code>filter_floor_hz</code> — the point
-      below which the attenuation being inverted was never confirmed to behave like a fixed
-      filter. Below it, correcting is a guess dressed as identification.</p>
+    <p>Share of the cascade's peak gain sitting below <code>filter_floor_hz</code> — a descriptive
+      level-invariance boundary. This legacy measure does not separate mastering from source
+      coloration; plateau-relative correction remains a shaping preference throughout.</p>
   </div>
 </div>
 
-<div class="section-label">All titles, ranked by confidence</div>
+<div class="section-label">All titles, alphabetically</div>
 <div class="grid" id="summary-grid"></div>
 
 <div class="section-label" style="margin-top:44px">Per-title detail</div>
@@ -297,7 +298,7 @@
 
   const grid = document.getElementById("summary-grid");
   const detail = document.getElementById("detail-sections");
-  const ranked = [...TITLES].sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
+  const ranked = [...TITLES].sort((a, b) => a.name.localeCompare(b.name));
 
   for (const t of ranked) {
     const card = document.createElement("a");
@@ -360,7 +361,7 @@
           <div class="sub">over ${t.band[0].toFixed(1)}&ndash;${t.band[1].toFixed(1)} Hz</div>
         </div>
         <div class="metric">
-          <div class="lbl">confidence</div>
+          <div class="lbl">evidence score (uncalibrated)</div>
           <div class="big tnum" style="color:${confColor(t.confidence)}">${fmtNum(t.confidence, 2)}</div>
           <div class="sub">shaping ${fmtFrac(t.shaping)}</div>
         </div>

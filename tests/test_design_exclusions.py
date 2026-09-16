@@ -190,7 +190,8 @@ def test_effective_exclusions_reach_cached_analysis(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(pipeline, "mean_spectrum", lambda *args: (freqs, values))
 
-    def diagnosis(material, params):
+    def diagnosis(material, params, extraction_params):
+        assert extraction_params.exclude_bands_hz == params.exclude_bands_hz
         seen.append(params.exclude_bands_hz)
         return Diagnosis(freqs, values, {})
 

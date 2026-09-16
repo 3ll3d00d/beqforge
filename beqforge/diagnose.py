@@ -1,35 +1,22 @@
-"""Per-channel diagnostics — where the evidence for a rolloff actually lives.
+"""Per-channel and coherent-mix features, with explicitly conditional interpretation.
 
-§3.1 identifies from the summed mix because the sum is what is listened to. That holds for
-what has to be *corrected*; it does not hold for where the evidence is. On the second title
-tried, the whole rolloff is an LFE high-pass at ~20 Hz and the LFE contributes 0.4% of mix
-power at 8 Hz, so the wall is absent from the sum below ~15 Hz and identification from the
-sum returns an unrepresentable answer.
-
-Three measurements, each answering a question no aggregate of the sum can:
-
-* `mix_shares` — which channel a given frequency's energy comes from, so "invisible in the
-  sum" becomes a number rather than an inference.
-* `stratified_response` — whether an attenuation is *level-independent*, which is what makes
-  it a filter rather than content. This is R2 of §6.4.
-* `band_tracking` — whether energy below the knee is programme-correlated content or a
-  stationary floor. This sets the terminus R1 refers to as "the noise floor".
-
-The last two are measured on whichever channel dominates the passband, and they run whether
-or not any channel was called filtered. They ask about the material, not about a filter, and
-gating them on a knee made the guard unreachable on the sparse material it exists to catch.
-
-Nothing here decides anything; it produces the numbers the pipeline and the report use.
+Level invariance is neither necessary nor sufficient for a mastering filter. Tracking can
+come from stopband leakage. Quiet-frame contrast can price a correction only under the
+noise-proxy assumptions in DESIGN_EVIDENCE.md. None identifies an unknown source spectrum.
 """
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import ndimage, signal
 
 from beqanalyser.design.material import Material
+
+if TYPE_CHECKING:
+    from beqanalyser.design.extraction import ExtractionParams
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +33,6 @@ class DiagnoseParams:
 
     band_hz: tuple[float, float] = (4.0, 200.0)
     """Range the diagnostics report over."""
-
-    share_band_hz: tuple[float, float] = (22.0, 35.0)
-    """Common band the per-channel *mix shares* are compared over.
-
-    Cross-channel comparison needs one band for every channel; which channel supplies the
-    low end is a question about the mix, not about any channel's own shape. Only the shares
-    use this. A channel's own response is referenced to its own plateau — see
-    `reference_percentile`."""
 
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored intervals omitted from references and diagnostic evidence."""
@@ -89,19 +68,7 @@ class DiagnoseParams:
     """Maximum absolute trend of a usable plateau; steeper monotonic spectra abstain."""
 
     knee_slope_db_per_octave: float = 14.0
-    """Slope over a half-octave window above which a channel is called filtered.
-
-    **The weakest threshold in the system.** Across the audible channels of three titles —
-    those clearing `min_passband_share` — it has to catch title 3's LFE at 15.9 dB/octave and
-    spare title 2's unfiltered L at 13.5, so max slope alone separates the two populations by
-    2.4 dB/octave. At the original 20.0 it missed title 3 entirely, and a 2nd-order Butterworth
-    at 12 dB/octave is still below anything safe to set here.
-
-    Slope is the wrong discriminator and this value is a stopgap. `stratified_response` already
-    measures the property that actually distinguishes a filter from a natural envelope — a
-    filter's relative shape does not vary with scene loudness (§6.4 R2) — and running it per
-    audible channel rather than only on the channel already chosen would classify on evidence
-    instead of on a 2.4 dB/octave gap. See §12."""
+    """Proposal heuristic for a steep channel, never proof of mastering attenuation."""
 
     strata: tuple[tuple[float, float], ...] = (
         (40.0, 80.0),
@@ -110,27 +77,16 @@ class DiagnoseParams:
     )
     """Percentile bands of passband level the stratified response is measured over.
 
-    A linear filter's relative response is identical in every stratum. Content's is not."""
-
-    min_passband_share: float = 0.05
-    """Share of summed-mix passband power below which a channel cannot be the rolloff.
-
-    A steep slope is not evidence of a filter if the channel supplies nothing to begin with:
-    the surrounds fall away below 20 Hz at 24-34 dB/octave simply because they carry almost no
-    bass, while contributing 1-2% of passband power. Restoring a channel that is inaudible in
-    the passband cannot be what makes the mix flat, and inverting its apparent attenuation by
-    tens of dB would manufacture content that was never there.
-
-    This is the automatic form of an exclusion that was manual on the first title."""
+    A common source envelope can be invariant; changing source spectra survive a fixed filter."""
 
     level_tolerance_db: float = 6.0
-    """Spread across strata above which an attenuation is not a fixed filter."""
+    """Descriptive spread boundary, not a test of whether mastering applied a filter."""
 
     tracking_window_s: float = 4.0
     """Envelope smoothing for `band_tracking`. Scene-scale, not transient-scale."""
 
     tracking_floor: float = 0.5
-    """Correlation with the passband below which a band is not carrying content."""
+    """Conditional tracking requirement; leakage and common noise can also correlate."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,14 +98,15 @@ class ChannelDiagnosis:
     """Mean spectrum in dB relative to this channel's own plateau."""
 
     share: np.ndarray
-    """Fraction of summed-mix power this channel supplies, per bin."""
+    """Signed Re(channel × conjugate(sum)) / power(sum), including cross terms."""
 
     max_slope_db_per_octave: float
     max_slope_hz: float
     passband_share: float
-    """Share of summed-mix power this channel supplies across `share_band_hz`."""
+    """Mean signed contribution over the mix plateau, for reporting only."""
 
     is_filtered: bool
+    """Legacy name for a steep-channel proposal heuristic, not a mastering claim."""
 
     plateau_hz: tuple[float, float] = (math.nan, math.nan)
     """Where this channel sits within `reference_tolerance_db` of its own reference level.
@@ -159,18 +116,46 @@ class ChannelDiagnosis:
     upper edge 31.7-62.2 Hz. A plateau whose lower edge sits at or above the channel's knee
     means the reference is on the knee's shoulder and the attenuation is understated."""
 
+    share_se: np.ndarray | None = None
+    """Across-block standard error of signed coherent contribution; unavailable is NaN."""
+
+    tracking: np.ndarray | None = None
+    """Envelope correlation below the own-channel plateau; not an SNR estimate."""
+
+    level_spread_db: np.ndarray | None = None
+    contrast_db: np.ndarray | None = None
+    contrast_se_db: np.ndarray | None = None
+    """Temporal contrast and its bootstrap error, never a causal noise separation."""
+
+    def boost_allowance(self, z: float, tracking_floor: float) -> np.ndarray:
+        """Conditional per-channel allowance; missing measurements license no restoration."""
+        if (
+            self.contrast_db is None
+            or self.contrast_se_db is None
+            or self.tracking is None
+        ):
+            return np.zeros_like(self.response_db)
+        valid = (
+            np.isfinite(self.contrast_se_db)
+            & np.isfinite(self.contrast_db)
+            & (self.tracking >= tracking_floor)
+        )
+        return np.where(
+            valid, np.maximum(self.contrast_db - z * self.contrast_se_db, 0), 0
+        )
+
     def __str__(self) -> str:
         if self.is_filtered:
-            verdict = "filtered"
+            verdict = "steep rolloff (cause unknown)"
         elif self.max_slope_db_per_octave >= 20.0:
-            verdict = "steep but inaudible"
+            verdict = "steep, reference unavailable"
         else:
             verdict = "no knee"
         return (
             f"{self.name:4s} max slope {self.max_slope_db_per_octave:5.1f} dB/oct "
             f"at {self.max_slope_hz:5.1f} Hz, plateau {self.plateau_hz[0]:5.1f}-"
             f"{self.plateau_hz[1]:5.1f} Hz, {self.passband_share * 100:4.1f}% of "
-            f"share band -> {verdict}"
+            f"mix plateau -> {verdict}"
         )
 
 
@@ -182,29 +167,23 @@ class Diagnosis:
     mix_db: np.ndarray
     channels: dict[str, ChannelDiagnosis]
     stratified: dict[str, np.ndarray] = field(default_factory=dict)
-    """Per-stratum response of the passband-dominant channel, keyed by stratum label."""
+    """Per-stratum response of the actual combined signal, keyed by stratum label."""
 
     level_spread_db: np.ndarray | None = None
-    """Spread across strata per bin. Large means the attenuation is not a fixed filter."""
+    """Spread of the combined signal; does not distinguish source from mastering."""
 
     filter_floor_hz: float = math.nan
-    """Below this the attenuation stops being level-independent — R2.
-
-    Not where the correction must stop. It is where inversion stops being *identification*
-    of a filter and becomes shaping, which is a claim about confidence, not about the target.
-    """
+    """Legacy name: boundary of mix level invariance, not an identification boundary."""
 
     noise_floor_hz: float = math.nan
-    """Below this there is no programme-correlated content left — R1's terminus.
+    """Legacy name: mix tracking boundary, conditional on absence of stopband leakage.
 
-    NaN means every band down to the bottom tracked the passband, so the correction is
-    expected to reach the bottom of the analysis band. A band that could not be measured is
-    *not* NaN — it terminates the search like a band that failed, because being unable to
-    see content is not the same as seeing content.
+    NaN means all tested bands tracked; unavailable measurements terminate the search.
     """
 
     @property
     def filtered_channels(self) -> list[str]:
+        """Channels eligible for a proposal, subject to their own measured allowance."""
         return [name for name, c in self.channels.items() if c.is_filtered]
 
 
@@ -343,31 +322,86 @@ def steepest_slope(
     return best, at
 
 
-def mix_shares(
-    material: Material, spectra: dict[str, np.ndarray] | None = None
-) -> dict[str, np.ndarray]:
-    """Fraction of summed-mix power each channel supplies, per bin.
+def _spectral_blocks(samples: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
+    """Non-overlapping Hann frames, grouped later into balanced temporal blocks.
 
-    Uses the same gains `tools/extract.py` applied when building the mix, so the shares sum
-    to ~1 and can be read directly as "where this frequency's energy comes from".
-
-    `spectra` is each channel's `mean_spectrum` in dB when the caller already has it.
-    `diagnose` does — it takes one per channel for the response — and taking it twice was
-    half the Welch time of a run for two copies of one number.
+    Block error is descriptive, not calibrated coverage: scenes can span blocks.
     """
+    n = min(WELCH_NPERSEG, len(samples))
+    frames = np.lib.stride_tricks.sliding_window_view(samples, n)[::n]
+    return np.fft.rfftfreq(n, 1 / fs)[1:], np.fft.rfft(frames * np.hanning(n), axis=1)[
+        :, 1:
+    ]
+
+
+def _ratio_error(
+    numerator: np.ndarray, denominator: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Ratio of means and delete-block jackknife error; retain coherent signed terms."""
+    groups = [
+        a
+        for a in np.array_split(np.arange(len(numerator)), max(1, len(numerator) // 16))
+        if len(a)
+    ]
+    n = np.array([numerator[g].sum(axis=0) for g in groups])
+    d = np.array([denominator[g].sum(axis=0) for g in groups])
+    total_n, total_d = n.sum(axis=0), d.sum(axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = total_n / total_d
+        leave = (total_n - n) / (total_d - d)
+    error = (
+        np.sqrt(
+            (len(n) - 1) / len(n) * np.sum((leave - leave.mean(axis=0)) ** 2, axis=0)
+        )
+        if len(n) >= 2
+        else np.full_like(ratio, np.nan)
+    )
+    return ratio, error
+
+
+def coherent_shares(
+    material: Material,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """Signed coherent contributions and temporal uncertainty. Cancellation may give >1 or <0."""
     from beqanalyser.design.material import LFE_GAIN, MAIN_GAIN
 
-    contributions: dict[str, np.ndarray] = {}
-    for name, samples in material.channels.items():
-        gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
-        power_db = (
-            spectra[name]
-            if spectra is not None
-            else mean_spectrum(samples, material.fs)[1]
-        )
-        contributions[name] = 10.0 ** (power_db / 10.0) * gain * gain
-    total = sum(contributions.values())
-    return {name: value / total for name, value in contributions.items()}
+    spectra = {
+        name: _spectral_blocks(samples, material.fs)[1]
+        * (LFE_GAIN if name == "LFE" else MAIN_GAIN)
+        for name, samples in material.channels.items()
+    }
+    if not spectra:
+        return {}, {}
+    summed = sum(spectra.values())
+    power = np.abs(summed) ** 2
+    values = {
+        name: _ratio_error(np.real(x * summed.conj()), power)
+        for name, x in spectra.items()
+    }
+    return (
+        {name: pair[0] for name, pair in values.items()},
+        {name: pair[1] for name, pair in values.items()},
+    )
+
+
+def mix_shares(material: Material, spectra=None) -> dict[str, np.ndarray]:
+    """Signed coherent contribution; `spectra` retained for source compatibility only."""
+    return coherent_shares(material)[0]
+
+
+def supported_mix_change(
+    before: np.ndarray, after: np.ndarray, fs: float, z: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Lower estimate of the proposed coherent power ratio, including block uncertainty.
+
+    Recomputed after channel restoration: a formerly quiet channel cannot inherit another
+    channel's precision. No independent-channel power-sum approximation is made.
+    """
+    freqs, original = _spectral_blocks(before, fs)
+    _, changed = _spectral_blocks(after, fs)
+    ratio, error = _ratio_error(np.abs(changed) ** 2, np.abs(original) ** 2)
+    lower = np.where(np.isfinite(error), ratio - z * error, 1.0)
+    return freqs, 10 * np.log10(np.maximum(lower, 1.0))
 
 
 def stratified_response(
@@ -382,11 +416,8 @@ def stratified_response(
     shoulder makes the normalisation point itself level-dependent and contaminates the very
     spread this measures.
 
-    This is the level-independence test of §6.4 R2. A linear filter's relative response is
-    the same however loud the scene; content's is not. On the second title the LFE measured
-    -63 dB re passband at 6 Hz in median scenes, -40 in loud ones and -36 in the loudest 1%,
-    which rules out a fixed filter *and* a fixed noise floor in one measurement — where the
-    depth of the attenuation alone rules out neither.
+    Source variation survives a fixed filter, while common-envelope natural colouring can
+    pass this check. This is a descriptive feature, not a causal classifier.
     """
     frames = np.lib.stride_tricks.sliding_window_view(samples, WELCH_NPERSEG)[
         :: WELCH_NPERSEG // 2
@@ -462,7 +493,7 @@ def band_tracking(
 ) -> float:
     """Correlation between a band's scene envelope and the passband's.
 
-    Real bass events have simultaneous energy across frequency; a stationary floor does not.
+    Programme events can share an envelope; stopband leakage can share it too.
     Restricted to frames where the passband is actually doing something, so the score is not
     manufactured by both bands falling silent together.
 
@@ -480,7 +511,11 @@ def band_tracking(
     return float(np.corrcoef(reference[live], target[live])[0, 1])
 
 
-def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagnosis:
+def diagnose(
+    material: Material,
+    params: DiagnoseParams | None = None,
+    extraction_params: "ExtractionParams | None" = None,
+) -> Diagnosis:
     """Decompose the mix per channel and locate the two floors R1 and R2 depend on."""
     params = params or DiagnoseParams()
     freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
@@ -490,7 +525,19 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         name: mean_spectrum(samples, material.fs)[1]
         for name, samples in material.channels.items()
     }
-    shares = mix_shares(material, spectra)
+    shares, share_errors = coherent_shares(material)
+    _, mix_plateau = plateau_reference(mix_db, freqs, params)
+    from beqanalyser.design.extraction import ExtractionParams, extract
+
+    extraction_params = extraction_params or ExtractionParams()
+    extraction_params = replace(
+        extraction_params,
+        exclude_bands_hz=tuple(
+            dict.fromkeys(
+                (*extraction_params.exclude_bands_hz, *params.exclude_bands_hz)
+            )
+        ),
+    )
 
     channels: dict[str, ChannelDiagnosis] = {}
     for name in material.channels:
@@ -506,13 +553,15 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         share = shares[name][band] if len(shares[name]) != len(freqs) else shares[name]
         # the share band is common to every channel on purpose: which channel supplies the
         # low end is a comparison, and a comparison needs one yardstick
-        in_share_band = (freqs >= params.share_band_hz[0]) & (
-            freqs <= params.share_band_hz[1]
-        )
+        in_share_band = (freqs >= mix_plateau[0]) & (freqs <= mix_plateau[1])
         in_share_band &= unexcluded(freqs, params.exclude_bands_hz)
         passband_share = (
             float(share[in_share_band].mean()) if in_share_band.any() else 0.0
         )
+        _, channel_spread, _, _, tracking = _temporal_evidence(
+            material.channels[name], material.fs, params, plateau, freqs
+        )
+        envelope = extract(material.channels[name], material.fs, extraction_params)
         channels[name] = ChannelDiagnosis(
             name=name,
             response_db=response,
@@ -521,49 +570,51 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
             max_slope_hz=at,
             passband_share=passband_share,
             is_filtered=(
-                math.isfinite(level)
-                and slope >= params.knee_slope_db_per_octave
-                and passband_share >= params.min_passband_share
+                math.isfinite(level) and slope >= params.knee_slope_db_per_octave
             ),
             plateau_hz=plateau,
+            share_se=share_errors[name][band],
+            tracking=tracking,
+            level_spread_db=channel_spread,
+            contrast_db=np.interp(
+                freqs, envelope.freqs, envelope.margin_db, left=np.nan, right=np.nan
+            ),
+            contrast_se_db=np.interp(
+                freqs, envelope.freqs, envelope.margin_se_db, left=np.inf, right=np.inf
+            ),
         )
         logger.info(f"  {channels[name]}")
 
-    filtered = [name for name, c in channels.items() if c.is_filtered]
-    # The floors are measured on the channel that dominates the passband, whether or not any
-    # channel was called filtered. Neither measurement needs a knee: "is this level-
-    # independent" and "is this programme-correlated" are questions about the material, and
-    # nesting them inside the filtered branch made the guard unreachable on exactly the case
-    # it exists for. Content high-passed at 30 Hz over a -26 dB floor is found at order 8
-    # (slope 40.7 dB/oct, floor at 15.6 Hz) and missed entirely at order 2 (13.6 dB/oct, no
-    # channel filtered, no floor, `flatten` free to ask for +22 dB at 5 Hz) — the same
-    # material either way, separated only by a steepness the floor does not depend on.
-    if not filtered:
-        logger.info("No channel shows a knee; the sum is the only available evidence")
-    if not channels:
-        return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
-
-    # the channel that dominates the passband, not whichever came first in the dict: on the
-    # first title `filtered` is [L, R, C, LFE] and the mains carry 6-8% each against the LFE's
-    # 76%, so stratifying the first one measures a channel nobody hears down there
-    dominant = max(channels, key=lambda name: channels[name].passband_share)
-    subject = material.channels[dominant]
-    # the floors are that channel's, so they are referenced to that channel's plateau
-    reference_hz = channels[dominant].plateau_hz
-    if not all(math.isfinite(f) for f in reference_hz):
-        logger.warning("Dominant channel has no usable contiguous plateau")
-        return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
-    strata_freqs, strata = stratified_response(
-        subject, material.fs, params, reference_hz
+    strata, spread, filter_floor, noise_floor, _ = _temporal_evidence(
+        material.mono_mix, material.fs, params, mix_plateau, freqs
     )
-    if not strata:
-        logger.warning(
-            f"{dominant} has too few frames in any loudness stratum to test level "
-            "independence; no floor measured"
-        )
-        return Diagnosis(freqs=freqs, mix_db=mix_db, channels=channels)
-    stacked = np.vstack(list(strata.values()))
-    spread = np.ptp(stacked, axis=0)
+    return Diagnosis(
+        freqs=freqs,
+        mix_db=mix_db,
+        channels=channels,
+        stratified=strata,
+        level_spread_db=spread,
+        filter_floor_hz=filter_floor,
+        noise_floor_hz=noise_floor,
+    )
+
+
+def _temporal_evidence(
+    subject: np.ndarray,
+    fs: float,
+    params: DiagnoseParams,
+    reference_hz: tuple[float, float],
+    freqs: np.ndarray,
+) -> tuple[dict[str, np.ndarray], np.ndarray, float, float, np.ndarray]:
+    """Measure each subject against its own plateau, including the actual combined mix."""
+    unavailable = np.full_like(freqs, np.nan)
+    if not all(math.isfinite(f) for f in reference_hz) or len(subject) < WELCH_NPERSEG:
+        return {}, unavailable, math.nan, params.band_hz[1], unavailable
+    strata_freqs, strata = stratified_response(subject, fs, params, reference_hz)
+    if len(strata) < 2:
+        spread = np.full_like(strata_freqs, np.nan)
+    else:
+        spread = np.ptp(np.vstack(list(strata.values())), axis=0)
     # searched downward from the *bottom* of the channel's plateau, not from the top of the
     # spectrum or the top of the plateau. Above it the strata diverge because loud scenes have
     # a different content spectrum, not because anything was filtered, and the spread is
@@ -581,22 +632,27 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
         else params.band_hz[0]
     )
 
+    if len(strata) < 2:
+        filter_floor = math.nan
+
     noise_floor = math.nan
     # the passband envelope is what every band is compared against, so it is computed once
     # here rather than again inside each call — it was 4 s a band on a two-hour title
-    tracking_reference = scene_envelope(subject, material.fs, reference_hz, params)
+    tracking_reference = scene_envelope(subject, fs, reference_hz, params)
+    tracking_curve = np.where(freqs >= reference_hz[0], 1.0, np.nan)
     for low, high in _octave_bands(params.band_hz[0], reference_hz[0]):
         if any(a <= high and b >= low for a, b in params.exclude_bands_hz):
             noise_floor = high
             break
         tracking = band_tracking(
             subject,
-            material.fs,
+            fs,
             (low, high),
             params,
             reference_hz,
             reference=tracking_reference,
         )
+        tracking_curve[(freqs >= low) & (freqs <= high)] = tracking
         # `not >=` rather than `<`, so a band that could not be measured at all fails the
         # same way one that failed does. NaN is not evidence of content, and reading it as
         # such is how a floor gets missed in the direction that costs something.
@@ -604,21 +660,12 @@ def diagnose(material: Material, params: DiagnoseParams | None = None) -> Diagno
             noise_floor = high
             break
 
-    logger.info(
-        f"Filtered: {', '.join(filtered) if filtered else 'none'} "
-        f"(floors measured on {dominant}, referenced to its {reference_hz[0]:.1f}-"
-        f"{reference_hz[1]:.1f} Hz plateau); level-independent above "
-        f"{filter_floor:.1f} Hz, content down to "
-        f"{'the bottom of the band' if math.isnan(noise_floor) else f'{noise_floor:.1f} Hz'}"
-    )
-    return Diagnosis(
-        freqs=freqs,
-        mix_db=mix_db,
-        channels=channels,
-        stratified={k: np.interp(freqs, strata_freqs, v) for k, v in strata.items()},
-        level_spread_db=np.interp(freqs, strata_freqs, spread),
-        filter_floor_hz=filter_floor,
-        noise_floor_hz=noise_floor,
+    return (
+        {k: np.interp(freqs, strata_freqs, v) for k, v in strata.items()},
+        np.interp(freqs, strata_freqs, spread),
+        filter_floor,
+        noise_floor,
+        tracking_curve,
     )
 
 
@@ -626,9 +673,9 @@ def _lowest_run(freqs: np.ndarray, mask: np.ndarray) -> float:
     """Lowest frequency of the contiguous run of `mask` ending at the top of the array.
 
     Callers pass a region ending at the passband, so this walks down from a frequency the
-    channel is known to be unfiltered at. An isolated island of agreement further down is
-    noise agreeing with itself, not the filter still being a filter, and must not be joined
-    to the run above it.
+    subject has a reference plateau. Isolated agreement further down does not establish
+    continuity with that plateau; it must not be joined to the run above it. Neither kind
+    of agreement establishes a mastering cause.
     """
     if not mask.any():
         return float(freqs[-1])
@@ -642,7 +689,7 @@ def _octave_bands(low: float, high: float) -> list[tuple[float, float]]:
     """Descending octave-ish bands between `high` and `low`, widest first."""
     bands: list[tuple[float, float]] = []
     top = high
-    while top / math.sqrt(2) > low:
+    while top > low:
         bands.append((max(low, top / math.sqrt(2)), top))
-        top /= math.sqrt(2)
+        top = max(low, top / math.sqrt(2))
     return bands
