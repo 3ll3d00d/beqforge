@@ -6,6 +6,7 @@ shows exactly what `python tools/design_beq.py --help` always has.
 """
 
 import importlib
+import multiprocessing
 import sys
 
 _SUBCOMMANDS = {
@@ -44,4 +45,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # `beqforge/filters.py`'s ProcessPoolExecutor re-execs this frozen binary to spawn workers
+    # on every platform where the multiprocessing start method is "spawn" (macOS, Windows —
+    # Linux's default "fork" never re-execs, which is why this only ever broke there). The
+    # re-exec passes a `--multiprocessing-fork` argv that must reach multiprocessing's own
+    # bootstrap, not our subcommand dispatch below; freeze_support() intercepts and handles it
+    # before `main()` ever sees it, and is a no-op for every ordinary invocation.
+    multiprocessing.freeze_support()
     sys.exit(main())
