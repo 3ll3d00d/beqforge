@@ -19,10 +19,20 @@ jobs:
       # apt/brew/choco ffmpeg builds are inconsistent about optional filters — brew's and
       # choco's default ffmpeg both lack the libsoxr resampler tools/extract.py asks for
       # (`Requested resampling engine is unavailable`), even though Ubuntu's apt package has
-      # it. This installs the same libsoxr-enabled build (gyan.dev full / evermeet.cx /
-      # johnvansickle static, per OS) everywhere, so all three legs decode identically.
-      - name: Install ffmpeg
+      # it. FedericoCarboni/setup-ffmpeg's Linux/Windows builds (johnvansickle static /
+      # gyan.dev full) do include it, but its macOS source (evermeet.cx) is x64-only and
+      # macos-latest runners are arm64 — so macOS gets its own libsoxr-enabled build via the
+      # homebrew-ffmpeg tap, which compiles natively for whatever arch it runs on.
+      - name: Install ffmpeg (Linux, Windows)
+        if: runner.os != 'macOS'
         uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies ffmpeg || true
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libsoxr
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.1.0
