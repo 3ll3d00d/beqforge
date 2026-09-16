@@ -1,0 +1,86 @@
+name: Build executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write  # softprops/action-gh-release needs to create/attach to the release
+
+jobs:
+  create_release:
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build (${{ matrix.os }})
+    # runs regardless of trigger (workflow_dispatch builds without a release to attach to);
+    # only waits on create_release, and only when that job actually ran, so a tag push still
+    # uploads to one release created once rather than racing three matrix legs to create it.
+    needs: [create_release]
+    if: always() && (needs.create_release.result == 'success' || needs.create_release.result == 'skipped')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: beqforge-linux-x86_64
+            built_path: dist/beqforge
+          - os: macos-latest
+            asset_name: beqforge-macos-x86_64
+            built_path: dist/beqforge
+          - os: windows-latest
+            asset_name: beqforge-windows-x86_64.exe
+            built_path: dist/beqforge.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build executable
+        run: uv run pyinstaller --clean beqforge.spec
+
+      - name: Smoke-test the built executable
+        run: uv run python tools/smoke_test_exe.py "${{ matrix.built_path }}"
+
+      - name: Rename artifact
+        run: cp "${{ matrix.built_path }}" "${{ matrix.asset_name }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

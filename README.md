@@ -117,6 +117,15 @@ decomposition and bass-management model — arrives in the request. `beqforge/de
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.
 
+For a machine without Python/`uv`, a standalone `beqforge` executable (every subcommand,
+including `serve-designer`) is built for Linux/macOS/Windows by
+`.github/workflows/build-executable.yml` on every `vX.Y.Z` tag, and attached to the matching
+GitHub release. `beqforge.spec` is the PyInstaller build recipe; `tools/smoke_test_exe.py`
+proves a built executable's `serve-designer` actually accepts a real request (not just
+`--help`) before it ships — the platform-specific failure mode worth catching is Windows'
+`multiprocessing` `spawn` inside a frozen executable, which only a real fit exercises. To build
+one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
+
 ## How it works, and why
 
 [AGENTS.md](AGENTS.md)'s "Working on `design/`" section is the full account — principles,
