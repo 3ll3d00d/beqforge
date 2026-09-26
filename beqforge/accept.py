@@ -156,13 +156,21 @@ class AcceptParams:
     min_section_contribution_db: float = 1.0
     """A section contributing less than this to the cascade has not earned its slot (§5.1).
 
-    Measured **over the judged band**, not over the whole design grid. A section earns its slot
-    by contributing to the correction, and a bass correction's correction is in the bass. Judged
+    Measured **over the band the fitter was allowed to place the target's sections in**
+    (`correction_band_hz` of the priced target, passed by the pipeline as
+    `contribution_band_hz`), not over the whole design grid. A section earns its slot by
+    contributing to the correction, and a bass correction's correction is in the bass. Judged
     over the whole grid instead, a cascade can spend sections on the midrange and score well for
     it: a pair of high-Q peaking sections a few hundred Hz up can each be worth nearly 2 dB
     across the grid and **0.00 dB** inside the band anyone listens to the result over. That is
     the "budget parked in the midrange" `correction_band_hz` exists to prevent, and it became
     reachable when `WIDEN_OCTAVES` opened the placement ceiling — so the two belong together.
+
+    Not the judged band either, which is narrower: it starts at the tracking floor. `flatten`
+    holds its boost flat below that floor, so the target asks for shape there and the fitter
+    spends sections on it; judged only above the floor, a section doing exactly what the fit
+    asked read as having done nothing (IMPROVEMENT_PLAN F3 — Black Bag's peaking section at
+    13.9 Hz, judged over 25-50 Hz). A caller with no target falls back to the judged band.
 
     The two populations do not overlap in practice: a section that earns nothing in band
     contributes essentially exactly 0.00 dB there, and every section that is doing work
@@ -500,6 +508,7 @@ def assess(
     filter_floor_hz: float = math.nan,
     required_offset_db: float = 0.0,
     target_db: np.ndarray | None = None,
+    contribution_band_hz: tuple[float, float] | None = None,
 ) -> Verdict:
     """Judge the published cascade against its licensed intent and the material.
 
@@ -648,9 +657,10 @@ def assess(
     # longer fits under full scale; the caller measures it because only the caller has the
     # signal.
 
-    # in the band the result is judged over, not across the whole grid — see
-    # `min_section_contribution_db` for the two midrange sections that motivated it
-    judged = (grid >= correction.band_hz[0]) & (grid <= correction.band_hz[1])
+    # in the band the fitter was allowed to place this target's sections in, falling back to
+    # the judged band; never the whole grid — see `min_section_contribution_db`
+    credited = contribution_band_hz or correction.band_hz
+    judged = (grid >= credited[0]) & (grid <= credited[1])
     for index, section in enumerate(filters):
         without = [f for j, f in enumerate(filters) if j != index]
         reduced = (
@@ -663,7 +673,7 @@ def assess(
             failures.append(
                 f"section {index + 1} ({section.type} at {section.freq_hz:.1f} Hz) "
                 f"contributes {contribution:.2f} dB across "
-                f"{correction.band_hz[0]:g}-{correction.band_hz[1]:g} Hz — "
+                f"{credited[0]:.4g}-{credited[1]:.4g} Hz — "
                 "has not earned its slot"
             )
 

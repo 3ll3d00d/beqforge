@@ -154,6 +154,19 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   plateau does not track the dialogue-dominated plateau at all (0.28). Tracking against the
   plateau stays. Dossier's floor is a consequence of its plateau (T4) and moves only if that
   is decided.
+* **F3 — done (the band mismatch; the "one more section" question is still open).** A section
+  is now credited for what it does across the band the fitter was allowed to place it in
+  (`correction_band_hz` of the priced target, the same band `_fit_all` uses), not only across
+  the judged band, which starts at the tracking floor. Midrange parking is still caught: that
+  band is the placement band, and the existing 341 Hz test still fails. Probe: Black Bag goes
+  from abstain to accepting `flatten` (same four sections; low end from −7 to −10 dB to within
+  about ±2 dB of flat), and three counterfactual candidates that failed only on this rule now
+  pass without changing any winner (28 Years Later, Alto Knights, Black Bag). A full Black Bag
+  run agrees. Synthetic evidence protocol, both seeds, before and after: identical selections
+  and false acceptances (1 of 4 development negatives, 0 of 4 held-out — as recorded in
+  `evidence_validation.json`). `_prune` still measures contribution over the score band, a
+  superset of the placement band. It keeps nothing the judge would now refuse, because a
+  section placed inside its band does its work there.
 * **E6 (report) — done.** The judge's own notes now reach the designer response as
   `verdict_notes`. They were in the run record but never in the response, so the review queue
   showed `shaping_fraction` as a bare number. On the baseline, Send Help's accepted filter now

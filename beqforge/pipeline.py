@@ -1386,6 +1386,13 @@ def _judge(
         filter_floor_hz=diagnosis.filter_floor_hz,
         required_offset_db=headroom.offset_db,
         target_db=target,
+        # the band `_fit_all` let this target's sections be placed in: a section is credited
+        # for work the fitter asked of it, not only for work inside the judged band
+        contribution_band_hz=(
+            None
+            if target is None
+            else correction_band_hz(target, DESIGN_GRID, params.lowest_frequency_hz)
+        ),
     )
     verdict.notes.append(
         f"verification transfer: published quantised device at {params.realisation.fs:g} Hz; "

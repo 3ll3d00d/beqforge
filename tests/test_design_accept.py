@@ -535,6 +535,39 @@ def test_a_section_must_earn_its_slot_inside_the_judged_band() -> None:
     assert "341" in earned[0] and "5-45 Hz" in earned[0], earned[0]
 
 
+def test_a_section_is_credited_across_the_band_it_was_placed_in() -> None:
+    """IMPROVEMENT_PLAN F3: the fitter and the judge must agree on where a section works.
+
+    `flatten` holds its boost flat below the tracking floor, so its target asks for shape
+    there and the fitter spends a section on it. Judged only over the judged band, which
+    starts at that floor, the section read as doing nothing — Black Bag's `flatten` candidate
+    was declined for a -2.2 dB peaking section at 13.9 Hz judged over 25-50 Hz. Credited over
+    the placement band the pipeline passes, it counts; a midrange section still does not.
+    """
+    judged = correction(lambda f: -13.0, lambda f: -1.5, band=(20.0, 45.0))
+    shaping_below = [
+        BiquadSpec("low_shelf", 30.0, 11.5, 0.73),
+        BiquadSpec("peaking_eq", 10.0, -2.2, 3.3),
+    ]
+    alone = assess(shaping_below, judged, noise_floor_hz=float("nan"))
+    assert any("peaking_eq at 10.0 Hz" in f for f in alone.failures), alone.failures
+
+    placed = assess(
+        shaping_below,
+        judged,
+        noise_floor_hz=float("nan"),
+        contribution_band_hz=(5.0, 120.0),
+    )
+    assert not any("earned its slot" in f for f in placed.failures), placed.failures
+
+    parked = shaping_below + [BiquadSpec("peaking_eq", 341.0, -1.7, 6.0)]
+    verdict = assess(
+        parked, judged, noise_floor_hz=float("nan"), contribution_band_hz=(5.0, 120.0)
+    )
+    earned = [f for f in verdict.failures if "earned its slot" in f]
+    assert len(earned) == 1 and "341" in earned[0], earned
+
+
 def test_boosting_below_the_noise_floor_is_caught() -> None:
     """The one clause that looks below where the judged band starts.
 
