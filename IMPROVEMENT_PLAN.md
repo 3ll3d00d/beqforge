@@ -130,6 +130,30 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   decision: `mv_adjust_db` and `confidence` feed the designer contract's own fields, the
   record schema and the ledger, and `is_filtered` is not an alias but T3's knee test.
   Probe: nothing moved (note text is outside every decision).
+* **T4 — checked; no code change.** Sensitivity sweep of the mix plateau against the band's
+  upper edge (120/200/300/450 Hz): stable on five titles, fragile on four. Dossier's plateau
+  always runs into the edge (143-200, 129-300, 127-450 Hz; none at 120); Ballad of Wallis
+  Island jumps from 28-38 Hz to 141-224 Hz at 300; Black Bag has none past 200; Send Help none
+  at 120. At the default 200 Hz, widest-first and lowest-first ordering pick the same plateau on
+  all nine, so reordering changes nothing today. The proposed rule — a region touching the top
+  edge is truncated, not a plateau — was tried and **rejected**: it changes only Dossier (to "no
+  usable plateau") and breaks verification of a correct result, since an exactly flattened curve
+  is flat to the top of the band (`test_the_exact_inverse_leaves_the_low_end_flat`).
+  **Why Dossier has no good plateau:** its mix never flattens above the rolloff. It rises at
+  about 3-4 dB/octave from 80 to 200 Hz (third-octave levels: −74.9 at 80 Hz, −73.2 at 125,
+  −69.5 at 160), against a 3 dB/octave flatness limit, so the only region that qualifies is
+  the 143-200 Hz tip. Rescuing it is a design decision, not a bug fix: how should a sloping
+  passband be referenced? Options: allow a tilted reference (fit the passband's slope and
+  measure the deficit against the extrapolated line), reference the mix to its main
+  contributors' own plateaus (L 80-198 Hz, R 102-198 Hz here), or keep abstaining but say
+  why. Open until decided.
+* **T8 — checked; chained tracking rejected.** Comparing each band's envelope with the band
+  directly above it, instead of with the plateau, removes the tracking floor on eight of nine
+  titles. Adjacent bands always correlate above 0.5, which is the stopband-leakage failure
+  the evidence rules warn about. On Dossier it still fails at 143 Hz, because the band below the
+  plateau does not track the dialogue-dominated plateau at all (0.28). Tracking against the
+  plateau stays. Dossier's floor is a consequence of its plateau (T4) and moves only if that
+  is decided.
 
 ## Baseline: 2026-09-26 track set
 
