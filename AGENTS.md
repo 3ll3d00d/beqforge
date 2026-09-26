@@ -48,7 +48,7 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
 | `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
-| `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, the two record comparison tools, and `probe.py`, the cheap regression probe. See "Performance" under "Working on `design/`" below. |
+| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `compare_verdicts.py`, `compare_records.py`; see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"). |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
 | `tests/` | `uv run pytest`. |
@@ -133,6 +133,93 @@ run against 13.9 s for the same code on the same machine — so a stalled run is
 timing even though its record is sound. Two cross-checks worth keeping: compare the record's own
 `total_s` against wall clock, and compare `FIT_STATS`' seconds-per-run across titles. If either
 disagrees with its neighbours, the run met a suspend and needs repeating rather than explaining.
+
+## Regression checking
+
+**Every change to anything under `beqforge/` goes through this before it is committed.** The
+test suite checks the code does what it says; this checks what it now *decides* on real
+material. A full `design_beq.py` pass over the baseline set is ~20 minutes, so the workflow is
+tiered: a cheap probe on every title, and real runs only where the probe says they are needed.
+
+**The baseline set.** The titles listed in `IMPROVEMENT_PLAN.md` ("Baseline: 2026-09-26 track
+set") as `data/<Title>.npz`, extracted as that section describes, each with its run record
+`data/<Title>.run.json.gz`. **Those records are the baseline** the probe re-judges against:
+don't overwrite them with a check run. Give check runs `--record <scratch>/<Title>.run.json.gz`.
+Refresh them deliberately, all together, when a change is accepted as the new baseline.
+
+**1. Snapshot before you change anything**, on committed code:
+
+```bash
+uv run python tools/experiments/probe.py snapshot data/*.npz --out <scratch>/before.json
+```
+
+It runs one process per title and takes ~1.5 minutes with a warm stage cache. It takes ~4
+minutes when the analysis has to be recomputed, which is any change to a module in
+`cache.ANALYSIS_MODULES`. After each commit, keep that commit's snapshot as the next
+reference, so every comparison is against the commit before it.
+
+**2. Snapshot after, and compare:**
+
+```bash
+uv run python tools/experiments/probe.py snapshot data/*.npz --out <scratch>/after.json
+uv run python tools/experiments/probe.py compare <scratch>/before.json <scratch>/after.json
+```
+
+`compare` ignores numeric changes up to `--tol` (0.01 by default). A change claimed to be
+exact-preserving uses `--tol 0` and must show nothing. The snapshot records:
+
+* **analysis** — mix plateau, floors, judged band, blockers, frame counts, the evidence
+  ceiling, and each channel's plateau and contrast;
+* **targets** — every strategy's priced target curve;
+* **rejudge** — every recorded candidate's *published* filters put back through the current
+  `_judge` (headroom is skipped because it is never gated), and which candidate
+  `Report.accepted` would select.
+
+**3. Act on what moved:**
+
+* **Nothing** → the change reaches no decision on this material. The test suite is still
+  required.
+* **A verdict or the accepted candidate** → look at every changed candidate's corrected curve
+  (charts, or the "Corrected low end" table of a real run) before believing it. "Never trust
+  a residual" applies to a verdict that flipped in your favour too.
+* **A target** → the probe's rejudge used the *recorded* target, so it proves nothing for that
+  title. `compare` names these titles: give each one a real run and check it with
+  `compare_verdicts.py` against its baseline record. A new accepted cascade can differ
+  section by section and still be the same answer — compare the corrected curves, not the
+  filters.
+* **An exact-preserving claim** → one real run and `compare_records.py` against its baseline
+  record. It must be byte-identical apart from the fingerprint and timings.
+
+**4. Any change that can turn a decline into an acceptance, or that touches evidence,
+ceiling, acceptance or selection** — also run the synthetic protocol, both seeds, before and
+after. False acceptances and selections must not get worse. The real titles contain no known
+negative, so they can show a wrong decline but never a wrong acceptance. Each seed is ~8
+minutes:
+
+```bash
+git worktree add <scratch>/wt_before HEAD   # "before", without stashing your change
+PY=$PWD/.venv/bin/python                    # the main venv; the worktree has none
+(cd <scratch>/wt_before && $PY tools/validate_evidence.py --seed 101 --output <scratch>/before_101.json)
+uv run python tools/validate_evidence.py --seed 101 --output <scratch>/after_101.json   # and --seed 947
+```
+
+**5. Write the outcome down** in `IMPROVEMENT_PLAN.md`'s "Progress": what changed, what the
+probe showed, which titles needed real runs and what they gave. An item with no recorded
+outcome is not done.
+
+**Pitfalls, each met at least once:**
+
+* The stage cache keeps **one entry per stage per title**. Running changed analysis code
+  against `data/` overwrites the cache the main tree uses. To try an idea without committing
+  it, use a scratch `git worktree` with its own `data/` directory of symlinks to the `.npz`
+  files and records, so its caches are written there.
+* A background run (tests, the synthetic protocol, a real design) imports the working tree
+  when each process starts. Don't edit `beqforge/` while one is running, or it silently
+  measures a mix of old and new code. Use a worktree instead.
+* On an unchanged tree the rejudge reproduces every recorded verdict and winner exactly. If the
+  probe's output is ever in doubt, check that first.
+* The probe covers only what it records. Anything it doesn't record — note text, headroom,
+  export content — needs its own test.
 
 ## Gotchas
 
@@ -368,15 +455,9 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   timings (`tools/experiments/compare_records.py`); validate a trade by checking the
   *decisions*, not the numbers — which candidates passed, which was accepted, what it
   published (`tools/experiments/compare_verdicts.py`).
-* **Regression without a full pass: `tools/experiments/probe.py`.** A change to decision logic
-  usually moves something before the fit (plateau, floors, judged band, evidence ceiling, the
-  priced target) or after it (the verdict on a given cascade), and the probe measures both
-  without fitting: `pipeline.analyse` from the stage cache, `pipeline.propose` for every
-  strategy's priced target (summarised with a digest), and every recorded candidate's
-  *published* filters put back through the current `_judge` (headroom skipped — it is never
-  gated). `snapshot` before and after, then `compare`; it names the titles whose targets moved,
-  and only those need a real `design_beq.py` run. On an unchanged tree the rejudge reproduces
-  every recorded verdict exactly — check that first if the probe itself is ever in doubt.
+* **Regression without a full pass** — `tools/experiments/probe.py`, and the workflow around
+  it in "Regression checking" above. Both kinds of change go through it; the probe says
+  which titles need a real run.
 * The fit pool leaves a core free (`FIT_WORKERS`); `PARALLEL_FITS = False` forces serial for
   profiling. **Already measured and rejected — don't redo:** replacing the optimiser with a
   smooth surrogate (fragile, or too slow), greedy section placement (this objective is
