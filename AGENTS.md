@@ -298,7 +298,7 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   abstains. No strategy has an opinion of its own: each will invert a noise floor as happily as
   a rolloff, which is what `priced_by_evidence` and `diagnose`'s guard are for. **Every strategy
   that builds a target must price it through `priced_by_evidence`, passing the mix's measured
-  deficit (`mix_deficit_db`)**. Pricing is the whole of the evidence: the tracking-floor hold,
+  low-end deficit (`low_end_deficit_db`)**. Pricing is the whole of the evidence: the tracking-floor hold,
   the deficit cap and the contrast ceiling, identical for every strategy. `counterfactual` once
   skipped pricing and handed the fitter +35 to +46 dB of boost no measurement supported. Until
   IMPROVEMENT_PLAN E3, only `flatten` got the hold and the cap, so the other two asked for up

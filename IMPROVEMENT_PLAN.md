@@ -276,7 +276,7 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
      how to state it without a constant. Mastering support is unavailable from programme
      alone (AGENTS.md), but a knee, level-invariance and tracking are all measured.
   2. **`varying_source/6`: a +18.7 dB, four-section `parametric` correction on a never-filtered
-     source.** A full-size false acceptance; investigate first.
+     source.** A full-size false acceptance — fixed; see "E2 finding 2" below.
 
   The evidence score does not separate these from true positives (0.91-0.96 on both), which
   confirms it cannot serve as a gate. The recovery gap between `flatten` (1-2 dB RMS) and the
@@ -284,6 +284,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   0.10) is a stated preference; `--gate` changes it. No scheduled CI job was added: at 15-20
   minutes it belongs in the regression workflow (AGENTS.md step 4) until the pipeline passes
   it.
+* **E2 finding 2 — fixed: every strategy is capped at the *low-end* deficit.** The worst corpus
+  false acceptance (`varying_source/6`, +18.7 dB parametric at 88 Hz) was a bass-heavy source
+  whose plateau sits at 4-12.6 Hz. The raw plateau-relative deficit therefore covered
+  everything above, and E3's cap allowed a model inversion to fill it. The cap is now
+  `low_end_deficit_db`: the deficit from the bottom up to its first settled end, tapered —
+  exactly `flatten`'s unpriced target, so `flatten` is unchanged (probe, `--tol 0`). Results:
+  * **Corpus:** gated false acceptances 7/45 → **4/45** (interval 0.06-0.29 → 0.02-0.21).
+    varying_source 3/9 → 0/9. Positives unchanged: 7/9, median recovery 1.26 dB RMS.
+    natural_droop unchanged at 4/9. The gate (0.10) still fails, on the four broadband ripple
+    fills.
+  * **Frozen protocol:** identical decisions on both seeds.
+  * **Real titles:** targets move only in the tails, by at most 1.6 dB. Full runs on the four
+    titles past tolerance: Caught Stealing and Send Help go back to `flatten`. Their
+    `parametric` target now equals `flatten`'s wherever the model asked for more, so it fits the
+    identical cascade and the tie goes to `flatten`. Send Help's earlier, flatter parametric
+    result (spread 10.6 against 12.6 dB) came from boosting in the taper zone above `flatten`'s
+    anchor, where the low end is not missing. Bugonia's and Obsession's winners are unchanged.
+  * **Consequence worth knowing:** under a shared cap, `parametric` and `counterfactual` can
+    only differ from `flatten` by asking for less. Records refreshed for the four titles;
+    `negative_corpus.json` is the new corpus baseline.
 
 ## Baseline: 2026-09-26 track set
 

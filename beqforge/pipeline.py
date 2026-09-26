@@ -545,13 +545,19 @@ def correction_evidence_score(target: np.ndarray, envelopes, z: float) -> float:
     return float(np.sum(weight * on_grid) / weight.sum())
 
 
-def mix_deficit_db(
+def low_end_deficit_db(
     material: Material, params: "PipelineParams"
-) -> tuple[np.ndarray, tuple[float, float]] | None:
-    """How far the mix sits below its own plateau, smoothed, on `DESIGN_GRID`, and the plateau.
+) -> np.ndarray | None:
+    """What the mix's low end is missing: the most any strategy may ask a filter to restore.
 
-    The most any correction can be missing: a target above it asks the mix to exceed its own
-    reference. `flatten`'s target is this, tapered; every strategy's target is capped by it in
+    The mix's smoothed deficit against its own plateau, on `DESIGN_GRID`, kept from the bottom
+    up to the first settled end of that deficit (`_deficit_anchor`) and tapered off above it.
+    A shortfall *above* that point is not a missing low end. It is the passband's own shape —
+    a bass-heavy source whose plateau sits at the bottom of the band reads everything above
+    it as "deficit" — and a strategy allowed to fill it reshapes the passband. It did: a
+    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (IMPROVEMENT_PLAN E2).
+
+    This is `flatten`'s unpriced target; every strategy's target is capped by it in
     `priced_by_evidence`. `None` when the mix has no usable plateau.
     """
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
@@ -563,10 +569,9 @@ def mix_deficit_db(
     deficit = smooth_unexcluded(
         np.maximum(-(response - level), 0.0), freqs, params.exclude_bands_hz, 15
     )
-    return (
-        np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0),
-        plateau_hz,
-    )
+    on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+    anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
+    return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
 def _held_below_floor(
@@ -614,7 +619,7 @@ def priced_by_evidence(
     """Bound a target by every piece of evidence, the same way for every strategy.
 
     In order: held flat below the tracking floor (`_held_below_floor`); capped at the mix's
-    measured deficit, when `deficit_db` is given (`mix_deficit_db`); clipped to peak–quiet
+    measured low-end deficit, when `deficit_db` is given (`low_end_deficit_db`); clipped to peak–quiet
     contrast minus its uncertainty, where missing or excluded bins license zero boost. The
     result is the target passed to fitting.
 
@@ -665,13 +670,10 @@ def flatten_targets(
     The plateau-relative deficit, tapered where it closes, then priced — held below the
     tracking floor and clipped to measured contrast — like every other strategy's target.
     """
-    measured = mix_deficit_db(material, params)
-    if measured is None:
+    unpriced = low_end_deficit_db(material, params)
+    if unpriced is None:
         return []
-    deficit, plateau_hz = measured
-    anchor = _deficit_anchor(DESIGN_GRID, deficit, params, plateau_hz)
-    unpriced = deficit * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
-    target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, deficit)
+    target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, unpriced)
     if target.max() < 1.0:
         return []
     return [
@@ -697,8 +699,7 @@ def counterfactual_targets(
         return []
     # Reuse channel spectra across restoration caps.
     restoration = _Restoration(material, diagnosis, params.playback)
-    measured = mix_deficit_db(material, params)
-    deficit = None if measured is None else measured[0]
+    deficit = low_end_deficit_db(material, params)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
         unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
@@ -753,8 +754,7 @@ def parametric_targets(
     """Propose the identified rolloff's protected and evidence-priced inverse."""
     if identification is None or not identification.detected:
         return []
-    measured = mix_deficit_db(material, params)
-    deficit = None if measured is None else measured[0]
+    deficit = low_end_deficit_db(material, params)
     result = design(
         identification,
         envelopes,

@@ -221,3 +221,27 @@ def test_every_strategy_prices_with_the_measured_deficit(monkeypatch):
     detected = types.SimpleNamespace(detected=True)
     pipeline.parametric_targets(material, diagnosis, envelopes, detected, params)
     assert handed and handed[0] is not None, "parametric"
+
+
+def test_a_bass_heavy_source_has_no_low_end_deficit():
+    """What is missing above the deficit's first settled end is the passband, not the low end.
+
+    A bass-heavy source has its plateau at the bottom of the band and falls away above it,
+    so its raw plateau-relative deficit is large everywhere above. Capped at that, a
+    parametric inverse boosted a never-filtered corpus title by 18.7 dB at 88 Hz. The low-end
+    deficit — `flatten`'s unpriced target, every strategy's cap — has nothing to give it.
+    """
+    from beqforge.diagnose import mean_spectrum
+    from beqforge.pipeline import low_end_deficit_db
+    from tests.test_design_diagnose import FS, material_from
+    from tests.test_design_pipeline import scened_noise
+
+    source = scened_noise(31, int(FS * 300.0))
+    heavy = source + 4 * signal.sosfilt(
+        signal.butter(2, 30, fs=FS, output="sos"), source
+    )
+    material = material_from({"L": heavy, "LFE": heavy * 0.5})
+    freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    falls = np.interp(10, freqs, response) - np.interp(80, freqs, response)
+    assert falls > 10.0, "the fixture should fall well away above its bass"
+    assert low_end_deficit_db(material, PipelineParams()).max() < 1.0
