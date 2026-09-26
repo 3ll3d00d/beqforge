@@ -122,6 +122,14 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   because `_source_digest` read sources a onefile build does not carry. Checked by a scratch
   PyInstaller build through `smoke_test_exe.py`, which now asserts both the baked revision and
   the record. Probe: nothing moved (no decision logic touched).
+* **C2 — done.** A run's limitations now live once, on `Report.evidence_notes`: proposals no
+  longer copy them, `_judge` no longer appends a candidate's target notes to its verdict notes,
+  and `priced_by_evidence` no longer repeats the "correction evidence" note. The designer
+  response, which has no run-level field, joins candidate and run notes in the commentary;
+  the `.beq` export does the same and de-duplicates legacy records. **Aliases kept**, by
+  decision: `mv_adjust_db` and `confidence` feed the designer contract's own fields, the
+  record schema and the ledger, and `is_filtered` is not an alias but T3's knee test.
+  Probe: nothing moved (note text is outside every decision).
 
 ## Baseline: 2026-09-26 track set
 

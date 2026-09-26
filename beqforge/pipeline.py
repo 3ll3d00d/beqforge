@@ -548,7 +548,9 @@ def priced_by_evidence(
         DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
     )
     ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
-    notes = evidence_notes(envelopes, params.confidence_z)
+    # which bins failed or lacked evidence is a property of the run, not of this target, and
+    # `analyse` already reports it once in the run's limitations
+    notes: list[str] = []
     clipped = target - ceiling
     worst_bin = int(np.argmax(clipped))
     if clipped[worst_bin] > 0.5:
@@ -1118,14 +1120,13 @@ def propose(
     fresh: bool = False,
     timings: Timings | None = None,
 ) -> list[Proposal]:
-    """Every selected strategy's proposals, each carrying the run's limitations as notes."""
+    """Every selected strategy's proposals, each carrying the notes on what bound its target."""
     timings = timings or Timings()
     params = analysed.params
     diagnosis = analysed.diagnosis
     envelopes = analysed.envelopes
     identification = analysed.identification
     identify_params = analysed.identify_params
-    limitations = list(analysed.limitations)
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
     proposals: list[Proposal] = []
@@ -1166,10 +1167,9 @@ def propose(
             if key is not None:
                 cache.store(cache_path, name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
-        proposals.extend(
-            dataclasses.replace(p, notes=tuple(dict.fromkeys((*p.notes, *limitations))))
-            for p in produced
-        )
+        # a proposal's notes are what bound *its* target; the run's limitations live once, on
+        # `Report.evidence_notes`, and the designer response joins the two itself
+        proposals.extend(produced)
     return proposals
 
 
@@ -1394,7 +1394,6 @@ def _judge(
     )
     verdict.notes.append(headroom.summary())
     verdict.notes.append(headroom.assumptions())
-    verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:
         logger.info(f"    {note}")

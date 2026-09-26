@@ -137,7 +137,11 @@ def _decline_for_no_passing_candidate(report: Report) -> tuple[str, str]:
 
 
 def _to_design_candidate(
-    candidate: Candidate, params: PipelineParams, *, report_gain_reduction: bool
+    candidate: Candidate,
+    params: PipelineParams,
+    *,
+    report_gain_reduction: bool,
+    run_notes: tuple[str, ...] = (),
 ) -> DesignCandidate:
     confidence = candidate.confidence
     if not math.isfinite(confidence):
@@ -162,8 +166,11 @@ def _to_design_candidate(
     commentary = {"strategy": candidate.label}
     if candidate.effective_params:
         commentary["effective_params"] = candidate.effective_params
-    if candidate.target_notes:
-        commentary["target_notes"] = "; ".join(candidate.target_notes)
+    # the response has no field for run-level notes, so the candidate carries them: what bound
+    # its own target first, then the run's limitations
+    notes = tuple(dict.fromkeys((*candidate.target_notes, *run_notes)))
+    if notes:
+        commentary["target_notes"] = "; ".join(notes)
     if not math.isnan(candidate.verdict.recovered_fraction):
         commentary["recovered_fraction"] = f"{candidate.verdict.recovered_fraction:.3f}"
     if not math.isnan(candidate.verdict.shaping_fraction):
@@ -279,7 +286,10 @@ def design(
         )
 
     candidate = _to_design_candidate(
-        accepted, params, report_gain_reduction=report_gain_reduction
+        accepted,
+        params,
+        report_gain_reduction=report_gain_reduction,
+        run_notes=report.evidence_notes,
     )
     candidate = dataclasses.replace(
         candidate, commentary={**(candidate.commentary or {}), **provenance}

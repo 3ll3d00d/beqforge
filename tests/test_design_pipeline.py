@@ -369,3 +369,18 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
     assert steps.max() < 1.0, (
         f"a step of {steps.max():.2f} dB is a cliff the fitter must chase"
     )
+
+
+def test_proposals_carry_their_own_notes_and_not_the_runs(walled) -> None:
+    """IMPROVEMENT_PLAN C2: a run's limitations are reported once, on the report.
+
+    Every proposal used to carry all of them too, so a candidate's printed notes, its `.beq`
+    export and the ledger each repeated the run's limitations once per candidate.
+    """
+    from beqforge.pipeline import analyse, propose
+
+    params = PipelineParams(strategies=("flatten",))
+    analysed = analyse(walled, params)
+    assert analysed.limitations, "the run should report its limitations somewhere"
+    for proposal in propose(walled, analysed):
+        assert not set(proposal.notes) & set(analysed.limitations), proposal.label

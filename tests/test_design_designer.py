@@ -611,3 +611,17 @@ def test_an_unwritable_record_dir_does_not_fail_the_design(tmp_path) -> None:
     response = design(_small_request(mono_mix=mono), record_dir=blocked)
     assert response.decline_reason == "channel_evidence_unavailable"
     assert "run_record: not written" in response.decline_message
+
+
+def test_the_response_joins_candidate_and_run_notes_once() -> None:
+    """The contract has no run-level field, so the candidate's commentary carries both."""
+    candidate = dataclasses.replace(
+        _candidate(), target_notes=("boost cap binds", "shared")
+    )
+    mapped = _to_design_candidate(
+        candidate,
+        PipelineParams(),
+        report_gain_reduction=False,
+        run_notes=("shared", "mix reference"),
+    )
+    assert mapped.commentary["target_notes"] == "boost cap binds; shared; mix reference"

@@ -177,7 +177,17 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
                     "beqforge": {
                         "accepted": bool(verdict["passed"]),
                         "failures": verdict["failures"],
-                        "notes": verdict["notes"] + candidate["target_notes"],
+                        # records written before the run's limitations moved to
+                        # `evidence_notes` repeat them in every candidate; keep one of each
+                        "notes": list(
+                            dict.fromkeys(
+                                (
+                                    *verdict["notes"],
+                                    *candidate["target_notes"],
+                                    *record.get("evidence_notes", ()),
+                                )
+                            )
+                        ),
                         "mv_adjust_db": candidate["mv_adjust_db"],
                     },
                 },
