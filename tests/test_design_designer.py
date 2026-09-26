@@ -560,6 +560,8 @@ def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None
     monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
     commentary = design(_small_request()).candidates[0].commentary
     assert commentary["beqforge_revision"] == "abc123+src:def456"
+    # the plain-language account leads, before the notes and parameters that qualify it
+    assert list(commentary)[:3] == ["found", "correction", "alternatives"]
     assert commentary["strategy"] == "flatten"  # added to, not replaced
     assert "run_record" not in commentary  # nothing asked for one
 
@@ -575,6 +577,7 @@ def test_a_decline_names_the_build_that_made_it(monkeypatch) -> None:
     response = design(_small_request())
     assert response.decline_message.startswith("flatten: overshoot")
     assert response.decline_message.endswith("[beqforge_revision: abc123+src:def456]")
+    assert " | found: reference:" in response.decline_message
     validate_response(response)
 
 

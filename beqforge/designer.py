@@ -26,7 +26,7 @@ from typing import Literal
 
 import numpy as np
 
-from beqforge import BiquadSpec, record
+from beqforge import BiquadSpec, explain, record
 from beqforge.design import DesignMethod
 from beqforge.material import Material
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
@@ -62,7 +62,9 @@ def _validate_audio_arrays(
     for name, samples in arrays:
         array = np.asarray(samples)
         if array.ndim != 1:
-            raise ValueError(f"{name} must be a 1-D audio array, got shape {array.shape}")
+            raise ValueError(
+                f"{name} must be a 1-D audio array, got shape {array.shape}"
+            )
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{name} must contain only finite samples")
         if name == "mono_mix":
@@ -287,7 +289,7 @@ def design(
         return DesignResponse(
             contract_version=request.contract_version,
             decline_reason=reason,
-            decline_message=f"{message} [{stamp}]",
+            decline_message=f"{message} | found: {explain.found(report)} [{stamp}]",
         )
 
     candidate = _to_design_candidate(
@@ -296,8 +298,15 @@ def design(
         report_gain_reduction=report_gain_reduction,
         run_notes=report.evidence_notes,
     )
+    # the plain-language account first, so a reader of the response meets the basis for the
+    # correction before the notes and parameters that qualify it
+    account = {
+        "found": explain.found(report),
+        "correction": explain.correction(accepted),
+        "alternatives": explain.alternatives(report, accepted),
+    }
     candidate = dataclasses.replace(
-        candidate, commentary={**(candidate.commentary or {}), **provenance}
+        candidate, commentary={**account, **(candidate.commentary or {}), **provenance}
     )
     return DesignResponse(
         contract_version=request.contract_version, candidates=[candidate]

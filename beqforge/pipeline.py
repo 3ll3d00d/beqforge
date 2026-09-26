@@ -406,6 +406,15 @@ class Report:
     the measure's own scatter is far larger, and preferring the lower number would be
     preferring noise. Candidates that differ by a clear margin are not a tie at all."""
 
+    mix_reference_db: float = math.nan
+    """Median level of the mix's own plateau: what every deficit is measured against."""
+
+    mix_plateau_hz: tuple[float, float] = (math.nan, math.nan)
+    """Where that plateau is. NaN when the mix has none, which is itself a blocker."""
+
+    judged_band_hz: tuple[float, float] | None = None
+    """The band every candidate's corrected curve was judged over; `None` if never set."""
+
     @property
     def accepted(self) -> Candidate | None:
         """The best of the candidates the acceptance model let through.
@@ -941,6 +950,9 @@ class Analysed:
     identification: Identification | None
     limitations: tuple[str, ...]
     blockers: tuple[str, ...]
+    mix_reference_db: float = math.nan
+    mix_plateau_hz: tuple[float, float] = (math.nan, math.nan)
+    judged_band_hz: tuple[float, float] | None = None
 
 
 def analyse(
@@ -1074,6 +1086,8 @@ def analyse(
         blockers.append("no qualifying loud events; restoration withheld")
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
+    region = (math.nan, math.nan)
+    judged = None
     if math.isfinite(mix_level):
         _, region = plateau_reference(
             mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
@@ -1110,6 +1124,9 @@ def analyse(
         identification=identification,
         limitations=tuple(limitations),
         blockers=tuple(blockers),
+        mix_reference_db=mix_level,
+        mix_plateau_hz=region,
+        judged_band_hz=judged,
     )
 
 
@@ -1202,6 +1219,9 @@ def run(
             FIT_STATS,
             accept=params.accept,
             evidence_notes=analysed.limitations,
+            mix_reference_db=analysed.mix_reference_db,
+            mix_plateau_hz=analysed.mix_plateau_hz,
+            judged_band_hz=analysed.judged_band_hz,
         )
     proposals = propose(material, analysed, cache_path, fresh, timings)
 
@@ -1258,6 +1278,9 @@ def run(
         fit_stats=FIT_STATS,
         accept=params.accept,
         evidence_notes=analysed.limitations,
+        mix_reference_db=analysed.mix_reference_db,
+        mix_plateau_hz=analysed.mix_plateau_hz,
+        judged_band_hz=analysed.judged_band_hz,
     )
 
 
