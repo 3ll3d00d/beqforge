@@ -224,6 +224,27 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   only Dossier moves (the other eight plateaus start at 18-50 Hz). This settles T4's open
   question for Dossier. A sloping passband *inside* the sub band remains unhandled until a
   title needs it.
+* **E3 — done, by fixing the evidence rather than the ranking.** The ambition was not in
+  selection. It was that only `flatten` got the tracking-floor hold and was bounded by the
+  measured deficit. On 28 Years Later, below the 20.5 Hz floor, `parametric` and
+  `counterfactual` asked for 16.4 and 15.5 dB where `flatten` asked 6.4. `priced_by_evidence`
+  now applies the hold and a cap at the mix's measured deficit (`mix_deficit_db`) to every
+  strategy, before the contrast ceiling. `flatten` is untouched: its targets are identical at
+  `--tol 0` on every title. Real runs on the eight titles the probe named:
+  * 28 Years Later still selects `parametric`, now +6.9 dB against `flatten`'s +6.1 (was
+    +18.7).
+  * Caught Stealing and Send Help switch to `parametric`. Both are flatter, not bigger: spread
+    3.27 against 3.44, and 10.6 against 12.6 dB. Send Help's +17.5 dB fills a bottom octave
+    that was 12-15 dB down, with no overshoot on its chart and the same recovered fraction
+    (0.93).
+  * Every other winner is unchanged. The largest recovered fraction is now 1.00 (was 2.01).
+  * The synthetic protocol **loses its one development false acceptance** (`natural_bass_light`,
+    won by counterfactual, now abstains): 0 of 4 on both seeds. The held-out positive recovers
+    slightly less (13.86 against 13.11 dB RMS from the full inverse).
+
+  Re-ranking by `correction_support_score` was not adopted: it is near-identical across one
+  title's candidates (0.91-0.92 on 28 Years Later), so it cannot separate them. A separate
+  "recovered fraction above 1 fails" rule is unnecessary once the cap exists.
 
 ## Baseline: 2026-09-26 track set
 

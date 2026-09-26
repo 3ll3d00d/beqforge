@@ -270,8 +270,9 @@ across every target at once) → `_judge` per candidate (publish, verify on the 
 headroom, `assess`). `Report.accepted` then takes the passing candidate whose corrected curve
 departs least from the *requested* shape, and within `ranking_tie_db` the one with fewest
 sections. Details worth knowing that are easy to miss elsewhere: `flatten` scans upward from the
-bottom for the first settled end of the deficit, tapers to nothing a quarter-octave above it,
-and holds the boost flat below the mix's tracking floor before pricing; `counterfactual` sweeps
+bottom for the first settled end of the deficit and tapers to nothing a quarter-octave above it;
+every strategy's target is then held flat below the mix's tracking floor and capped at the
+mix's measured deficit inside `priced_by_evidence`, before the contrast ceiling; `counterfactual` sweeps
 `restore_caps_db` (one candidate each, identical priced targets deduplicated) and only restores
 a channel as far as that channel's own contrast allows; the judged band runs from the tracking
 floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
@@ -282,13 +283,16 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   response), `counterfactual` (restore filtered channels, re-sum, read the deficit) and
   `parametric` (fit and invert a rolloff) all produce a target, all go through the same fitter
   and the same acceptance model, and all run by default. Adding one is a function plus an entry
-  in `STRATEGIES`. Select with `--strategy NAME` (repeatable, or `all`). All eight titles on
-  hand now accept — `flatten` and `counterfactual` between them win every one; `parametric` has
-  never produced the selected filter. No strategy has an opinion of its own: each will invert a
-  noise floor as happily as a rolloff, which is what `priced_by_evidence` and `diagnose`'s guard
-  are for. **Every strategy that builds a target must price it through `priced_by_evidence`**;
-  `counterfactual` did not for a long time, and handed the fitter +35 to +46 dB of boost that no
-  measurement supported.
+  in `STRATEGIES`. Select with `--strategy NAME` (repeatable, or `all`). On the nine-title
+  baseline (`IMPROVEMENT_PLAN.md`) `flatten` and `parametric` both win titles, and one title
+  abstains. No strategy has an opinion of its own: each will invert a noise floor as happily as
+  a rolloff, which is what `priced_by_evidence` and `diagnose`'s guard are for. **Every strategy
+  that builds a target must price it through `priced_by_evidence`, passing the mix's measured
+  deficit (`mix_deficit_db`)**. Pricing is the whole of the evidence: the tracking-floor hold,
+  the deficit cap and the contrast ceiling, identical for every strategy. `counterfactual` once
+  skipped pricing and handed the fitter +35 to +46 dB of boost no measurement supported. Until
+  IMPROVEMENT_PLAN E3, only `flatten` got the hold and the cap, so the other two asked for up
+  to 10 dB more below the floor and won selection on it.
 * **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but
   the outcome is a flat-to-rising response, and inverting the measured response reaches it
   directly. Do not reach for `identify_rolloff` to build a target — it returned "no

@@ -148,3 +148,76 @@ def test_coverage_and_channel_policies_apply_even_with_measured_mix_support(
     report = run(material)
     assert report.accepted is None
     assert any(reason in note for note in report.evidence_notes)
+
+
+def test_every_target_is_held_below_the_floor_and_capped_at_the_deficit():
+    """IMPROVEMENT_PLAN E3: one evidence rule for every strategy, not only `flatten`.
+
+    A model inversion that keeps climbing below the tracking floor used to reach the fitter
+    unheld: on 28 Years Later the parametric and counterfactual targets asked for 16.4 and
+    15.5 dB below the floor where `flatten` asked 6.4, and the parametric cascade won at
+    +18.7 dB. On Send Help a parametric target reached 1.54 times the measured deficit.
+    """
+    env = envelopes_with_margin(40.0)  # contrast licenses far more than either rule allows
+    diagnosis = Diagnosis(
+        DESIGN_GRID, np.zeros_like(DESIGN_GRID), {}, noise_floor_hz=20.0
+    )
+    climbing = np.clip(30.0 - 10.0 * np.log2(DESIGN_GRID / 5.0), 0.0, None)
+    at_floor = float(np.interp(20.0, DESIGN_GRID, climbing))
+
+    held, notes = priced_by_evidence(climbing, env, diagnosis, PipelineParams())
+    below = DESIGN_GRID < 20.0
+    assert np.allclose(held[below], at_floor)
+    assert any("noise floor binds" in n for n in notes)
+
+    deficit = np.full_like(DESIGN_GRID, 8.0)
+    capped, notes = priced_by_evidence(
+        climbing, env, diagnosis, PipelineParams(), deficit
+    )
+    assert capped.max() <= 8.0 + 1e-9
+    assert any("deficit cap binds" in n for n in notes)
+
+
+def test_every_strategy_prices_with_the_measured_deficit(monkeypatch):
+    """The cap only works if every caller hands it over — `flatten` is capped by
+    construction, so it is the other two that must not forget."""
+    import types
+
+    from beqforge import pipeline
+    from beqforge.diagnose import diagnose
+    from tests.test_design_diagnose import FS, high_passed, material_from
+    from tests.test_design_pipeline import scened_noise
+
+    samples = int(FS * 300.0)
+    material = material_from(
+        {
+            "L": scened_noise(20, samples),
+            "LFE": high_passed(scened_noise(22, samples), 22.0, order=6),
+        }
+    )
+    diagnosis = diagnose(material)
+    envelopes = extract(material.mono_mix, float(material.fs))
+    params = PipelineParams()
+    handed: list = []
+    real = pipeline.priced_by_evidence
+
+    def recording(target, envelopes, diagnosis, params, deficit_db=None):
+        handed.append(deficit_db)
+        return real(target, envelopes, diagnosis, params, deficit_db)
+
+    monkeypatch.setattr(pipeline, "priced_by_evidence", recording)
+
+    assert diagnosis.filtered_channels, "the high-passed LFE should read as filtered"
+    pipeline.counterfactual_targets(material, diagnosis, envelopes, None, params)
+    assert handed and all(d is not None for d in handed), "counterfactual"
+
+    handed.clear()
+
+    def fake_design(identification, envelopes, params, price_target):
+        price_target(np.full_like(DESIGN_GRID, 5.0))
+        return types.SimpleNamespace(filters=[], decline_reason="test")
+
+    monkeypatch.setattr(pipeline, "design", fake_design)
+    detected = types.SimpleNamespace(detected=True)
+    pipeline.parametric_targets(material, diagnosis, envelopes, detected, params)
+    assert handed and handed[0] is not None, "parametric"

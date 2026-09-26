@@ -545,17 +545,95 @@ def correction_evidence_score(target: np.ndarray, envelopes, z: float) -> float:
     return float(np.sum(weight * on_grid) / weight.sum())
 
 
+def mix_deficit_db(
+    material: Material, params: "PipelineParams"
+) -> tuple[np.ndarray, tuple[float, float]] | None:
+    """How far the mix sits below its own plateau, smoothed, on `DESIGN_GRID`, and the plateau.
+
+    The most any correction can be missing: a target above it asks the mix to exceed its own
+    reference. `flatten`'s target is this, tapered; every strategy's target is capped by it in
+    `priced_by_evidence`. `None` when the mix has no usable plateau.
+    """
+    freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    level, plateau_hz = plateau_reference(
+        response, freqs, params.diagnose, params.exclude_bands_hz
+    )
+    if not math.isfinite(level):
+        return None
+    deficit = smooth_unexcluded(
+        np.maximum(-(response - level), 0.0), freqs, params.exclude_bands_hz, 15
+    )
+    return (
+        np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0),
+        plateau_hz,
+    )
+
+
+def _held_below_floor(
+    target: np.ndarray, floor_hz: float
+) -> tuple[np.ndarray, list[str]]:
+    """Hold a target flat below the tracking floor, never above its own value there.
+
+    Below the floor nothing tracks the passband, so there is nothing to recover: the boost is
+    held at its value at the floor rather than chasing a curve that describes noise. Temporal
+    contrast alone licenses up to 14 dB more down there on real titles (IMPROVEMENT_PLAN E5),
+    so this is the only place the tracking evidence reaches a target.
+    """
+    notes: list[str] = []
+    if math.isnan(floor_hz):
+        return target, notes
+    below = DESIGN_GRID < floor_hz
+    if not below.any():
+        return target, notes
+    held = float(np.interp(floor_hz, DESIGN_GRID, target))
+    withheld = float(np.max(target[below])) - held
+    # The hold cannot exceed the local measured deficit.
+    over_by = float(np.max(held - target[below]))
+    target = np.where(below, np.minimum(held, target), target)
+    if withheld >= 0.5:
+        notes.append(
+            f"noise floor binds: the target asks for a further {withheld:.1f} dB below "
+            f"{floor_hz:.1f} Hz, held flat because nothing down there tracks the passband"
+        )
+    if over_by >= 0.5:
+        notes.append(
+            f"noise-floor hold capped at the local target below {floor_hz:.1f} Hz: "
+            f"the flat hold at {held:.1f} dB would have exceeded it by up to "
+            f"{over_by:.1f} dB"
+        )
+    return target, notes
+
+
 def priced_by_evidence(
     target: np.ndarray,
     envelopes,
     diagnosis: Diagnosis,
     params: "PipelineParams",
+    deficit_db: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[str]]:
-    """Clip each target bin to peak–quiet contrast minus its uncertainty.
+    """Bound a target by every piece of evidence, the same way for every strategy.
 
-    Interpolate `Envelopes.boost_ceiling` onto the design grid; missing or
-    excluded bins license zero boost. The result is the target passed to fitting.
+    In order: held flat below the tracking floor (`_held_below_floor`); capped at the mix's
+    measured deficit, when `deficit_db` is given (`mix_deficit_db`); clipped to peak–quiet
+    contrast minus its uncertainty, where missing or excluded bins license zero boost. The
+    result is the target passed to fitting.
+
+    Only `flatten` used to get the first two. A model inversion or a channel restoration
+    handed straight to the ceiling asked for 10 dB more than `flatten` below the floor of 28
+    Years Later, and a parametric target reached 1.54 times the measured deficit on Send Help
+    — the ambition IMPROVEMENT_PLAN E3 found selection rewarding.
     """
+    target, notes = _held_below_floor(target, diagnosis.noise_floor_hz)
+    if deficit_db is not None:
+        excess = target - deficit_db
+        worst = int(np.argmax(excess))
+        if excess[worst] > 0.5:
+            notes.append(
+                f"deficit cap binds: the target asks for {target[worst]:.1f} dB at "
+                f"{DESIGN_GRID[worst]:.1f} Hz, where the mix is {deficit_db[worst]:.1f} dB "
+                "below its reference"
+            )
+        target = np.minimum(target, deficit_db)
     native_ceiling = envelopes.boost_ceiling(params.confidence_z)
     ceiling = np.interp(
         DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
@@ -563,7 +641,6 @@ def priced_by_evidence(
     ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
     # which bins failed or lacked evidence is a property of the run, not of this target, and
     # `analyse` already reports it once in the run's limitations
-    notes: list[str] = []
     clipped = target - ceiling
     worst_bin = int(np.argmax(clipped))
     if clipped[worst_bin] > 0.5:
@@ -585,50 +662,16 @@ def flatten_targets(
 ) -> list[Proposal]:
     """Request enough boost to reach the mix's own spectral plateau.
 
-    Smooth the positive plateau-relative deficit, taper it where the deficit
-    closes, hold it below the tracking floor and price it by measured contrast.
+    The plateau-relative deficit, tapered where it closes, then priced — held below the
+    tracking floor and clipped to measured contrast — like every other strategy's target.
     """
-    freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    level, plateau_hz = plateau_reference(
-        response, freqs, params.diagnose, params.exclude_bands_hz
-    )
-    if not math.isfinite(level):
+    measured = mix_deficit_db(material, params)
+    if measured is None:
         return []
-    response = response - level
-    deficit = smooth_unexcluded(
-        np.maximum(-response, 0.0), freqs, params.exclude_bands_hz, 15
-    )
-
-    target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
-    anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
-    target *= _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
-    notes: list[str] = []
-    # Apply the tracking-floor hold before evidence pricing so the cap cannot hide it.
-    floor = diagnosis.noise_floor_hz
-    if not math.isnan(floor):
-        # below the noise floor there is nothing to recover; hold the boost rather than
-        # continuing to chase a curve that is describing noise
-        held = float(np.interp(floor, DESIGN_GRID, target))
-        below = DESIGN_GRID < floor
-        local_deficit = target
-        withheld = float(np.max(local_deficit[below])) - held if below.any() else 0.0
-        # The hold cannot exceed the local measured deficit.
-        over_by = float(np.max(held - local_deficit[below])) if below.any() else 0.0
-        target = np.where(below, np.minimum(held, local_deficit), target)
-        if withheld >= 0.5:
-            notes.append(
-                f"noise floor binds: the mix asks for a further {withheld:.1f} dB below "
-                f"{floor:.1f} Hz, held flat because nothing down there tracks the passband"
-            )
-        if over_by >= 0.5:
-            notes.append(
-                f"noise-floor hold capped at the local measured deficit below {floor:.1f} Hz: "
-                f"the flat hold at {held:.1f} dB would have exceeded it by up to "
-                f"{over_by:.1f} dB"
-            )
-    unpriced = target
-    target, capped = priced_by_evidence(target, envelopes, diagnosis, params)
-    notes.extend(capped)
+    deficit, plateau_hz = measured
+    anchor = _deficit_anchor(DESIGN_GRID, deficit, params, plateau_hz)
+    unpriced = deficit * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
+    target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, deficit)
     if target.max() < 1.0:
         return []
     return [
@@ -654,10 +697,14 @@ def counterfactual_targets(
         return []
     # Reuse channel spectra across restoration caps.
     restoration = _Restoration(material, diagnosis, params.playback)
+    measured = mix_deficit_db(material, params)
+    deficit = None if measured is None else measured[0]
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
         unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
-        target, capped = priced_by_evidence(unpriced, envelopes, diagnosis, params)
+        target, capped = priced_by_evidence(
+            unpriced, envelopes, diagnosis, params, deficit
+        )
         if target.max() < 1.0:
             logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
             continue
@@ -706,12 +753,14 @@ def parametric_targets(
     """Propose the identified rolloff's protected and evidence-priced inverse."""
     if identification is None or not identification.detected:
         return []
+    measured = mix_deficit_db(material, params)
+    deficit = None if measured is None else measured[0]
     result = design(
         identification,
         envelopes,
         parametric_params(params),
         price_target=lambda target: priced_by_evidence(
-            target, envelopes, diagnosis, params
+            target, envelopes, diagnosis, params, deficit
         ),
     )
     if not result.filters:

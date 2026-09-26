@@ -48,6 +48,9 @@ def test_nondefault_shared_settings_reach_both_fit_paths(monkeypatch):
         return [BiquadSpec("low_shelf", 20.0, 3.0, 0.707)], 0.1
 
     monkeypatch.setattr(D, "fit_minimal_biquads", fit)
+    # white noise sits within a few dB of its own plateau, so the measured-deficit cap would
+    # bind before the contrast ceiling this test reads confidence_z off (6 - 2.5 * 1 = 3.5)
+    monkeypatch.setattr(pipeline, "mix_deficit_db", lambda material, params: None)
     (proposal,) = pipeline.parametric_targets(*inputs(), params)
     effective = pipeline.STRATEGIES["parametric"].effective_params(params)
     assert effective.max_boost_db == 12.0
