@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import scipy.fft
 
 from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge import cache
@@ -761,17 +762,27 @@ class _Restoration:
     spectra: dict[str, np.ndarray]
     bins: np.ndarray
     before_db: np.ndarray
+    length: int
+    """Transform length: the programme zero-padded to a length the FFT factors quickly.
+
+    Unpadded, the length is whatever the programme happens to be, and a two-hour title can
+    factor as 2*3*613*1741 or 7*7*144779 — pocketfft's slow path, measured at 1.9 s a transform
+    and 86 s for one title's counterfactual targets. Padding (typically by under 1%) takes that
+    to about 0.1 s. It changes the restoration only at the programme's ends, where the
+    zero-phase gain's circular wrap now reads zeros instead of the other end of the film."""
 
     def __init__(self, material: Material, diagnosis: Diagnosis) -> None:
+        length = scipy.fft.next_fast_len(len(material.mono_mix), real=True)
         spectra = {
-            name: np.fft.rfft(material.channels[name])
+            name: np.fft.rfft(material.channels[name], length)
             for name in diagnosis.filtered_channels
         }
         object.__setattr__(self, "spectra", spectra)
+        object.__setattr__(self, "length", length)
         object.__setattr__(
             self,
             "bins",
-            np.fft.rfftfreq(len(material.mono_mix), 1.0 / material.fs),
+            np.fft.rfftfreq(length, 1.0 / material.fs),
         )
         object.__setattr__(
             self, "before_db", mean_spectrum(material.mono_mix, material.fs)[1]
@@ -821,7 +832,9 @@ def counterfactual_target(
         spectrum = restoration.spectra[name]
         gain = np.interp(restoration.bins, freqs, boost, left=boost[0], right=0.0)
         gain[~unexcluded(restoration.bins, params.exclude_bands_hz)] = 0.0
-        lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=len(samples))
+        lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=restoration.length)[
+            : len(samples)
+        ]
         mix_gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
         restored = restored + mix_gain * (lifted - samples)
 
