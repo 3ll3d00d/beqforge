@@ -267,7 +267,15 @@ is ground truth for E2 or A1.
 | Obsession | 7.1 (Atmos), 109 min | accept | accept | `flatten` 3, +28.2 dB | 0.92 / 1.02 | 24.3-40.1 | none → 5-45 |
 | Send Help | 7.1 (Atmos), 113 min | accept | accept | `flatten` 2, +13.1 dB | 0.93 / 1.00 | 24.1-41.7 | none → 5-45 |
 
-**Dossier 137 should not have been declined.** Every main channel is steeply rolled off (L 48.5
+**Records refreshed after E3 (d68eba0).** The table above is the state at 4858a45. The
+`data/*.run.json.gz` records the probe re-judges against now come from d68eba0. Winners at
+that commit: `parametric` on 28 Years Later, Caught Stealing and Send Help; `flatten` on Alto
+Knights, Ballad of Wallis Island, Black Bag, Bugonia and Obsession; Dossier 137 abstains
+(`no_usable_plateau`, see Progress). The next refresh is due when a change is accepted that
+moves targets.
+
+**Dossier 137 should not have been declined.** *(Superseded — see "Dossier 137 — decided" in
+Progress: abstaining is right; the original reason was wrong.)* Every main channel is steeply rolled off (L 48.5
 dB/oct at 41.7 Hz, R 51.2 at 28.1 Hz, C 33.2 at 39.3 Hz); the mean spectrum falls about 40 dB
 between 100 and 30 Hz; LFE is almost silent (219 loud frames of 13,597, 0% of the mix plateau).
 The decline is not an evidence decision. It is T4 feeding T8: a plateau at the band edge sets
