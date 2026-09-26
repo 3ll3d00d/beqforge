@@ -10,13 +10,13 @@ directly, so a nine-title regression pass costs seconds per title rather than mi
   and tracking floors, the judged band, blockers, and the evidence ceiling's footprint. Read from
   the stage cache when it is valid, so a change outside `cache.ANALYSIS_MODULES` costs nothing
   here; a change inside it recomputes the analysis once and leaves it cached for a later run.
-* **targets** — every strategy's priced target, summarised (peak, where, extent, a rounded
-  digest). A digest that moves means the fitter would be handed something different, so the
+* **targets** — every strategy's priced target: peak, where, extent and the curve itself. A
+  target that moves past `--tol` means the fitter would be handed something different, so the
   title needs a real run (`tools/design_beq.py`) before its verdict can be trusted.
 * **rejudge** — every candidate in the title's existing run record, its *published* filters put
   back through the current `_judge`. Isolates changes to verification and acceptance from the
   fitter entirely. Judged against the recorded target, which is only meaningful while the
-  target digest has not moved — the comparison says so when it has.
+  target has not moved — the comparison says so when it has.
 
     uv run python tools/experiments/probe.py snapshot data/*.npz --out base.json
     ... change something ...
@@ -32,7 +32,6 @@ the analysis itself — 20-40 s a title — when a change invalidates it.
 
 import argparse
 import gzip
-import hashlib
 import json
 import logging
 import math
@@ -66,12 +65,6 @@ def _num(value) -> float | None:
     return round(value, 6) if math.isfinite(value) else None
 
 
-def _digest(values: np.ndarray) -> str:
-    """Stable to the fourth decimal of a dB — below anything a verdict can turn on."""
-    rounded = np.round(np.nan_to_num(np.asarray(values, dtype=float), nan=-999.0), 4)
-    return hashlib.sha256(rounded.tobytes()).hexdigest()[:16]
-
-
 def _target(target: np.ndarray | None, lowest_hz: float) -> dict | None:
     if target is None:
         return None
@@ -82,7 +75,7 @@ def _target(target: np.ndarray | None, lowest_hz: float) -> dict | None:
         "peak_db": _num(target[peak]),
         "peak_hz": _num(DESIGN_GRID[peak]),
         "band_hz": None if band is None else [_num(b) for b in band],
-        "digest": _digest(target),
+        "curve_db": [_num(v) for v in target],
     }
 
 
@@ -141,7 +134,7 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
             "quiet_frames": envelopes.quiet_frames,
             "ceiling_bins_positive": int(np.sum(ceiling > 0)),
             "ceiling_max_db": _num(np.nanmax(ceiling)) if ceiling.size else None,
-            "ceiling_digest": _digest(ceiling),
+            "ceiling_db": [_num(v) for v in ceiling],
             "channels": {
                 name: {
                     "plateau_hz": [_num(p) for p in channel.plateau_hz],
@@ -182,7 +175,6 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
         )
         verdict = candidate.verdict
         out["rejudge"][recorded["label"]] = {
-            "recorded_target_digest": _digest(target),
             "passed": bool(verdict.passed),
             "failures": list(verdict.failures),
             "band_hz": [_num(b) for b in candidate.correction.band_hz],
@@ -209,17 +201,46 @@ def snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
-def _walk(a, b, path: str, out: list[str]) -> None:
+def _walk(a, b, path: str, out: list[str], tol: float) -> None:
     if isinstance(a, dict) and isinstance(b, dict):
         for key in sorted(set(a) | set(b)):
             if key not in a:
-                out.append(f"{path}.{key}: added {b[key]!r}")
+                out.append(f"{path}.{key}: added")
             elif key not in b:
-                out.append(f"{path}.{key}: removed (was {a[key]!r})")
+                out.append(f"{path}.{key}: removed")
             else:
-                _walk(a[key], b[key], f"{path}.{key}", out)
+                _walk(a[key], b[key], f"{path}.{key}", out, tol)
+    elif _numeric_list(a) and _numeric_list(b) and len(a) == len(b):
+        # a curve: one line for the whole array, and only past the tolerance
+        x = np.array([np.nan if v is None else v for v in a], dtype=float)
+        y = np.array([np.nan if v is None else v for v in b], dtype=float)
+        if not np.array_equal(np.isnan(x), np.isnan(y)):
+            out.append(f"{path}: measured bins differ")
+            return
+        delta = np.abs(x - y)[~np.isnan(x)]
+        worst = float(delta.max()) if delta.size else 0.0
+        if worst > tol:
+            at = int(np.nanargmax(np.abs(x - y)))
+            out.append(
+                f"{path}: max |change| {worst:.4f} (bin {at}: {x[at]:.3f} -> {y[at]:.3f})"
+            )
+    elif _is_number(a) and _is_number(b):
+        if abs(a - b) > tol:
+            out.append(f"{path}: {a!r} -> {b!r}")
     elif a != b:
         out.append(f"{path}: {a!r} -> {b!r}")
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _numeric_list(value) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) > 3
+        and all(v is None or _is_number(v) for v in value)
+    )
 
 
 def compare(args: argparse.Namespace) -> int:
@@ -229,7 +250,7 @@ def compare(args: argparse.Namespace) -> int:
     needs_run: list[str] = []
     for title in sorted(set(old) | set(new)):
         changes: list[str] = []
-        _walk(old.get(title, {}), new.get(title, {}), "", changes)
+        _walk(old.get(title, {}), new.get(title, {}), "", changes, args.tol)
         if not changes:
             print(f"{title}: unchanged")
             continue
@@ -237,9 +258,7 @@ def compare(args: argparse.Namespace) -> int:
         print(f"{title}: {len(changes)} change(s)")
         for change in changes:
             print(f"    {change}")
-        targets_old = old.get(title, {}).get("targets", {})
-        targets_new = new.get(title, {}).get("targets", {})
-        if targets_old != targets_new:
+        if any(change.startswith(".targets") for change in changes):
             needs_run.append(title)
     if needs_run:
         print(
@@ -269,6 +288,12 @@ def main() -> int:
     comp = sub.add_parser("compare", help="list what moved between two snapshots")
     comp.add_argument("old")
     comp.add_argument("new")
+    comp.add_argument(
+        "--tol",
+        type=float,
+        default=0.01,
+        help="ignore numeric changes up to this (dB, Hz, fractions alike); 0 for exact",
+    )
     args = parser.parse_args()
     return snapshot(args) if args.command == "snapshot" else compare(args)
 
