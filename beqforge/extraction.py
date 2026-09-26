@@ -66,10 +66,11 @@ class ExtractionParams:
     scene_margin_db: float = 45.0
     """How far above the floor a frame must sit to count as content. Absolute, per §3.2.
 
-    Large, because sub-bass in a film has enormous dynamic range — 61 dB from p10 to p99 on the
-    first real title — and the genuine bass events are the top 1-3% of frames. At +12 dB, 62%
-    of frames qualified and the feature being looked for was diluted out of existence: a knee
-    at 20 Hz measured +10.9 dB above 40 Hz over the top 1% of frames and -2.5 dB over that 62%.
+    Large, because sub-bass in a film has enormous dynamic range — around 60 dB between the 10th
+    and 99th percentile of frame energy — and the genuine bass events are only the top 1-3% of
+    frames. With a small margin most frames qualify and the feature being looked for is diluted
+    out of existence: a knee that stands clearly above the passband over the loudest 1% of
+    frames can read as no knee at all over a majority of them.
 
     The dilution is worst on exactly the material §2.3 says matters most. §3.2 warns that
     *relative* selection manufactures false positives on a bass-light title; an absolute margin
@@ -102,19 +103,18 @@ class ExtractionParams:
     inside it" — §2.1's move stated outright, since it makes a title whose knee is higher
     unrepresentable rather than unusual. Above the band `margin_se_db` is `inf`, which by its own
     documented convention means *no restriction*, so the one mechanism that prices boost against
-    evidence was silent exactly where the titles that abstain ask for it: measured, three ask for
-    boost above 60 Hz, by 6.7, 3.9 and 1.5 dB.
+    evidence was silent exactly where the titles that abstain ask for it: in practice some titles ask
+    for several dB of boost above 60 Hz.
 
     Deriving the edge was tried before removing it, from the mix's own plateau, on the argument
     that above where the programme reaches level no strategy asks for boost. **That argument is
-    false and Alien says so**: its plateau begins at 49.7 Hz and `flatten` asks for up to 14.6 dB
-    above 40 Hz, out to 132 Hz. A derived edge resting on a premise the material contradicts is
+    false**: a mix whose plateau begins near 50 Hz has `flatten` asking for more than ten dB
+    above 40 Hz, out past 100 Hz. A derived edge resting on a premise the material contradicts is
     no better than the constant it replaced.
 
     So every bin is priced, and the question of where to stop does not arise. It is affordable
-    because the stage is not where the time is: pricing all 477 bins of the largest title on hand
-    costs 2.7 s against 0.6 s for the 57 the old band covered, inside a 60 s run whose fitter is
-    82% of it. `_block_bootstrap_se` chunks the one large allocation rather than sizing it by the
+    because the stage is not where the time is: pricing every bin costs a few seconds against
+    under one for the old band, inside a run whose fitter is most of the time. `_block_bootstrap_se` chunks the one large allocation rather than sizing it by the
     bin count, which keeps the memory flat as the bin count grows. This cap remains only so a
     profiling run can pin the cost; nothing in the pipeline sets it."""
 
@@ -223,9 +223,8 @@ class Envelopes:
     What identification fits, and what a human actually reads. §3.3 originally called for a
     high percentile and argued a mean is "dominated by quiet passages"; measured on real
     material that is backwards. The percentile of heavy scenes is dominated by the *loudest*
-    events, which are LFE-driven and carry whatever the author sculpted into them — on the
-    first title a narrow +14 dB feature at 20 Hz — and that drags the corner estimate up with
-    it. Averaging the whole runtime averages such features away.
+    events, which are LFE-driven and carry whatever the author sculpted into them — a narrow
+    feature in the LFE, say — and that drags the corner estimate up with it. Averaging the whole runtime averages such features away.
     """
 
     peak_db: np.ndarray

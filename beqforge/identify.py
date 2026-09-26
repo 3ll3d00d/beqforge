@@ -55,10 +55,9 @@ class IdentifyParams:
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Bands to drop before fitting, for narrow authored features that are content, not shape.
 
-    The first real title carries a +14 dB feature about a third of an octave wide at 20 Hz in
-    its LFE channel. It is not a rolloff and it is not natural envelope; a robust loss does not
-    reject it because it is too broad to look like an outlier, and left in it drags the corner
-    from 13 Hz to 20."""
+    An LFE channel can carry a feature of ten-odd dB about a third of an octave wide. It is not a
+    rolloff and it is not natural envelope; a robust loss does not reject it because it is too
+    broad to look like an outlier, and left in it drags the fitted corner upward by several Hz."""
 
     envelope_order: int = 1
     """Polynomial order of `N(f)` in log-frequency.
@@ -243,11 +242,10 @@ def _fit_two_part(
 ) -> tuple[RolloffFit, np.ndarray]:
     """Fit `N + A` together under a robust loss.
 
-    Robust because real content is not smooth. The first title tried carries a narrow ~+8 dB
-    resonance at 20 Hz, about a third of an octave wide, sitting on an otherwise unremarkable
-    envelope. A low-order `N` cannot represent a feature that narrow, so under least squares
-    the attenuation term absorbs it: the corner is dragged up to 18.5 Hz and the knee pegs at
-    its bound, sharper than any physical filter. A soft-L1 loss treats the resonance as the
+    Robust because real content is not smooth. A mix may carry a narrow resonance, about a third of an octave
+    wide, on an otherwise unremarkable envelope. A low-order `N` cannot represent a feature that
+    narrow, so under least squares the attenuation term absorbs it: the corner is dragged up
+    and the knee pegs at its bound, sharper than any physical filter. A soft-L1 loss treats the resonance as the
     outlier it is and leaves the broad shape to be measured.
 
     All parameters are fitted jointly, from several starts, because `N` and `A` trade against

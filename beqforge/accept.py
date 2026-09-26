@@ -3,8 +3,8 @@
 R2 is a property of the material, measured by `diagnose`, and it bounds what a candidate may
 attempt rather than judging one after the fact — so it appears here only as a note. Where a
 correction reaches below the level-independence floor it is shaping rather than inverting an
-identified filter, which lowers confidence without making the answer wrong. Title 2's accepted
-design does exactly that and is right to; what was missing was anything saying so.
+identified filter, which lowers confidence without making the answer wrong. A design can
+legitimately do that, so the module says so rather than rejecting it.
 
 The reason this module exists separately from `verify` is that `Correction`'s statistics are
 aggregates — `spread`, `tilt` and `level` are all means or extrema over a band — and R1 is
@@ -62,19 +62,19 @@ class AcceptParams:
 
     0.0 because every filter the evidence base contains was produced aiming at flat — §3.4a's
     "flat is the shape; how far past flat to go is the preference dial of §4.3". A non-zero
-    default would change four accepted answers on no evidence.
+    default would change accepted answers on no evidence.
 
     **Acceptance-only, today.** No strategy builds a house curve into its target, so asking for
-    a rise currently discards the flat candidates rather than producing rising ones: measured
-    across the eight titles, +1 dB/octave loses a title and +2 loses three. Making this generate
+    a rise currently discards the flat candidates rather than producing rising ones: asking
+    for +1 dB/octave already loses some flat candidates, and +2 loses more. Making this generate
     rather than filter means adding the requested rise to `flatten`/`counterfactual`'s targets,
     and it costs headroom at the bottom — roughly 6 dB for +2 dB/octave."""
 
     tilt_tolerance_db_per_octave: float = 2.0
     """How far the corrected tilt may sit from `target_tilt_db_per_octave`.
 
-    2.0 is the half-width of the window this replaced, rounded; verified to select the identical
-    filter on all eight titles. Also the tolerance the turnover clause compares against, which
+    2.0 is the half-width of the window this replaced, rounded; chosen so the window selects the
+    same filters the earlier, cruder window did. Also the tolerance the turnover clause compares against, which
     is why it is one number rather than two."""
 
     level_tolerance_db: float = 3.0
@@ -94,9 +94,9 @@ class AcceptParams:
     """Precision every dB comparison here is made at. Below it, a difference is not a decision.
 
     No threshold in this class is known to better than this, and published gains are rounded to
-    0.005 dB, so comparing at float precision invents knife-edges: title 2's 38.6 Hz shelf
-    contributed 1.003 dB against a 1.0 dB limit and shipped with 0.003 dB of slack — one
-    rounding from losing a section for no reason anyone could defend.
+    0.005 dB, so comparing at float precision invents knife-edges: a section contributing 1.003 dB against
+    a 1.0 dB limit passes with 0.003 dB of slack, one rounding from being dropped for no reason
+    anyone could defend.
 
     Applied to both sides of each comparison, so it loosens every clause by at most half a
     quantum and never tightens one. Not applied to the extent clause, which is in Hz and already
@@ -107,13 +107,14 @@ class AcceptParams:
 
     "Flat" is part of R1, but an absolute threshold cannot express it. A smooth cascade cannot
     remove structure the mean spectrum already has, so the material sets a floor: measured
-    against a smooth trend over the judged band, all three titles wobble by 5.8-6.7 dB. An
-    absolute 6.0 dB limit therefore sat exactly on that floor — it failed the hand-built filter
-    accepted on the first title (6.6 against 6.74 of roughness) and passed one on the second
-    only because the cascade happened to cancel some of the wobble.
+    against a smooth trend over the judged band, real material wobbles by several dB on its own
+    (around 6 dB in the cases measured). An absolute 6 dB limit therefore sat exactly on that
+    floor: it failed a good hand-built filter whose wobble was just under the material's own,
+    and passed another only because the cascade happened to cancel some of the wobble.
 
-    Judged as an excess over roughness the populations separate: accepted designs run -1.6 to
-    -0.1 dB, while the two rejected ones run +2.4 and +4.3."""
+    Judged as an excess over roughness the populations separate: good designs come out at or
+    below the material's roughness, while the ones that add wobble of their own come out
+    clearly above it, by a couple of dB or more."""
 
     roughness_degree: int = 3
     """Order of the smooth trend the material's roughness is measured against."""
@@ -124,21 +125,17 @@ class AcceptParams:
     min_judge_octaves: float = 1.0
     """Narrowest band a slope may be read from. Below it, abstain and say so.
 
-    Tilt over a short band is not a weak measurement, it is an arbitrary one: Blazing Saddles'
-    band from its own 33.7 Hz noise floor measures -7.32 dB/octave to 45 Hz and -0.02 to 80 Hz,
-    which is the difference between "over-corrected" and "flat" decided by where the band was
-    stopped. Every clause downstream of tilt inherits that.
+    Tilt over a short band is not a weak measurement, it is an arbitrary one: the same
+    corrected curve can read as steeply over-corrected (-7 dB/octave) when the band is stopped
+    at one frequency and flat (0 dB/octave) when it is stopped a little higher, so the verdict
+    is decided by where the band ended. Every clause downstream of tilt inherits that.
 
-    Calibrated between the two titles that have a measured noise floor at all, which is the only
-    place this can bind. Blazing Saddles leaves **0.42** octaves and is the case above. Nocturnal
-    Animals leaves **1.19**, and over them its `flatten` candidate measures +0.97 dB/octave and
-    -1.9 dB — stable, inside every limit, and the right answer. 1.0 separates them.
-
-    It was first set at 1.5 on the reasoning that the five titles with no measured floor all
-    judge over 3.17 octaves and so have the width to spare. That compared the wrong populations:
-    a title with no floor is never constrained by this clause, so its width says nothing about
-    where the clause should sit, and the value it produced rejected Nocturnal Animals' good
-    filter on a band its own measurement was fine over."""
+    One octave is the narrowest band over which a slope means something. It is set from the
+    only place this clause can bind: a title whose tracking floor leaves well under an octave
+    to judge is arbitrary, while one that leaves an octave and a fifth or more is stable and
+    inside every limit. It is not set from titles with no measured floor — those are never
+    constrained by this clause, so how wide their bands are says nothing about where it should
+    sit; a value chosen that way rejected a good filter whose band was perfectly measurable."""
 
     turnover_min_octaves: float = 0.5
     """How far inside the band the peak must sit before a turnover is measured.
@@ -161,26 +158,24 @@ class AcceptParams:
 
     Measured **over the judged band**, not over the whole design grid. A section earns its slot
     by contributing to the correction, and a bass correction's correction is in the bass. Judged
-    over 3-400 Hz instead, a cascade can spend sections on the midrange and score well for it:
-    Nocturnal Animals' `flatten` candidate passed with peaking sections at 214 and 341 Hz, Q 6.0,
-    worth 1.94 and 1.72 dB across the grid and **0.00 dB** inside the band anyone listens to the
-    result over. That is the "budget parked in the midrange" `correction_band_hz` exists to
-    prevent, and it became reachable when `WIDEN_OCTAVES` opened the placement ceiling — so the
-    two belong together.
+    over the whole grid instead, a cascade can spend sections on the midrange and score well for
+    it: a pair of high-Q peaking sections a few hundred Hz up can each be worth nearly 2 dB
+    across the grid and **0.00 dB** inside the band anyone listens to the result over. That is
+    the "budget parked in the midrange" `correction_band_hz` exists to prevent, and it became
+    reachable when `WIDEN_OCTAVES` opened the placement ceiling — so the two belong together.
 
-    Measured across every passing candidate on the eight titles, the two populations do not
-    overlap: the sections that earn nothing in band contribute exactly 0.00 dB there, and every
-    other section contributes 1.00 dB or more. Worth knowing that the thinnest of those is
-    title 2's 38.6 Hz shelf at **1.003 dB**, which clears this by 0.003 — it sits that close
-    under the whole-grid measurement too, so the margin is not something this change introduced,
-    but it is the filter title 2 ships and it is one rounding away from losing a section."""
+    The two populations do not overlap in practice: a section that earns nothing in band
+    contributes essentially exactly 0.00 dB there, and every section that is doing work
+    contributes 1.00 dB or more, so 1 dB separates them without sitting on either. Note the
+    thinnest genuine section can sit only a few thousandths of a dB above it, one rounding away
+    from being dropped; that margin is a property of the limit, not something to tune around."""
 
     shaping_note_db: float = 1.0
     """Boost claimed below the level-independence floor worth remarking on.
 
     Not a limit. R2 says where inverting an attenuation stops being *identification* of a
     filter and becomes shaping, which is a claim about confidence rather than about the
-    target — title 2's accepted filter boosts through that region and is right to. But
+    target — a filter can rightly boost through that region. But
     nothing in the system said where the boundary was, so a reader had no way to tell a
     correction that rests on measured level-independence from one that does not.
 
@@ -195,9 +190,10 @@ class AcceptParams:
     Acceptance now judges the curve the device will actually realise — `verify` adds the
     coefficient-rounding error — and asks the only question that matters: does the shape survive.
     That is comparative and needs no calibrated number, where this one was a population separator
-    (p90 of 1.09-1.11 dB for two-shelf designs against 13.59 for a cancelling cascade). It also
-    rejected a usable filter: title 1's `counterfactual/35dB` measured 6.28 dB here and realises
-    to tilt -1.79, level -1.2, which is a shape nobody would object to.
+    (a plain two-shelf design drifts by about 1 dB at the 90th percentile, a cancelling cascade
+    by over ten). It also rejected usable filters: one that measured over 6 dB here still
+    realised a shape within a couple of dB/octave and a couple of dB of the intent, which nobody
+    would object to.
 
     Kept because the fitter still screens on it to *prefer* a robust cascade among equals, which
     is a legitimate tiebreak and the reason cancelling cascades rarely reach acceptance at all.
@@ -221,7 +217,7 @@ class Verdict:
     """The material's slope over the segment the corrected peak defines — the baseline.
 
     Not the slope below the material's *own* peak, which is a different segment and made the
-    comparison meaningless on seven of eight titles; see `turnover_db_per_octave`."""
+    comparison meaningless on most material; see `turnover_db_per_octave`."""
 
     turnover_after: float = math.nan
     """The same segment on the corrected curve. The turnover clause compares these two."""
@@ -241,10 +237,10 @@ class Verdict:
     ceiling to have clipped). Otherwise `sum(target) / sum(deficit)` over the points in the
     judged band where the deficit exceeds `recovered_fraction_floor_db` — a ratio of sums
     rather than a mean of ratios so a handful of near-zero-deficit bins cannot dominate it.
-    Below 100% the evidence ceiling clipped the target; the four titles whose target is
-    essentially unclipped read 84-102%, Alien and Tron 66-79%, and one title as low as 22% —
-    over 100% means the target asked for more than the measured deficit, which §14.1's
-    Blazing Saddles case shows is a construction defect, not evidence for a deeper rolloff."""
+    Below 100% the evidence ceiling clipped the target: a well-supported title reads close to
+    100%, a thinly supported one much less (as low as a fifth). Over 100% means the target asked
+    for more than the measured deficit, which is a construction defect, not evidence for a
+    deeper rolloff."""
 
     shaping_fraction: float = math.nan
     """Share of the cascade's peak gain claimed below `filter_floor_hz`, R2's boundary.

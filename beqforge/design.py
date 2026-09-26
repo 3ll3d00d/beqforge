@@ -115,7 +115,7 @@ class DesignParams:
     call reached `fit_minimal_biquads` without a `seeds` argument and so inherited that
     function's own default of three, while the pipeline around it fitted from one — so the
     parametric route ran three times the optimiser of every other candidate, on the strategy
-    that is rejected on all four titles. `PipelineParams.fit_seeds` sets this now, and the
+    least often selected. `PipelineParams.fit_seeds` sets this now, and the
     reasoning there applies here unchanged."""
 
     realisation: Realisation | None = Realisation()

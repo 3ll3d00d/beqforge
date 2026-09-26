@@ -49,7 +49,7 @@ def device_error_db(
     is not the one the optimiser produced. Measured at the device's rate, where the rounding
     happens, then resampled onto the analysis axis.
 
-    Measured across the eight titles this runs 0.08 to 1.41 dB. Two things worth knowing about
+    Over real material this runs from under a tenth of a dB to a little over one. Two things worth knowing about
     its size: a 32-bit float device is no better than 5.23 fixed point here, because the
     coefficients that matter sit near |a1| = 2 where both formats have the same 1.19e-7 absolute
     step; and the mechanism is not pole radius — one step moves that by 0.03% of its margin —
@@ -273,10 +273,11 @@ class Correction:
         One physical quantity in dB rather than a weighted combination of the clauses'
         statistics, which is what makes it comparable without a constant to argue about: level,
         tilt and wobble are all departures from this same line, and this measures all three at
-        once in the unit they are already in. Ranking on `wobble_db` alone decided on 0.08-0.23
-        dB of a quantity whose own scatter is 3-14 dB, and was blind to level — on title 3 it
-        preferred a candidate sitting +3.70 dB above plateau to one at -0.36 because its wobble
-        was 0.09 dB lower. The same two score 4.27 and 1.54 here.
+        once in the unit they are already in. Ranking on `wobble_db` alone decided on differences of a
+        fraction of a dB in a quantity whose own scatter is several dB, and was blind to level —
+        it could prefer a candidate sitting nearly 4 dB above plateau to one a third of a dB
+        below it because its wobble was a hair lower. Departure from the requested shape scores
+        those two very differently, and correctly.
 
         Measured against the request rather than against flat, so the ranking cannot quietly
         reimpose flat on a run that asked for a house curve. At 0.0 the two are identical.

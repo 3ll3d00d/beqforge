@@ -45,18 +45,17 @@ class DiagnoseParams:
     22-35 Hz, justified as "above any plausible knee and below where mains content starts
     dominating" — which is §2.1's forbidden move written down, since it makes a knee above
     22 Hz unrepresentable rather than unusual. Measured, the band is not a passband on any
-    channel of any title tried: it slopes at +0.8 to +40 dB/octave, and on the fourth title
-    the mains fall at +40 dB/octave straight through it, because that title's wall is at
-    19-21 Hz and the "reference" sits on its shoulder. Referencing there understated those
-    channels' attenuation by 13-17 dB.
+    channel: it slopes by anything from a gentle tilt to tens of dB/octave, and where a mix's
+    own wall sits inside it the "reference" lands on the shoulder of the knee, so the
+    attenuation is understated by however much the shoulder has already fallen.
 
     A single fixed band cannot be right for both a full-range channel and the LFE in any
-    case: the LFE carries its own lowpass, measured at 32-62 Hz across four titles, so a band
+    case: the LFE carries its own lowpass, typically somewhere in the tens of Hz, so a band
     high enough to clear a mains knee is already on the LFE's downslope.
 
     Sampling uniformly in log frequency weights each octave equally, so the LFE's passband is
     not swamped by the two octaves above its lowpass; a high percentile rather than the
-    maximum so a narrow authored feature — the first title's +14 dB hump at 20 Hz — does not
+    maximum so a narrow authored feature (a hump a third of an octave wide, say) does not
     become the reference."""
 
     reference_tolerance_db: float = 3.0
@@ -113,8 +112,8 @@ class ChannelDiagnosis:
     """Where this channel sits within `reference_tolerance_db` of its own reference level.
 
     Reported because it is the assumption every attenuation figure rests on, and it is not a
-    constant: measured across four titles the lower edge runs 12.8-36.7 Hz and the LFE's
-    upper edge 31.7-62.2 Hz. A plateau whose lower edge sits at or above the channel's knee
+    constant: the lower edge varies by a factor of about three between mixes and the LFE's
+    upper edge by a factor of two. A plateau whose lower edge sits at or above the channel's knee
     means the reference is on the knee's shoulder and the attenuation is understated."""
 
     share_se: np.ndarray | None = None

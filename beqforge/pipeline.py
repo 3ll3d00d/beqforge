@@ -6,24 +6,23 @@ their outputs are directly comparable, and any of them may be selected, combined
 at once with the best surviving candidate taken. They disagree usefully, and a disagreement
 is evidence about the material rather than a problem to be resolved by picking a favourite.
 
-* **`flatten`** — invert the measured mix response. The rule the human-validated filters on
-  all three titles turned out to represent: the shape a good correction produces is flat to
-  the bottom of the evidence, and the target is simply the mix's own curve negated. Needs no
-  model of the rolloff and no `N`/`A` separation, which is the part §0 calls the weak link.
+* **`flatten`** — invert the measured mix response: the shape a good correction produces is
+  flat to the bottom of the evidence, and the target is the mix's own deficit against its
+  plateau. Needs no model of the rolloff and no `N`/`A` separation, which is the weak link.
 * **`counterfactual`** — restore the filtered channels, re-sum, read the deficit off the mix.
-  The route that answered title 2, where the sum carries no usable evidence below ~15 Hz
-  because the filtered channel is 23 dB under the mains there.
-* **`parametric`** — `identify_rolloff` on the mono mix and invert the fitted rolloff (§3.5).
-  The soft-hinge route; the only one that can produce an exact closed-form inversion when the
-  alignment is representable, which on the three titles so far it never was.
+  The route for a mix whose sum carries no usable evidence at the bottom because a filtered
+  channel sits far under the mains there.
+* **`parametric`** — `identify_rolloff` on the mono mix and invert the fitted rolloff.
+  The soft-hinge route; the only one that can produce an exact closed-form inversion, when the
+  alignment is representable.
 
 `flatten` is validated only on modern, bass-rich material. On a sparse or old mix, flattening
 would lift the noise floor with the content, and nothing in the target itself objects — that
-is what the guard is for. `diagnose`'s level-independence test, band tracking and noise floor
-bound how far down a correction may reach and say when to abstain; they are not on the path to
-producing a target.
+is what the evidence pricing is for. `diagnose`'s band tracking sets the noise floor below
+which `flatten` holds its boost flat, and its level-independence test is diagnostic only;
+identification is not on the path to a target except through `parametric`.
 
-Candidates are judged against §6.4 and the survivors ranked. The ranking is deliberately
+Candidates are judged by `accept.assess` and the survivors ranked. The ranking is deliberately
 shallow — the acceptance model does the work, and a scalar score that could overrule it would
 reintroduce exactly the aggregate-blindness R1 exists to defeat.
 """
@@ -144,10 +143,9 @@ class PipelineParams:
     levels the mix against the mix's **own plateau** (`plateau_reference`) and stops where its
     own deficit stops, so neither the level nor the extent is a constant.
 
-    Measured, the mix plateau begins at 13.9, 18.3, 21.6 and 32.3 Hz across the four titles.
-    40 Hz fell inside all four, so the old constant was not yet wrong — but by only 1.24x on
-    the fourth, and a title with a knee near 50 Hz would have been levelled inside its own
-    rolloff.
+    A fixed 40 Hz sat inside the plateau of every mix it was tried on, so it was not yet wrong
+    — but only narrowly on some, and a mix with a knee near 50 Hz would have been levelled
+    inside its own rolloff.
 
     Scanning **upward from the bottom** and taking the first crossing is what keeps the
     high-frequency fall out of the target. Referenced to a plateau level rather than to a
@@ -168,25 +166,23 @@ class PipelineParams:
     is inverting something that is not a filter is exactly what is not known in advance, and
     the acceptance model is better placed to reject the wrong ones than a prior is.
 
-    50 added on Predator, the title the original three could not close: 45 dB still fell at
-    2.8 dB/oct (`max_tilt_db_per_octave` is 2.0), 50 dB reached the plateau and passed outright
-    — and 55/60/70 dB all produced the *identical* target, so 50 is not an arbitrary stop, it
-    is where this channel's own measured attenuation runs out. Cheap to try even where it does
-    nothing: a cap whose target matches an earlier one is deduplicated before fitting."""
+    The sweep runs to 50 dB because that is where a very heavily attenuated channel's own
+    measured attenuation runs out: smaller caps can leave the restored mix still falling too
+    steeply for the acceptance model (`max_tilt_db_per_octave`), while beyond 50 dB every cap
+    produces the identical target, so the top of the sweep is a natural stop, not an arbitrary
+    one. Cheap to try even where it does nothing: a cap whose target matches an earlier one is
+    deduplicated before fitting."""
 
     max_sections: int = 4
     """Ceiling on biquads a fit may spend, escalated from 1 up to this (`_tiers`).
 
-    Tried at `BIQUAD_BUDGET` (10, designer-interface.md v1.0 §5) on the theory that a title
-    exhausting 4 sections without settling was budget-starved rather than shape-limited.
-    Measured on Predator, the one real title that both exhausts the budget and has the most
-    to gain: `counterfactual/25dB` spent the extra room, settling at 5 sections instead of 4,
-    and failed on the *same* comparative checks anyway — "still falls at 11.7 dB/oct —
-    under-corrected; corrected level -9.6 dB is outside -3..+8" is not a section-count
-    problem. Every other candidate hit its identical wall at whatever section count it tried.
-    Cost was not proportionate to that answer: 997 s against 70 s, 265 optimiser runs against
-    40, for the same abstention — the estimate that "`max_sections=5` would roughly
-    double a run" was, if anything, optimistic about 10.
+    Raising it to `BIQUAD_BUDGET` (10, designer-interface.md v1.0 §5) was tried on the theory
+    that a title exhausting 4 sections without settling was budget-starved rather than
+    shape-limited. It was not: the extra sections were spent, and the candidate failed the same
+    comparative checks anyway ("still falls ... under-corrected; corrected level outside the
+    window" is not a section-count problem). Every other candidate hit its identical wall at
+    whatever section count it tried. Cost was out of proportion to that answer — an order of
+    magnitude more time and optimiser runs for the same abstention.
 
     Reverted rather than left at 10 and merely undocumented: a search-cost ceiling that costs
     14x on exactly the titles it was meant to help, for no change in outcome, is not a free
@@ -224,11 +220,10 @@ class PipelineParams:
     exactly that evidence (contiguous runs, not raw frames, because a 50%-overlapping frame
     pair is not two independent observations), so the ceiling now tightens where the estimate
     itself is shaky and relaxes where it is not, per bin per title, instead of asserting one
-    number for every extraction. Checked against all eight titles on hand: the derived
-    ceiling came out looser than the old flat one everywhere the evidence was solid, and did
-    what the flat one could not on the one title with almost none of it (Nocturnal Animals,
-    10 independent loud events) — SE there ran 4-8x every other title's, and the ceiling
-    tightened accordingly without being told to.
+    number for every extraction. Where the evidence is solid the derived ceiling comes out
+    looser than the old flat one; where a title has almost none (a handful of independent
+    loud events) the standard error runs several times larger than elsewhere and the ceiling
+    tightens accordingly without being told to.
 
     Missing or deliberately omitted measurements license no boost."""
 
@@ -406,10 +401,9 @@ class Report:
     """Flatness difference below which two candidates are the same answer (`accepted`).
 
     Inside it, the one with fewer sections wins — R3's parsimony, applied where it belongs.
-    Two of the three titles with more than one passing candidate are genuine ties by this
-    measure: Nocturnal Animals at 2.47 against 2.49 dB and Tron at 1.32 against 1.34, where
-    preferring the lower number is preferring noise. Title 3's pair sit 1.54 against 4.27 and
-    are not a tie at all."""
+    Candidates whose departures differ by a few hundredths of a dB are genuinely tied, since
+    the measure's own scatter is far larger, and preferring the lower number would be
+    preferring noise. Candidates that differ by a clear margin are not a tie at all."""
 
     @property
     def accepted(self) -> Candidate | None:
@@ -423,10 +417,10 @@ class Report:
         asking for a house curve is not handed the flattest candidate — then on section count
         within `ranking_tie_db`. It was ranked on `wobble_db`, which is the statistic the
         flatness clause judges but the wrong one to choose *between* passing candidates: it is
-        blind to level and tilt, which acceptance admits across an 11 dB and 4.5 dB/octave
-        range respectively, and the margins it decided on were 0.08-0.23 dB of a quantity
-        whose own scatter is 3-14 dB. On title 3 that preferred a candidate 3.70 dB above
-        plateau to one 0.36 dB below it, for 0.09 dB of wobble and one fewer section.
+        blind to level and tilt, which acceptance admits across a wide range, and the margins it
+        decided on were a fraction of a dB in a quantity whose own scatter is several dB. That
+        could prefer a candidate several dB above plateau to one a fraction of a dB below it,
+        for a hair less wobble and one fewer section.
         """
         passing = [c for c in self.candidates if c.verdict.passed]
         if not passing:
@@ -747,8 +741,8 @@ STRATEGIES = {
 """Every way of deriving a target, by name. All equal citizens of the same pipeline.
 
 `parametric` is the one that caches, because it is the one whose target derivation runs an
-optimiser: it calls `design`, which calls the fitter, and across the four titles that is 403 s
-of a 1,586 s run — more than any other single stage. What it contributes is a statement about
+optimiser: it calls `design`, which calls the fitter, and that is more than any other single
+stage of a run. What it contributes is a statement about
 the *material* — does this look like a deliberate rolloff, of what alignment and order — which
 does not change between runs of the same code over the same title. `flatten` and
 `counterfactual` derive a curve directly and are not worth the round trip.

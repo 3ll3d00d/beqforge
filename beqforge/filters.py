@@ -305,28 +305,16 @@ independent reasons to be generous upward, and they agree:
 * *Blending.* A correction that stops at F still has to meet the rest of the programme above F,
   and the section that does that sits above F by construction.
 
-This was `high * 1.5`, half an octave, and that cost title 1 its accepted filter once placement
-stopped being the fixed `(5, 40)` literal. Measured on that title, where the target ends at
-14.8 Hz:
-
-| upward room | outcome | worst drift | sections |
-| --- | --- | --- | --- |
-| 0.58 oct (the old 1.5x) | abstains | 5.04 dB | 8.3, 7.7 Hz |
-| 1.0 oct | abstains | 4.07 dB | 9.0, 10.6, 13.6 Hz |
-| 1.5 oct | abstains | 4.36 dB | 8.4, 9.6 Hz |
-| **2.0 oct** | **accepts** | **1.98 dB** | 8.7, 9.5 Hz |
-| 2.5 oct | accepts | 2.28 dB | 10.3, 9.2, 31.0 Hz |
-| to the scored band's top (3.75 oct) | abstains | 5.22 dB | — |
-
-Both ends fail, so this is a plateau and not a threshold: too tight drives corners toward DC,
-too loose lets the fit park budget in the midrange again, which is the failure the whole
-function exists to prevent. 2.0 is the low end of the measured plateau and a round number of
-octaves, which is the unit §13.5 prefers for a width. The 2.5 oct row is also where the
-blending argument shows up directly — a section at 31.0 Hz serving a correction that ends at
-14.8.
-
-Titles whose correction is already wide are insensitive to it: titles 2 and 3 return the
-identical cascade at every width tried."""
+The room is a trade between two failures, so it has a working range rather than a threshold.
+Too little (half an octave, the old `high * 1.5`) forces the optimiser to squeeze its corners
+downward, where publication rounding bites hardest, and a narrow correction that could be
+realised at one width was rejected at another. Too much (up to the scored band's top) lets the
+fit park spare sections in the midrange, which is the failure this function exists to prevent.
+Two octaves sits at the low end of the range in between, and is a round number of octaves,
+the unit a width is best stated in. Wider settings show the blending argument directly: a
+section placed well above the point where a narrow correction ends is serving the programme
+above it, not the correction. A correction that is already wide is insensitive to this
+setting, since it needs no extra room."""
 
 
 def correction_band_hz(
@@ -771,8 +759,8 @@ def _prune(
     `fit_to_biquads` spends whatever budget it is handed, so a cascade fitted at four sections
     can arrive with one contributing 0.01 dB. Asking for fewer sections instead is not the
     same thing — the *fit* may genuinely need the freedom, and only afterwards is it visible
-    that a section ended up doing nothing. Two of three titles reached a good shape and were
-    then rejected for carrying a section worth 0.34 and 0.01 dB.
+    that a section ended up doing nothing. Without this pass a cascade that had reached a good
+    shape was still rejected for carrying a section worth a fraction of a dB.
     """
     specs, residual = candidate
     if len(specs) < 2:

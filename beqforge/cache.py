@@ -6,12 +6,8 @@ model read those and decide what to do about them. Only the last of those change
 acceptance model is being worked on, and only the fitter changes while the fitter is. Anything
 upstream of the edit is being recomputed for nothing.
 
-Measured across the four titles, at 1,586 s of pipeline time:
-
-    target/parametric   403.2 s   25.4%
-    diagnose etc.       116.9 s    7.4%
-    ---------------------------------
-    cacheable           520.1 s   32.8%
+Measured over a set of real titles, the cacheable stages were about a third of pipeline time:
+`parametric` roughly a quarter, `diagnose`/`extract`/`identify` most of the rest.
 
 `parametric` is the expensive one and the one that least needs repeating. What it contributes
 is a *diagnosis* — does this look like a deliberate rolloff, and of what alignment and order —
