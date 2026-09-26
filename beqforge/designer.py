@@ -171,6 +171,11 @@ def _to_design_candidate(
     notes = tuple(dict.fromkeys((*candidate.target_notes, *run_notes)))
     if notes:
         commentary["target_notes"] = "; ".join(notes)
+    # what the judge itself noticed — above all how much of the correction sits below the
+    # level-invariance floor (IMPROVEMENT_PLAN E6). A reviewer reading only the response had
+    # the fraction as a bare number and never saw the sentence saying what it means
+    if candidate.verdict.notes:
+        commentary["verdict_notes"] = "; ".join(dict.fromkeys(candidate.verdict.notes))
     if not math.isnan(candidate.verdict.recovered_fraction):
         commentary["recovered_fraction"] = f"{candidate.verdict.recovered_fraction:.3f}"
     if not math.isnan(candidate.verdict.shaping_fraction):

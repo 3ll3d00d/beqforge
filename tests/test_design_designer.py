@@ -625,3 +625,15 @@ def test_the_response_joins_candidate_and_run_notes_once() -> None:
         run_notes=("shared", "mix reference"),
     )
     assert mapped.commentary["target_notes"] == "boost cap binds; shared; mix reference"
+
+
+def test_the_judges_own_notes_reach_the_response() -> None:
+    """IMPROVEMENT_PLAN E6: a correction resting below the level-invariance floor says so."""
+    shaping = (
+        "13.1 dB of the correction is claimed below 22.7 Hz, where the attenuation stops "
+        "being level-invariant; this shaping diagnostic does not identify the cause (R2)"
+    )
+    candidate = _candidate()
+    candidate.verdict.notes.append(shaping)
+    mapped = _to_design_candidate(candidate, PipelineParams(), report_gain_reduction=False)
+    assert shaping in mapped.commentary["verdict_notes"]

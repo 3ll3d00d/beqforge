@@ -154,6 +154,14 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   plateau does not track the dialogue-dominated plateau at all (0.28). Tracking against the
   plateau stays. Dossier's floor is a consequence of its plateau (T4) and moves only if that
   is decided.
+* **E6 (report) — done.** The judge's own notes now reach the designer response as
+  `verdict_notes`. They were in the run record but never in the response, so the review queue
+  showed `shaping_fraction` as a bare number. On the baseline, Send Help's accepted filter now
+  says "16.1 dB of the correction is claimed below 22.7 Hz, where the attenuation stops being
+  level-invariant" and warns its 7.9 Hz shelf has 1.5 quantisation steps of DC headroom ("one
+  rounding moves its low-frequency gain by 4.4 dB"); Obsession's says 28.9 dB below 24.2 Hz.
+  No threshold was added: the note is the one `assess` already writes. The quantitative part
+  of E6 (false-accept rate on natural-droop variants) waits for E2.
 
 ## Baseline: 2026-09-26 track set
 
