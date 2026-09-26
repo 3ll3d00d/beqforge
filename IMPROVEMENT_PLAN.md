@@ -97,6 +97,22 @@ E2 gates the rest in practice: without a false-accept baseline no decision-chang
 shown to help. The nine titles below contain no known negative, so on their own they can show a
 wrong decline but never a wrong acceptance.
 
+## Progress
+
+Each entry: what changed, how it was checked, what moved. "Probe" is
+`tools/experiments/probe.py compare` against the previous commit's snapshot on all nine
+baseline titles; a full `design_beq.py` run is made only for titles the probe says need one.
+
+* **Tooling.** `pipeline.run` split into `analyse`/`propose`; `probe.py` added; the
+  `counterfactual` restoration transform padded to a fast FFT length (Caught Stealing's run
+  167 s → 66 s; targets move by under 5e-5 dB; verdicts identical).
+* **T1 — done.** `counterfactual` re-sums the restored channels under the playback model's
+  gains, rebuilding the mix from the channels when its LFE-to-mains ratio differs from §2's
+  (a common gain cancels). Unit test: same ratio gives an identical target; LFE +6 dB moves it.
+  Probe at `--tol 0`: nothing moved on any title. `flatten`, `diagnose` and the judged band
+  still read §2's stored mix, deliberately — it is the contract's analysis signal, and
+  cached analysis does not depend on playback flags.
+
 ## Baseline: 2026-09-26 track set
 
 Nine complete programmes from UHD/BD discs, extracted at 1 kHz by beqdesigner's worklist

@@ -208,6 +208,35 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
         assert np.array_equal(alone, pooled), f"cap {cap}"
 
 
+def test_counterfactual_re_sums_under_the_playback_model(walled) -> None:
+    """IMPROVEMENT_PLAN T1: the restored mix is weighted the way the sub feed is judged.
+
+    It used to re-sum with the module constants whatever `--lfe-gain-db`/`--main-gain-db`
+    said, while verification and headroom used the playback model. A common gain cancels (the
+    deficit is plateau-relative), so only the LFE-to-mains ratio may move the target.
+    """
+    import dataclasses
+
+    from beqforge.diagnose import diagnose
+    from beqforge.pipeline import counterfactual_target
+
+    diagnosis = diagnose(walled)
+    if not diagnosis.filtered_channels:
+        pytest.skip("no channel is filtered, so there is nothing to restore")
+    params = PipelineParams()
+
+    def under(**gains) -> np.ndarray:
+        playback = dataclasses.replace(params.playback, **gains)
+        return counterfactual_target(
+            walled, diagnosis, 25.0, dataclasses.replace(params, playback=playback)
+        )
+
+    base = counterfactual_target(walled, diagnosis, 25.0, params)
+    assert np.array_equal(under(main_gain_db=-26.2, lfe_gain_db=-16.2), base)
+    louder_lfe = under(lfe_gain_db=-4.2)
+    assert np.max(np.abs(louder_lfe - base)) > 0.1
+
+
 def test_parametric_fits_from_the_same_seeds_as_every_other_candidate() -> None:
     """`design` inherited `fit_minimal_biquads`' own default and so fitted from three seeds.
 

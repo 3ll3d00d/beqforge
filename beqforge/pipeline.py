@@ -638,7 +638,7 @@ def counterfactual_targets(
     if not diagnosis.filtered_channels:
         return []
     # Reuse channel spectra across restoration caps.
-    restoration = _Restoration(material, diagnosis)
+    restoration = _Restoration(material, diagnosis, params.playback)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
         unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
@@ -762,6 +762,10 @@ class _Restoration:
     spectra: dict[str, np.ndarray]
     bins: np.ndarray
     before_db: np.ndarray
+    mix: np.ndarray
+    """The mix a restored channel is re-summed into — see `_restoration_mix`."""
+    gains: dict[str, float]
+    """Each channel's weight in `mix`."""
     length: int
     """Transform length: the programme zero-padded to a length the FFT factors quickly.
 
@@ -771,8 +775,16 @@ class _Restoration:
     to about 0.1 s. It changes the restoration only at the programme's ends, where the
     zero-phase gain's circular wrap now reads zeros instead of the other end of the film."""
 
-    def __init__(self, material: Material, diagnosis: Diagnosis) -> None:
-        length = scipy.fft.next_fast_len(len(material.mono_mix), real=True)
+    def __init__(
+        self,
+        material: Material,
+        diagnosis: Diagnosis,
+        playback: PlaybackParams | None = None,
+    ) -> None:
+        mix, gains = _restoration_mix(material, playback or PlaybackParams())
+        object.__setattr__(self, "mix", mix)
+        object.__setattr__(self, "gains", gains)
+        length = scipy.fft.next_fast_len(len(mix), real=True)
         spectra = {
             name: np.fft.rfft(material.channels[name], length)
             for name in diagnosis.filtered_channels
@@ -784,9 +796,36 @@ class _Restoration:
             "bins",
             np.fft.rfftfreq(length, 1.0 / material.fs),
         )
-        object.__setattr__(
-            self, "before_db", mean_spectrum(material.mono_mix, material.fs)[1]
-        )
+        object.__setattr__(self, "before_db", mean_spectrum(mix, material.fs)[1])
+
+
+def _restoration_mix(
+    material: Material, playback: PlaybackParams
+) -> tuple[np.ndarray, dict[str, float]]:
+    """The mix a counterfactual restoration is re-summed into, and each channel's weight in it.
+
+    `material.mono_mix` carries §2's fixed weights. The deficit a restoration reads is a
+    question about the sub feed the playback model describes, so when that model weights the
+    LFE against the mains differently, the mix is rebuilt from the channels at the model's
+    gains. Only the ratio matters — the deficit is read against the mix's own plateau, so a
+    common gain cancels — and at §2's ratio the stored mix is used exactly as it stands.
+    """
+    stored_ratio_db = 20.0 * math.log10(LFE_GAIN / MAIN_GAIN)
+    if math.isclose(
+        playback.lfe_gain_db - playback.main_gain_db, stored_ratio_db, abs_tol=1e-9
+    ):
+        return material.mono_mix, {
+            name: LFE_GAIN if name == "LFE" else MAIN_GAIN for name in material.channels
+        }
+    gains = {
+        name: 10.0
+        ** ((playback.lfe_gain_db if name == "LFE" else playback.main_gain_db) / 20.0)
+        for name in material.channels
+    }
+    mix = np.zeros_like(material.mono_mix, dtype=np.float64)
+    for name, samples in material.channels.items():
+        mix += gains[name] * samples
+    return mix, gains
 
 
 def counterfactual_target(
@@ -803,9 +842,9 @@ def counterfactual_target(
     a channel 23 dB under the mains contributes nothing to the sum until it is restored, and
     a target computed on the channel alone would not know that.
     """
-    restoration = restoration or _Restoration(material, diagnosis)
+    restoration = restoration or _Restoration(material, diagnosis, params.playback)
     freqs = diagnosis.freqs
-    restored = material.mono_mix.copy()
+    restored = restoration.mix.copy()
     for name in diagnosis.filtered_channels:
         samples = material.channels[name]
         response = diagnosis.channels[name].response_db
@@ -835,12 +874,11 @@ def counterfactual_target(
         lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=restoration.length)[
             : len(samples)
         ]
-        mix_gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
-        restored = restored + mix_gain * (lifted - samples)
+        restored = restored + restoration.gains[name] * (lifted - samples)
 
     before = restoration.before_db
     grid, deficit = supported_mix_change(
-        material.mono_mix, restored, material.fs, params.confidence_z
+        restoration.mix, restored, material.fs, params.confidence_z
     )
     deficit[~unexcluded(grid, params.exclude_bands_hz)] = 0.0
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
