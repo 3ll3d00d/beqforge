@@ -5,10 +5,11 @@ inconsistencies and redundancies, with a testable check for each and the shape o
 test material needed to run them. It absorbs the improvement-shaped items previously in
 [TODO.md](TODO.md) so each is tracked once; `TODO.md` now points here for them.
 
-**Status of the evidence.** Each item is marked *verified* (visible in the code as read) or
-*hypothesis* (plausible from the code, needs its check to run before anyone acts on it). Nothing
-here has been run against real material yet — the point of "Stress tracks" below is to make that
-possible.
+**Status of the evidence.** Each item is marked *verified* (visible in the code as read),
+*observed* (seen on real material in the baseline below) or *hypothesis* (plausible from the
+code, needs its check to run before anyone acts on it). A first real track set of nine titles
+has been run — see "Baseline: 2026-09-26 track set" below. It produced two wrong declines, both
+traced to a mechanism, and several new findings (E7, E8, T8, R1).
 
 **Ground rules** (from [AGENTS.md](AGENTS.md), restated because this plan is where they are most
 likely to be tested):
@@ -32,10 +33,12 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | --- | --- | --- | --- |
 | **E1** | **Acceptance mostly re-checks the fit against the target it was handed** *(verified)*. `flatten`'s target is the mix's deficit against its own plateau and `verify` measures that same mix, so the tilt, level, extent and wobble clauses (judged against intent) largely test fit quality. Only overshoot, cliff, turnover, section contribution and stability ask whether the filter is *wrong*. | Held-out verification: derive the target from one half of the programme (split by scene, not by time) and judge on the other. Pass: false accepts on the negative corpus (E2) fall without losing any true positive, and a target that overfits one half fails on the other. | M |
 | **E2** | **The false-accept rate is measured on four development negatives** *(verified)*. One of four is falsely accepted; four held-out show none; there is no interval on either. Absorbs TODO 10 and the parametric-path note on calibrating scene segmentation against a false-positive rate. | Build a negative corpus of 50 or more constructed cases across the track shapes below; report the false-accept rate with a Clopper-Pearson interval, per shape. Gate a scheduled test on the interval's *upper* bound. Real tracks supply content, the harness supplies ground truth (see "Variants"). | M |
-| **E3** | **Selection rewards ambition** *(verified)*. `Report.accepted` ranks by departure from the requested (flat) shape, so the least-clipped, most-boosting candidate wins even when its support is weakest. Absorbs TODO 6, which asks for a written decision either way. | Re-rank passing candidates by support (`correction_support_score` or `recovered_fraction`) before shape. Pass: on the negative corpus, the selected candidate's recovered fraction does not exceed what the injected truth licenses; on real tracks compare with `compare_verdicts.py` and review every changed decision by eye. Either outcome is written down here. | S |
+| **E3** | **Selection rewards ambition, and is unstable** *(verified; observed)*. `Report.accepted` ranks by departure from the requested (flat) shape, so the least-clipped, most-boosting candidate wins even when its support is weakest. Absorbs TODO 6, which asks for a written decision either way. **Observed:** on 28 Years Later, HEAD selects `parametric` (+19.5 dB shelf at 23.6 Hz with a −7 dB peak at 38 Hz, recovered fraction 0.99) over a passing `flatten` (+6.1 dB, recovered 0.86), on a spread difference of 0.6 dB (11.6 vs 12.2). The designer server's older build shipped the `flatten` answer for the same title. A 0.6 dB shape margin chose a filter three times as large. `parametric` also passes with a recovered fraction above 1 on Send Help (1.54): it boosts past the measured deficit. | Re-rank passing candidates by support (`correction_support_score` or `recovered_fraction`) before shape, and treat any recovered fraction above 1 as a failure, not a ranking input. Also a stability check: the accepted strategy and peak gain must not move when the ranking margin is under `ranking_tie_db` plus the fit residual. Pass: on the negative corpus, the selected candidate's recovered fraction does not exceed what the injected truth licenses; on real tracks compare with `compare_verdicts.py` and review every changed decision by eye (28 Years Later first). Either outcome is written down here. | S |
 | **E4** | **The evidence ceiling is unsmoothed and punches holes** *(verified that it is per bin; effect is hypothesis)*. It is peak-minus-quiet contrast minus `z` standard errors per bin, applied with `np.clip`, so isolated unsupported bins become zero inside a supported region and reach the fitter as structure. | Smooth the ceiling with a running minimum over about a third of an octave. Pass: fit residual, wobble and section count improve or hold on every track; no accepted filter gains boost the raw ceiling did not license. | S |
 | **E5** | **Two mechanisms for one job** *(verified that both exist; redundancy is hypothesis)*. `flatten` holds its boost flat below the tracking floor *and* prices by contrast. If the ceiling already zeroes those bins the hold is dead code; if it does not, the ceiling is not doing what it claims. | Ablate the hold. Pass: verdicts unchanged means delete it; verdicts changed means find which bins the ceiling let through and why. | S |
-| **E6** | **The ceiling measures dynamic range, not missing content** *(verified, acknowledged in AGENTS.md)*. A naturally drooping mix with strong scene-to-scene contrast is licensed up to its plateau. | Not fixable from programme audio alone (see AGENTS.md's "preference shaping"). The check is to *quantify* it: false-accept rate on natural-droop variants (E2) reported separately, and surfaced in the report so a reader can see when a title looks like that shape. | M |
+| **E6** | **The ceiling measures dynamic range, not missing content** *(verified, acknowledged in AGENTS.md; observed)*. A naturally drooping mix with strong scene-to-scene contrast is licensed up to its plateau. **Observed:** Send Help (+13.1 dB) and Obsession (+28.2 dB) are accepted with `shaping_fraction` 1.00 and 1.02: all of the correction sits below the level-invariance floor (22.7 and 24.2 Hz), with confidence 0.94 and 0.92. Neither is known to be wrong, but this is exactly the shape E6 describes, and nothing in the response tells a reviewer so. | Not fixable from programme audio alone (see AGENTS.md's "preference shaping"). The check is to *quantify* it: false-accept rate on natural-droop variants (E2) reported separately, and surfaced in the report so a reader can see when a title looks like that shape. A `shaping_fraction` near 1 should reach the designer response as a first-class warning, not a commentary number. | M |
+| **E7** | **Extraction's scene and reference bands are fixed constants** *(verified; effect observed)*. `ExtractionParams.scene_band_hz = (10, 60)` picks loud frames, and `reference_band_hz = (60, 120)` picks quiet ones, for every title and every channel. That is the fixed-band mistake the principles forbid, sitting under the boost ceiling. **Observed:** on Dossier 137, whose mains are filtered at 28-42 Hz, the 10-60 Hz scene band is mostly stopband, and only 260 of 13,597 mix frames qualify as loud. | Derive both bands from the subject's own plateau (the scene band ends at, and the reference band is, the plateau). Pass: loud-frame counts rise on Dossier-shaped titles and no accepted boost grows beyond what the old ceiling licensed on the other eight. | S |
+| **E8** | **Digital silence yields near-infinite contrast** *(observed)*. Where a channel's quiet frames are exact zeros, the median margin reads about 2,900 dB (the `1e-300` log floor). Seen on 4 of 9 real titles: LFE on Black Bag, Send Help and Bugonia; LFE, Ls and Rs on Dossier 137. Frame counts also go wrong: Dossier's Ls/Rs report 7,866 of 13,597 frames "loud". `boost_allowance` for such a channel is then bounded only by `restore_caps_db` and the mix-level pricing. No verdict is yet known to depend on it. | Treat exact-zero frames as absent, not quiet (exclude them from the quiet percentile, and mark a channel with too few non-silent frames unavailable). Pass: no channel margin above the extraction's dynamic range; verdicts unchanged, or each change explained. | S |
 
 ### Target construction and judging: consistency
 
@@ -44,7 +47,8 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **T1** | **`counterfactual` ignores the playback model** *(verified)*. It re-sums with the module constants `MAIN_GAIN` and `LFE_GAIN`; verification and headroom use `params.playback`, which the CLI can change. | Unit test: changing `--lfe-gain-db` or `--main-gain-db` must change the counterfactual target. Identical at defaults, so exact-preserving. | S |
 | **T2** | **`restore_caps_db` is a swept constant** (25/35/45/50 dB). Absorbs TODO 1: derive it from each filtered channel's own attenuation at its level-independence floor, which `diagnose` already computes and nothing consults. | Compare derived caps with the sweep on every track with a filtered channel. Pass: the derived cap reproduces the selected candidate's verdict, or the difference is explained. | S |
 | **T3** | **`knee_slope_db_per_octave` (14.0) is a fixed threshold** for deciding a channel is filtered. Absorbs TODO 2: replace it with per-channel level-independence, which `stratified_response` already measures. | Must catch a real 15.9 dB/octave filter and spare a natural 13.5 dB/octave channel. Construct both in the harness, then check the real tracks with LFE lowpass variation. | S |
-| **T4** | **Hidden constants in the plateau** *(hypothesis)*. The plateau is the widest region within 3 dB of the 90th percentile over a fixed 4-200 Hz band, so the reference moves with the band edge, and "widest first" can favour a broad mid-bass shelf over a narrow true low-frequency plateau. | Sensitivity sweep: band upper edge 120/200/300 Hz, tolerance and minimum width. Pass: plateau level moves by under about 1 dB and its region by under a third of an octave. Otherwise a constant is deciding the outcome. | S |
+| **T4** | **Hidden constants in the plateau** *(verified; observed — causes a wrong decline)*. The plateau is the widest region within 3 dB of the 90th percentile over a fixed 4-200 Hz band, so the reference moves with the band edge, and "widest first" can favour a broad mid-bass shelf over a narrow true low-frequency plateau. **Observed:** Dossier 137's mix plateau is 143.3-200.0 Hz and runs into the band's upper edge. Everything downstream inherits it (T8): the tracking floor and level-invariance boundary land at 143 Hz, the judged band collapses to 143-156 Hz, and every candidate fails on "0.12 octaves left to judge". `flatten` fits sections at 284 and 303 Hz. Ballad of Wallis Island's plateau is also narrow (28.4-38.5 Hz, 0.44 octaves) and still accepted. | Sensitivity sweep: band upper edge 120/200/300 Hz, tolerance and minimum width. Pass: plateau level moves by under about 1 dB and its region by under a third of an octave. Otherwise a constant is deciding the outcome. Also: a region touching either edge of the analysis band is truncated, not a plateau. Its extent is unknown, so either extend the band until it closes or abstain with that reason. Dossier 137 is the regression case: it must stop failing on judged-band width. | S |
+| **T8** | **Tracking is measured against the plateau's envelope, so it inherits any plateau error** *(verified; observed)*. `_temporal_evidence` walks octave bands down from the plateau and stops at the first whose scene envelope correlates below 0.5 with the plateau's. A plateau in the dialogue band makes every bass band look untracked. **Observed on Dossier 137** (mix, correlation per band): against the chosen 143-200 Hz reference, 0.28 at 100-140 Hz and 0.21-0.26 through 35-71 Hz, so the floor stops at 143 Hz. Against 50-100 Hz, 0.94 at 71-100 Hz, 0.70, and 0.54 at 35-50 Hz, failing at 25-35 Hz: a floor near 35 Hz, which is where the mains' 48-51 dB/octave knees are. | Fix T4 first and re-measure. Then decide whether tracking should correlate against the plateau or against the nearest band above (chained), which cannot be poisoned by the plateau's content. Pass: Dossier 137's floor lands within a third of an octave of its mains' knees, and no other title's floor moves by more than that without an explanation. | S |
 | **T5** | **The deficit anchor may follow ripple** *(hypothesis)*. `_deficit_anchor` needs a third-of-an-octave run with no deficit of 0.5 dB or more; a mix that wobbles by several dB around its plateau may keep resetting the run and push the anchor upward. | Inject 3-6 dB of ripple on a flat plateau with no filter. Pass: the anchor stays at the plateau's lower edge. If not, add hysteresis or widen the run. | S |
 | **T6** | **Fixed floor on the judged band** *(verified)*. `judged_band_hz` uses `max(45 Hz, deficit anchor)` as its upper edge, so a correction ending at 15 Hz is judged out to 45 Hz. | Remove or derive from the priced target's extent. Pass: no change to verdicts on tracks whose correction reaches 45 Hz or more; review each changed verdict where it ends well below. | S |
 | **T7** | **Noise-floor resolution does not match its use** *(hypothesis)*. The floor is found in octave bands, but the extent clause compares against it with a 1.2x tolerance. Relates to TODO 12 (frame length 1024 vs 4096 samples), which is absorbed here. | Compare estimated against injected floor on harness signals at 1/3-octave and octave resolution; then check whether any real verdict depends on the frame length. Low priority until one does. | S |
@@ -55,28 +59,88 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | --- | --- | --- | --- |
 | **F1** | Fitter and judge disagree on drift (TODO 3): the optimiser minimises drift at exact coefficients, `assess` measures the 90th percentile across rounding. Jittered evaluations inside the cost were tried and were worse; a smooth pole-radius penalty has not been tried. | Add the penalty; pass: fewer accepted cascades with poles near z = 1 at 96 kHz and no loss of accepted candidates. | M |
 | **F2** | `max_q = 6.0` contradicts the documented argument against constraining Q (TODO 4). It is near-binding on real material. | Either relax it or record why it is needed. Check the sections currently at Q 5.2 to 6.0 against their unconstrained fits. | S |
-| **F3** | **Nothing feeds an acceptance failure back into the fit** *(hypothesis; the fitter was not read for this)*. The fit escalates sections against a residual target; acceptance is judged afterwards on different metrics. | Read `fit_minimal_biquads_all`'s stop rule. If it stops on residual alone, test whether one more section rescues candidates that fail only on wobble or tilt. Related to the already-rejected larger budget: that test failed because the target was wrong, so run this on targets known to be sound. | S |
+| **F3** | **The fitter and the judge measure over different bands** *(verified; observed — causes a wrong decline)*. The fit scores and `_prune` measure section contribution over `residual_band_hz` (5-200 Hz, widened to cover placements). `assess` credits a section only for what it does inside the judged band (tracking floor to `max(45 Hz, anchor)`). A section shaping the region below the tracking floor, where `flatten` holds its boost flat, is doing work the fitter asked for, and the judge rejects it for that. `_prune` then refuses to drop it, because dropping it costs more than 1 dB of residual *outside* the judged band. **Observed:** this is the only failure on Black Bag's `flatten` candidate: a −2.2 dB peak at 13.9 Hz and +1.05 dB at 131.8 Hz, judged over 25.1-50.2 Hz. Otherwise it passes (spread 16.0 → 11.8 dB, tilt +0.7 dB/oct, recovered 0.98). The same rule also rejects counterfactual candidates on 28 Years Later (shelf at 5.6 Hz) and Alto Knights (8.4 Hz). The fitter also spends sections above the sub band (131.8 Hz on Black Bag; 284 and 303 Hz on Dossier). | Put fit, prune and contribution on one band. Either contribution is judged over the band the target asks for (`correction_band_hz` of the priced target, which includes the held-flat region), or the fit stops scoring outside the judged band and refits after pruning. Pass: Black Bag's `flatten` is accepted, or fails on a substantive clause; no accepted filter elsewhere gains a section the judged band cannot see. Then test the original question: does one more section rescue candidates that fail only on wobble or tilt, run on targets known to be sound? | S |
 
 ### Calibration and clean-up
 
 | ID | Finding | Check and pass criterion | Effort |
 | --- | --- | --- | --- |
 | **A1** | **Acceptance tolerances were tuned on titles with no negatives** *(verified)*: level 3 dB, tilt 2 dB/octave, spread margin 2 dB, cliff 2 dB/octave, overshoot 3 dB plus slack, extent 1.2x. That is the catalogue-calibration failure in miniature. | After E2 exists, sweep each tolerance and plot false-accept rate against true-positive rate. Move a tolerance only where the curve shows a clear knee; otherwise record it as a stated preference. | M |
-| **C1** | **`parametric` costs about a quarter of a run, has never produced the selected filter, and rests on the weakest component** *(verified from AGENTS.md and the cache)*. `plateau_reference` and `mean_spectrum` are also recomputed in `run`, `diagnose`, `flatten_targets`, `counterfactual_targets` and per candidate in `judged_band_hz`. | Make `parametric` opt-in and compute the shared plateau once on `Diagnosis`. Pass: identical verdicts across records, wall time down. **Exact-preserving; own commit.** | S |
+| **C1** | **`parametric` costs about a quarter of a run and rests on the weakest component** *(verified from AGENTS.md and the cache)*. The claim that it never produces the selected filter no longer holds: at HEAD it wins 28 Years Later, the largest boost on offer (see E3). Its passing candidates reach recovered fractions of 1.54 (Send Help), and it is rejected for 1.90 and 2.01 on Bugonia and Caught Stealing. Settle E3 before making it opt-in, since the verdicts are no longer identical without it. `plateau_reference` and `mean_spectrum` are also recomputed in `run`, `diagnose`, `flatten_targets`, `counterfactual_targets` and per candidate in `judged_band_hz`. | Make `parametric` opt-in and compute the shared plateau once on `Diagnosis`. Pass: identical verdicts across records, wall time down. **Exact-preserving; own commit.** | S |
+| **R1** | **The baseline must be reproducible from a record, and the review queue's output is not** *(observed)*. The designer server that produced the review queue is a PyInstaller build (`dist/beqforge serve-designer`) three days older than HEAD. On 28 Years Later it shipped a different filter from HEAD on input identical to 24-bit rounding (beqdesigner's `mono.wav` against the extracted mix: RMS difference 7e-6). HEAD itself is deterministic (a rerun reproduced every section). The designer response carries only the accepted candidate and no code revision, so a queue entry cannot say which build made it or why the losers lost. | Stamp the response (commentary or metadata) with the record fingerprint's revision and source hash. Have the server write the same `.run.json.gz` record `design_beq.py` does, beside the extraction. Pass: every queue entry can be replayed with `tools/replay.py`, and a stale build is visible without guessing. | S |
 | **C2** | Duplicate limitation notes (attached to every proposal; `evidence_notes` computed twice) and legacy aliases (`mv_adjust_db`, `is_filtered`, `confidence`). | Deduplicate notes; keep aliases only where the external contract needs them. Exact-preserving apart from note text. | S |
 
 ## Suggested order
 
-0. **Baseline.** Assemble the track set below, run every track through the current code, keep
-   the records. Everything else is measured against these. Build the variants (E2) alongside.
-1. **Exact-preserving** changes, each its own commit: T1, C1, C2.
-2. **Analysis only, no behaviour change:** E5, T4, T5, T7, F3 and E6's report. Each ends in a
+0. **Baseline.** Done for nine titles (below). Records are in `data/*.run.json.gz` at 4858a45;
+   `tools/render_ledger.py` renders them together. R1 comes first so the next batch through the
+   designer server is replayable too. Build the variants (E2) alongside.
+1. **Exact-preserving** changes, each its own commit: T1, C2, and R1's stamping. C1 is no
+   longer exact-preserving (28 Years Later's selection changes without `parametric`) and moves
+   after E3.
+2. **The two known wrong declines**, each its own commit, each checked on all nine titles with
+   `compare_verdicts.py`:
+   * T4 + T8 (plateau at the band edge, tracking inheriting it): Dossier 137.
+   * F3 (fit and judge on different bands): Black Bag.
+
+   These are the only items with a real title that is currently wrong, so they come ahead of the
+   analysis. The E2 caveat still applies: a fix that makes a decline accept has to be shown not
+   to open a false accept, so run the harness negatives (`evidence_validation.json`) before and
+   after.
+3. **Analysis only, no behaviour change:** E5, E7, E8, T5, T7 and E6's report. Each ends in a
    written decision here.
-3. **Behaviour changes with a decision to record:** E4, E3, T6, T2, T3, E1.
-4. **Calibration:** A1, then F1 and F2.
+4. **Behaviour changes with a decision to record:** E3 (28 Years Later is the test case), then
+   C1, E4, T6, T2, T3, E1.
+5. **Calibration:** A1, then F1 and F2.
 
 E2 gates the rest in practice: without a false-accept baseline no decision-changing item can be
-shown to help.
+shown to help. The nine titles below contain no known negative, so on their own they can show a
+wrong decline but never a wrong acceptance.
+
+## Baseline: 2026-09-26 track set
+
+Nine complete programmes from UHD/BD discs, extracted at 1 kHz by beqdesigner's worklist
+(`ffmpeg -drc_scale 0 … aresample=1000:resampler=soxr`, 24-bit) and designed through the designer
+server. They were then re-extracted from the same `multichannel.wav` with `tools/extract.py` and
+re-run at HEAD (4858a45) with default parameters and all three strategies. Filtered/unfiltered
+status is **unknown for every title**: nothing here has an independent source, so none of these
+is ground truth for E2 or A1.
+
+| Title | Layout, runtime | Server | HEAD | Winner (sections, peak gain) | Recovered / shaping | Mix plateau | Tracking floor → judged band |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 28 Years Later | 7.1 (Atmos), 115 min | accept | accept | `parametric` 2, +18.7 dB (server: `flatten` 4, +7.7) | 0.99 / 0.77 | 28.7-81.2 | 20.5 → 20.5-45 |
+| Alto Knights | 7.1 (Atmos), 122 min | accept | accept | `flatten` 3, +20.2 dB | 0.90 / 0.84 | 25.5-53.8 | 12.8 → 12.8-45 |
+| Ballad of Wallis Island | 5.1, 100 min | accept | accept | `flatten` 3, +8.6 dB | 0.93 / 0.43 | 28.4-38.5 (0.44 oct) | 20.1 → 20.1-59.1 |
+| **Black Bag** | 5.1, 94 min | **decline** | **decline** | — (`flatten` fails on F3 only) | 0.98 / 0.63 | 50.2-82.8 | 25.1 → 25.1-50.2 |
+| Bugonia | 7.1 (Atmos), 119 min | accept | accept | `flatten` 1, +5.4 dB | 0.59 / 0.61 | 18.1-39.7 | 6.4 → 6.4-45 |
+| Caught Stealing | 7.1 (Atmos), 107 min | accept | accept | `flatten` 2, +12.2 dB | 1.00 / 0.61 | 24.5-49.7 | none → 5-45 |
+| **Dossier 137** | 5.1, 116 min | **decline** | **decline** | — (all fail on judged-band width) | — | **143.3-200.0** | **143.3 → 143.3-155.6** |
+| Obsession | 7.1 (Atmos), 109 min | accept | accept | `flatten` 3, +28.2 dB | 0.92 / 1.02 | 24.3-40.1 | none → 5-45 |
+| Send Help | 7.1 (Atmos), 113 min | accept | accept | `flatten` 2, +13.1 dB | 0.93 / 1.00 | 24.1-41.7 | none → 5-45 |
+
+**Dossier 137 should not have been declined.** Every main channel is steeply rolled off (L 48.5
+dB/oct at 41.7 Hz, R 51.2 at 28.1 Hz, C 33.2 at 39.3 Hz); the mean spectrum falls about 40 dB
+between 100 and 30 Hz; LFE is almost silent (219 loud frames of 13,597, 0% of the mix plateau).
+The decline is not an evidence decision. It is T4 feeding T8: a plateau at the band edge sets
+a tracking reference in the dialogue band, and the judged band collapses. Expected after the fix:
+a judged band reaching down to about 35 Hz, and a correction the evidence may or may not license
+there. Either outcome is legitimate; the current one is not.
+
+**Black Bag is a probable wrong decline.** Its `flatten` candidate passes every substantive
+clause and fails only F3's band mismatch. Whether a pruned or refitted cascade is acceptable is
+F3's check; the mix's level-invariance boundary sits at 50 Hz with 5.6 dB of the correction
+below it, so the answer may still be a small or partial correction.
+
+**Shape coverage.** Positive-control candidates (bass-rich, full LFE): 28 Years Later, Send
+Help, Obsession, Caught Stealing, Bugonia. Sparse, dialogue-led: Black Bag, Dossier 137, Alto
+Knights. Nearest to a music film: Ballad of Wallis Island (not continuous bass). Layout: 5.1 and
+7.1 beds only. **Still missing:** paired releases, an old or upmixed mix, a concert film,
+a heavily compressed mix, a noise-dominated documentary, 2.0, and long/short pairs — so the
+"Definition of enough" below cannot yet be met (no natural-droop variant, no paired release).
+
+**Reproducing it.** `tools/extract.py "<title> - audio 1/multichannel.wav" --out data --name
+<Title>` accepts the worklist's WAV directly (layout survives in the WAV header), then
+`tools/design_beq.py data/<Title>.npz`. About 100-175 s a title at HEAD.
 
 ## Stress tracks
 
