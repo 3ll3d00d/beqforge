@@ -14,7 +14,7 @@ directly, so a nine-title regression pass costs seconds per title rather than mi
   target that moves past `--tol` means the fitter would be handed something different, so the
   title needs a real run (`tools/design_beq.py`) before its verdict can be trusted.
 * **rejudge** — every candidate in the title's existing run record, its *published* filters put
-  back through the current `_judge`. Isolates changes to verification and acceptance from the
+  back through the current `_judge`, and which of them `Report.accepted` would select. Isolates changes to verification and acceptance from the
   fitter entirely. Judged against the recorded target, which is only meaningful while the
   target has not moved — the comparison says so when it has.
 
@@ -51,8 +51,11 @@ from beqforge.filters import correction_band_hz  # noqa: E402
 from beqforge.material import load  # noqa: E402
 from beqforge import pipeline  # noqa: E402
 from beqforge.pipeline import (  # noqa: E402
+    FIT_STATS,
     Headroom,
     PipelineParams,
+    Report,
+    Timings,
     _judge,
     analyse,
     judged_band_hz,
@@ -161,6 +164,7 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
         return out
     with gzip.open(record_path, "rt", encoding="utf-8") as handle:
         record = json.load(handle)
+    rejudged = []
     for recorded in record["candidates"]:
         filters = [BiquadSpec(**f) for f in recorded["filters"]]
         target = np.asarray(recorded["target_db"], dtype=float)
@@ -173,6 +177,7 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
             diagnosis,
             params,
         )
+        rejudged.append(candidate)
         verdict = candidate.verdict
         out["rejudge"][recorded["label"]] = {
             "passed": bool(verdict.passed),
@@ -187,6 +192,18 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
             if verdict.shaping_fraction is None
             else _num(verdict.shaping_fraction),
         }
+    # selection, over the rejudged candidates: a verdict that flips can change the winner even
+    # when the winner's own verdict did not move
+    selected = Report(
+        material,
+        diagnosis,
+        analysed.identification,
+        rejudged,
+        Timings(),
+        FIT_STATS,
+        accept=params.accept,
+    ).accepted
+    out["accepted"] = None if selected is None else selected.label
     return out
 
 
