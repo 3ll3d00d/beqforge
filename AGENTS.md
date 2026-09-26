@@ -49,6 +49,7 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
 | `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
+| `tools/negative_corpus.py` | The negative corpus (IMPROVEMENT_PLAN E2): `harness.corpus_case` titles across seven shapes, two channels each, truth known by construction. Reports false acceptances per shape with a 95% Clopper-Pearson interval, true positives and recovery on injected filters, and gates on the upper bound over the negatives a pipeline can tell from a filter (`natural_droop` is reported, not gated). The committed baseline is `negative_corpus.json`. |
 | `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `compare_verdicts.py`, `compare_records.py`; see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"). |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
@@ -202,6 +203,15 @@ git worktree add <scratch>/wt_before HEAD   # "before", without stashing your ch
 PY=$PWD/.venv/bin/python                    # the main venv; the worktree has none
 (cd <scratch>/wt_before && $PY tools/validate_evidence.py --seed 101 --output <scratch>/before_101.json)
 uv run python tools/validate_evidence.py --seed 101 --output <scratch>/after_101.json   # and --seed 947
+```
+
+Then the **negative corpus**. It is the only measure of a false-acceptance *rate* this repo
+has, so a change that claims to reduce false acceptances has to show it here. Compare against
+the committed `negative_corpus.json`, and don't overwrite that file unless the change is
+accepted as the new baseline. Allow 15-20 minutes:
+
+```bash
+uv run python tools/negative_corpus.py --seeds 1-9 --output <scratch>/corpus.json
 ```
 
 **5. Write the outcome down** in `IMPROVEMENT_PLAN.md`'s "Progress": what changed, what the

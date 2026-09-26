@@ -252,6 +252,38 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `analyse` already found. Honest size: a mean spectrum is 0.12 s, so this saves under a
   second on a 70-170 s run; it is done for one source of truth, not for speed. Exact: probe
   at `--tol 0` unchanged, Bugonia's full record byte-identical.
+* **E2 — done: the corpus exists, and it fails its own gate.** `harness.corpus_case` builds
+  two-channel titles in seven shapes, every parameter drawn from the seed.
+  `tools/negative_corpus.py` runs them one process each and reports per shape, with 95%
+  Clopper-Pearson intervals. Baseline, 9 seeds (63 cases), committed as `negative_corpus.json`:
+
+  | Shape | Result | Interval | Size of what was accepted |
+  | --- | --- | --- | --- |
+  | broadband | 4/9 false acceptances | 0.14-0.79 | +2.0 to +3.2 dB, all `flatten` |
+  | varying_source | 3/9 false acceptances | 0.07-0.70 | +1.4, +3.4 and **+18.7 dB**, all `parametric` |
+  | sparse_dialogue, rumble, stationary_noise | 0/9 each | 0-0.34 | — |
+  | **gated negatives** | **7/45 (16%)** | **0.06-0.29** | gate 0.10: **fails** |
+  | natural_droop (reported, not gated) | 4/9 | 0.14-0.79 | +17 to +25 dB, counterfactual/parametric |
+  | filtered (positives) | 7/9 true positives | 0.40-0.97 | +21 to +32 dB; median recovery 1.26 dB RMS |
+
+  The frozen protocol (`validate_evidence.py`) is unchanged and still shows 0/4 on both seeds.
+  The corpus is harder because its events carry per-event spectral colour and level-dependent
+  emphasis, which is closer to real programme. Two findings:
+  1. **`flatten` fills ripple on unfiltered material** (+2 to +3 dB, one to three sections).
+     The diagnosis says so itself — no channel knee, level-invariant and tracking to the bottom
+     of the band — yet nothing in acceptance asks for evidence of a rolloff before correcting.
+     Not yet decided: whether "no evidence of a rolloff" should be an abstention reason, and
+     how to state it without a constant. Mastering support is unavailable from programme
+     alone (AGENTS.md), but a knee, level-invariance and tracking are all measured.
+  2. **`varying_source/6`: a +18.7 dB, four-section `parametric` correction on a never-filtered
+     source.** A full-size false acceptance; investigate first.
+
+  The evidence score does not separate these from true positives (0.91-0.96 on both), which
+  confirms it cannot serve as a gate. The recovery gap between `flatten` (1-2 dB RMS) and the
+  one `parametric` true positive (15.6 dB RMS) is also worth a look. The gate (upper bound
+  0.10) is a stated preference; `--gate` changes it. No scheduled CI job was added: at 15-20
+  minutes it belongs in the regression workflow (AGENTS.md step 4) until the pipeline passes
+  it.
 
 ## Baseline: 2026-09-26 track set
 

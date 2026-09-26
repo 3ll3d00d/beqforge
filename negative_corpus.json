@@ -1,0 +1,1550 @@
+{
+ "protocol": "negative-corpus-v1",
+ "revision": "41644a1c31ea-dirty+src:6f8e1eb9d7ec",
+ "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, shaping_note_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), verify_band_hz=(5.0, 45.0), exclude_bands_hz=())",
+ "seeds": "1-9",
+ "duration_s": 240.0,
+ "gate": 0.1,
+ "summary": {
+  "broadband": {
+   "n": 9,
+   "false_acceptances": 4,
+   "rate": 0.4444444444444444,
+   "interval": [
+    0.13699566226516652,
+    0.787991493221132
+   ]
+  },
+  "sparse_dialogue": {
+   "n": 9,
+   "false_acceptances": 0,
+   "rate": 0.0,
+   "interval": [
+    0.0,
+    0.3362671168799428
+   ]
+  },
+  "varying_source": {
+   "n": 9,
+   "false_acceptances": 3,
+   "rate": 0.3333333333333333,
+   "interval": [
+    0.07485463141969183,
+    0.7007049437914596
+   ]
+  },
+  "rumble": {
+   "n": 9,
+   "false_acceptances": 0,
+   "rate": 0.0,
+   "interval": [
+    0.0,
+    0.3362671168799428
+   ]
+  },
+  "stationary_noise": {
+   "n": 9,
+   "false_acceptances": 0,
+   "rate": 0.0,
+   "interval": [
+    0.0,
+    0.3362671168799428
+   ]
+  },
+  "natural_droop": {
+   "n": 9,
+   "false_acceptances": 4,
+   "rate": 0.4444444444444444,
+   "interval": [
+    0.13699566226516652,
+    0.787991493221132
+   ]
+  },
+  "filtered": {
+   "n": 9,
+   "true_positives": 7,
+   "rate": 0.7777777777777778,
+   "interval": [
+    0.39990642628368794,
+    0.9718550265221018
+   ],
+   "median_recovery_rms_db": 1.2598330603014138
+  },
+  "gated_negatives": {
+   "shapes": [
+    "broadband",
+    "sparse_dialogue",
+    "varying_source",
+    "rumble",
+    "stationary_noise"
+   ],
+   "n": 45,
+   "false_acceptances": 7,
+   "rate": 0.15555555555555556,
+   "interval": [
+    0.06490921200837761,
+    0.2945516010980533
+   ]
+  }
+ },
+ "cases": [
+  {
+   "name": "broadband/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.93043483736252,
+   "candidate_failures": {
+    "flatten": []
+   },
+   "peak_boost_db": 3.23,
+   "sections": 1,
+   "shape": "broadband",
+   "seed": 1,
+   "injected": null,
+   "seconds": 121.9
+  },
+  {
+   "name": "sparse_dialogue/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 1,
+   "injected": null,
+   "seconds": 1.6
+  },
+  {
+   "name": "varying_source/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 1,
+   "injected": null,
+   "seconds": 4.4
+  },
+  {
+   "name": "rumble/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 1,
+   "injected": null,
+   "seconds": 2.4
+  },
+  {
+   "name": "stationary_noise/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 1,
+   "injected": null,
+   "seconds": 1.0
+  },
+  {
+   "name": "natural_droop/1",
+   "negative": true,
+   "excerpt": false,
+   "selected": "counterfactual/25dB",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9242170579397602,
+   "candidate_failures": {
+    "flatten": [
+     "tilts -1.7 dB/oct where -4.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected level -5.1 dB against the -1.6 intended, outside the 3 dB allowed",
+     "corrected only down to 42.7 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/25dB": [],
+    "counterfactual/35dB": [
+     "tilts -1.4 dB/oct where -4.2 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected level -5.3 dB against the -2.0 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 10.1 dB over 5-45 Hz against 8.0 dB in the material; expected flat",
+     "corrected only down to 44.9 Hz; content continues to 5.0 Hz"
+    ],
+    "parametric": [
+     "peaks at 15.4 Hz then falls at 21.4 dB/oct below it against 19.2 in the material \u2014 too much too soon, then a rolloff"
+    ]
+   },
+   "peak_boost_db": 23.2,
+   "sections": 1,
+   "shape": "natural_droop",
+   "seed": 1,
+   "injected": null,
+   "seconds": 534.3
+  },
+  {
+   "name": "filtered/1",
+   "negative": false,
+   "excerpt": false,
+   "selected": "parametric",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 15.608424891094222,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.905202782832326,
+   "candidate_failures": {
+    "flatten": [
+     "corrected level -4.6 dB against the -0.9 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 12.0 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "introduces a cliff of 39.6 dB/oct at 9.0 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 46.9 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "peaks at 16.1 Hz then falls at 26.2 dB/oct below it against 23.4 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 13.1 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "introduces a cliff of 38.9 dB/oct at 10.3 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 35.6 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected low end wobbles 11.9 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "introduces a cliff of 55.4 dB/oct at 6.6 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/45dB": [
+     "corrected low end wobbles 12.1 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "introduces a cliff of 54.5 dB/oct at 6.6 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "parametric": []
+   },
+   "peak_boost_db": 18.89,
+   "sections": 1,
+   "shape": "filtered",
+   "seed": 1,
+   "injected": "LR4@24.8999Hz",
+   "seconds": 670.1
+  },
+  {
+   "name": "broadband/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9321523699908842,
+   "candidate_failures": {
+    "flatten": []
+   },
+   "peak_boost_db": 1.96,
+   "sections": 3,
+   "shape": "broadband",
+   "seed": 2,
+   "injected": null,
+   "seconds": 126.1
+  },
+  {
+   "name": "sparse_dialogue/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 2,
+   "injected": null,
+   "seconds": 1.4
+  },
+  {
+   "name": "varying_source/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": "parametric",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9545088379859193,
+   "candidate_failures": {
+    "parametric": []
+   },
+   "peak_boost_db": 3.36,
+   "sections": 1,
+   "shape": "varying_source",
+   "seed": 2,
+   "injected": null,
+   "seconds": 123.9
+  },
+  {
+   "name": "rumble/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 2,
+   "injected": null,
+   "seconds": 3.2
+  },
+  {
+   "name": "stationary_noise/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 2,
+   "injected": null,
+   "seconds": 0.9
+  },
+  {
+   "name": "natural_droop/2",
+   "negative": true,
+   "excerpt": false,
+   "selected": "counterfactual/25dB",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9137228379453892,
+   "candidate_failures": {
+    "flatten": [
+     "corrected low end wobbles 10.3 dB over 5-48.534 Hz against 7.3 dB in the material; expected flat",
+     "introduces a cliff of 42.5 dB/oct at 5.4 Hz where the input's worst was 32.7 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/25dB": [],
+    "counterfactual/35dB": [
+     "corrected low end wobbles 10.2 dB over 5-48.534 Hz against 7.3 dB in the material; expected flat",
+     "introduces a cliff of 44.8 dB/oct at 5.4 Hz where the input's worst was 32.7 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "parametric": []
+   },
+   "peak_boost_db": 24.76,
+   "sections": 2,
+   "shape": "natural_droop",
+   "seed": 2,
+   "injected": null,
+   "seconds": 428.2
+  },
+  {
+   "name": "filtered/2",
+   "negative": false,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 2.2584734567569216,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.943217540054761,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [
+     "corrected low end wobbles 8.0 dB over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
+     "corrected only down to 45.2 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "lifts 11.5 Hz to +6.8 dB, 1.1 dB above anything the material or the requested shape supports there \u2014 boosting what is not content",
+     "corrected low end wobbles 8.9 dB over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
+     "corrected only down to 45.4 Hz; content continues to 5.0 Hz"
+    ]
+   },
+   "peak_boost_db": 32.11,
+   "sections": 3,
+   "shape": "filtered",
+   "seed": 2,
+   "injected": "LR2@36.9366Hz",
+   "seconds": 381.4
+  },
+  {
+   "name": "broadband/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "broadband",
+   "seed": 3,
+   "injected": null,
+   "seconds": 6.5
+  },
+  {
+   "name": "sparse_dialogue/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 3,
+   "injected": null,
+   "seconds": 1.4
+  },
+  {
+   "name": "varying_source/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "parametric": [
+     "introduces a cliff of 18.2 dB/oct at 17.8 Hz where the input's worst was 16.2 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 5.1 Hz; content continues to 4.2 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 3,
+   "injected": null,
+   "seconds": 129.6
+  },
+  {
+   "name": "rumble/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 3,
+   "injected": null,
+   "seconds": 2.4
+  },
+  {
+   "name": "stationary_noise/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 3,
+   "injected": null,
+   "seconds": 1.1
+  },
+  {
+   "name": "natural_droop/3",
+   "negative": true,
+   "excerpt": false,
+   "selected": "parametric",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.931588650924308,
+   "candidate_failures": {
+    "flatten": [
+     "corrected low end wobbles 11.1 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
+     "introduces a cliff of 61.2 dB/oct at 7.6 Hz where the input's worst was 45.4 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/25dB": [
+     "corrected level -6.0 dB against the -2.3 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 9.5 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
+     "corrected only down to 33.4 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected level -6.4 dB against the -1.8 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 8.8 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
+     "corrected only down to 34.7 Hz; content continues to 5.0 Hz"
+    ],
+    "parametric": []
+   },
+   "peak_boost_db": 17.37,
+   "sections": 3,
+   "shape": "natural_droop",
+   "seed": 3,
+   "injected": null,
+   "seconds": 550.5
+  },
+  {
+   "name": "filtered/3",
+   "negative": false,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 1.1724588777941949,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9301518931576594,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [
+     "corrected low end wobbles 18.3 dB over 5-64.3482 Hz against 6.0 dB in the material; expected flat",
+     "introduces a cliff of 72.8 dB/oct at 5.6 Hz where the input's worst was 28.8 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 8.8 Hz; content continues to 5.0 Hz",
+     "section 1 (low_shelf at 6.0 Hz) contributes 0.85 dB across 5.962-62.06 Hz \u2014 has not earned its slot"
+    ],
+    "counterfactual/35dB": [
+     "corrected low end wobbles 18.3 dB over 5-64.3482 Hz against 6.0 dB in the material; expected flat",
+     "introduces a cliff of 72.8 dB/oct at 5.6 Hz where the input's worst was 28.8 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 8.8 Hz; content continues to 5.0 Hz",
+     "section 1 (low_shelf at 6.0 Hz) contributes 0.85 dB across 5.962-62.06 Hz \u2014 has not earned its slot"
+    ]
+   },
+   "peak_boost_db": 23.16,
+   "sections": 3,
+   "shape": "filtered",
+   "seed": 3,
+   "injected": "BW2@19.0097Hz",
+   "seconds": 371.3
+  },
+  {
+   "name": "broadband/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9505276786390556,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [
+     "section 1 (low_shelf at 20.5 Hz) contributes 0.11 dB across 5-32.01 Hz \u2014 has not earned its slot",
+     "section 2 (low_shelf at 8.0 Hz) contributes 0.48 dB across 5-32.01 Hz \u2014 has not earned its slot",
+     "section 3 (low_shelf at 10.1 Hz) contributes 0.96 dB across 5-32.01 Hz \u2014 has not earned its slot"
+    ],
+    "parametric": [
+     "lifts 4.4 Hz to +7.8 dB, 1.1 dB above anything the material or the requested shape supports there \u2014 boosting what is not content",
+     "corrected low end wobbles 9.7 dB over 5-45 Hz against 7.2 dB in the material; expected flat"
+    ]
+   },
+   "peak_boost_db": 2.37,
+   "sections": 2,
+   "shape": "broadband",
+   "seed": 4,
+   "injected": null,
+   "seconds": 385.3
+  },
+  {
+   "name": "sparse_dialogue/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 4,
+   "injected": null,
+   "seconds": 2.3
+  },
+  {
+   "name": "varying_source/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "parametric": [
+     "introduces a cliff of 17.7 dB/oct at 37.1 Hz where the input's worst was 13.6 \u2014 relocates the discontinuity rather than removing it"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 4,
+   "injected": null,
+   "seconds": 126.0
+  },
+  {
+   "name": "rumble/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 4,
+   "injected": null,
+   "seconds": 1.7
+  },
+  {
+   "name": "stationary_noise/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 4,
+   "injected": null,
+   "seconds": 0.6
+  },
+  {
+   "name": "natural_droop/4",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected only down to 5.1 Hz; content continues to 4.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected only down to 5.1 Hz; content continues to 4.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected only down to 5.1 Hz; content continues to 4.0 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "natural_droop",
+   "seed": 4,
+   "injected": null,
+   "seconds": 381.3
+  },
+  {
+   "name": "filtered/4",
+   "negative": false,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected low end wobbles 10.9 dB over 5-135.957 Hz against 8.0 dB in the material; expected flat",
+     "introduces a cliff of 35.1 dB/oct at 7.6 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 41.5 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "introduces a cliff of 30.9 dB/oct at 5.1 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/35dB": [
+     "peaks at 12.5 Hz then falls at 25.4 dB/oct below it against 23.0 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 13.8 dB over 5-135.957 Hz against 8.0 dB in the material; expected flat",
+     "introduces a cliff of 36.2 dB/oct at 7.6 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 38.1 Hz; content continues to 5.0 Hz"
+    ],
+    "parametric": [
+     "introduces a cliff of 35.5 dB/oct at 7.6 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "filtered",
+   "seed": 4,
+   "injected": "LR4@21.8569Hz",
+   "seconds": 473.2
+  },
+  {
+   "name": "broadband/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9242198643878331,
+   "candidate_failures": {
+    "flatten": []
+   },
+   "peak_boost_db": 3.01,
+   "sections": 3,
+   "shape": "broadband",
+   "seed": 5,
+   "injected": null,
+   "seconds": 126.3
+  },
+  {
+   "name": "sparse_dialogue/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 5,
+   "injected": null,
+   "seconds": 0.8
+  },
+  {
+   "name": "varying_source/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "parametric": [
+     "corrected only down to 5.1 Hz; content continues to 4.2 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 5,
+   "injected": null,
+   "seconds": 54.7
+  },
+  {
+   "name": "rumble/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 5,
+   "injected": null,
+   "seconds": 1.4
+  },
+  {
+   "name": "stationary_noise/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 5,
+   "injected": null,
+   "seconds": 0.7
+  },
+  {
+   "name": "natural_droop/5",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "tilts -2.0 dB/oct where -5.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected level -4.6 dB against the -1.2 intended, outside the 3 dB allowed",
+     "peaks at 12.2 Hz then falls at 30.4 dB/oct below it against 27.6 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 16.3 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
+     "introduces a cliff of 52.0 dB/oct at 8.3 Hz where the input's worst was 45.3 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 36.1 Hz; content continues to 4.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected low end wobbles 12.7 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
+     "corrected only down to 25.9 Hz; content continues to 4.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "tilts -3.0 dB/oct where -5.8 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected level -5.3 dB against the -2.0 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 12.1 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
+     "corrected only down to 35.9 Hz; content continues to 4.0 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "natural_droop",
+   "seed": 5,
+   "injected": null,
+   "seconds": 405.9
+  },
+  {
+   "name": "filtered/5",
+   "negative": false,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "tilts +0.6 dB/oct where -2.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected low end wobbles 9.9 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "introduces a cliff of 33.8 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 51.8 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected low end wobbles 8.4 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "introduces a cliff of 32.1 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/35dB": [
+     "corrected low end wobbles 8.6 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "introduces a cliff of 34.8 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 36.9 Hz; content continues to 5.0 Hz"
+    ],
+    "parametric": [
+     "introduces a cliff of 32.8 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "filtered",
+   "seed": 5,
+   "injected": "LR4@22.0426Hz",
+   "seconds": 436.2
+  },
+  {
+   "name": "broadband/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "broadband",
+   "seed": 6,
+   "injected": null,
+   "seconds": 2.7
+  },
+  {
+   "name": "sparse_dialogue/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 6,
+   "injected": null,
+   "seconds": 0.8
+  },
+  {
+   "name": "varying_source/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": "parametric",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9402522454752035,
+   "candidate_failures": {
+    "flatten": [
+     "lifts 5.1 Hz to +8.1 dB, 2.2 dB above anything the material or the requested shape supports there \u2014 boosting what is not content",
+     "corrected low end wobbles 9.4 dB over 5-45 Hz against 5.8 dB in the material; expected flat",
+     "section 1 (low_shelf at 5.4 Hz) contributes 0.15 dB across 5-23.56 Hz \u2014 has not earned its slot",
+     "section 2 (peaking_eq at 5.2 Hz) contributes 0.87 dB across 5-23.56 Hz \u2014 has not earned its slot",
+     "section 3 (peaking_eq at 19.9 Hz) contributes 0.06 dB across 5-23.56 Hz \u2014 has not earned its slot"
+    ],
+    "parametric": []
+   },
+   "peak_boost_db": 18.71,
+   "sections": 4,
+   "shape": "varying_source",
+   "seed": 6,
+   "injected": null,
+   "seconds": 266.4
+  },
+  {
+   "name": "rumble/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 6,
+   "injected": null,
+   "seconds": 2.7
+  },
+  {
+   "name": "stationary_noise/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 6,
+   "injected": null,
+   "seconds": 0.6
+  },
+  {
+   "name": "natural_droop/6",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected level -7.9 dB against the -2.3 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 13.6 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected only down to 39.3 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected level -7.7 dB against the -3.2 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 10.6 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected only down to 29.8 Hz; content continues to 5.0 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected level -7.9 dB against the -2.8 intended, outside the 3 dB allowed",
+     "peaks at 14.9 Hz then falls at 28.7 dB/oct below it against 21.5 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 16.5 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "introduces a cliff of 41.3 dB/oct at 11.7 Hz where the input's worst was 36.4 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 39.3 Hz; content continues to 5.0 Hz"
+    ],
+    "parametric": [
+     "corrected level -7.5 dB against the -3.7 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 12.3 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "introduces a cliff of 40.1 dB/oct at 12.5 Hz where the input's worst was 36.4 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 31.7 Hz; content continues to 5.0 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "natural_droop",
+   "seed": 6,
+   "injected": null,
+   "seconds": 513.8
+  },
+  {
+   "name": "filtered/6",
+   "negative": false,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 1.409591910499594,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9456465843839639,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [],
+    "counterfactual/35dB": []
+   },
+   "peak_boost_db": 24.25,
+   "sections": 1,
+   "shape": "filtered",
+   "seed": 6,
+   "injected": "BW2@18.7117Hz",
+   "seconds": 403.0
+  },
+  {
+   "name": "broadband/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "parametric": [
+     "corrected only down to 5.1 Hz; content continues to 4.1 Hz",
+     "section 1 (low_shelf at 43.0 Hz) contributes 0.78 dB across 7.808-165.5 Hz \u2014 has not earned its slot",
+     "section 2 (low_shelf at 24.4 Hz) contributes 0.85 dB across 7.808-165.5 Hz \u2014 has not earned its slot",
+     "section 3 (low_shelf at 54.0 Hz) contributes 0.12 dB across 7.808-165.5 Hz \u2014 has not earned its slot"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "broadband",
+   "seed": 7,
+   "injected": null,
+   "seconds": 144.5
+  },
+  {
+   "name": "sparse_dialogue/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 7,
+   "injected": null,
+   "seconds": 0.7
+  },
+  {
+   "name": "varying_source/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "section 1 (low_shelf at 12.4 Hz) contributes 0.83 dB across 5-38 Hz \u2014 has not earned its slot"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 7,
+   "injected": null,
+   "seconds": 62.5
+  },
+  {
+   "name": "rumble/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 7,
+   "injected": null,
+   "seconds": 2.3
+  },
+  {
+   "name": "stationary_noise/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 7,
+   "injected": null,
+   "seconds": 0.6
+  },
+  {
+   "name": "natural_droop/7",
+   "negative": true,
+   "excerpt": false,
+   "selected": "counterfactual/25dB",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9064540251550319,
+   "candidate_failures": {
+    "flatten": [
+     "corrected low end wobbles 10.4 dB over 5-45 Hz against 6.3 dB in the material; expected flat",
+     "introduces a cliff of 53.9 dB/oct at 5.4 Hz where the input's worst was 37.2 \u2014 relocates the discontinuity rather than removing it"
+    ],
+    "counterfactual/25dB": [],
+    "counterfactual/35dB": [
+     "corrected low end wobbles 10.1 dB over 5-45 Hz against 6.3 dB in the material; expected flat",
+     "introduces a cliff of 54.7 dB/oct at 5.4 Hz where the input's worst was 37.2 \u2014 relocates the discontinuity rather than removing it"
+    ]
+   },
+   "peak_boost_db": 22.49,
+   "sections": 1,
+   "shape": "natural_droop",
+   "seed": 7,
+   "injected": null,
+   "seconds": 385.8
+  },
+  {
+   "name": "filtered/7",
+   "negative": false,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 1.1764552776490065,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9325614835870061,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": []
+   },
+   "peak_boost_db": 22.68,
+   "sections": 1,
+   "shape": "filtered",
+   "seed": 7,
+   "injected": "LR2@15.7045Hz",
+   "seconds": 278.4
+  },
+  {
+   "name": "broadband/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected only down to 5.1 Hz; content continues to 4.1 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "broadband",
+   "seed": 8,
+   "injected": null,
+   "seconds": 156.4
+  },
+  {
+   "name": "sparse_dialogue/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 8,
+   "injected": null,
+   "seconds": 0.9
+  },
+  {
+   "name": "varying_source/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": "parametric",
+   "false_acceptance": true,
+   "abstained": false,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9599899203979073,
+   "candidate_failures": {
+    "flatten": [
+     "section 1 (low_shelf at 20.6 Hz) contributes 0.83 dB across 15.33-76.45 Hz \u2014 has not earned its slot"
+    ],
+    "parametric": []
+   },
+   "peak_boost_db": 1.35,
+   "sections": 1,
+   "shape": "varying_source",
+   "seed": 8,
+   "injected": null,
+   "seconds": 206.2
+  },
+  {
+   "name": "rumble/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 8,
+   "injected": null,
+   "seconds": 1.5
+  },
+  {
+   "name": "stationary_noise/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 8,
+   "injected": null,
+   "seconds": 0.4
+  },
+  {
+   "name": "natural_droop/8",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected level -6.3 dB against the -1.4 intended, outside the 3 dB allowed",
+     "peaks at 12.9 Hz then falls at 27.7 dB/oct below it against 23.9 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 11.8 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "introduces a cliff of 40.8 dB/oct at 7.6 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 48.3 Hz; content continues to 4.2 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected level -6.1 dB against the -2.2 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 10.3 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "introduces a cliff of 38.3 dB/oct at 7.3 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 39.6 Hz; content continues to 4.2 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected level -6.5 dB against the -1.9 intended, outside the 3 dB allowed",
+     "peaks at 12.9 Hz then falls at 27.7 dB/oct below it against 23.9 in the material \u2014 too much too soon, then a rolloff",
+     "corrected low end wobbles 11.4 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "introduces a cliff of 40.8 dB/oct at 7.6 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 44.7 Hz; content continues to 4.2 Hz"
+    ],
+    "parametric": [
+     "corrected low end wobbles 9.0 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "corrected only down to 5.1 Hz; content continues to 4.2 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "natural_droop",
+   "seed": 8,
+   "injected": null,
+   "seconds": 428.8
+  },
+  {
+   "name": "filtered/8",
+   "negative": false,
+   "excerpt": false,
+   "selected": "counterfactual/25dB",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 1.0031887934417225,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9266338913292801,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [],
+    "parametric": []
+   },
+   "peak_boost_db": 21.24,
+   "sections": 2,
+   "shape": "filtered",
+   "seed": 8,
+   "injected": "LR2@16.0264Hz",
+   "seconds": 322.8
+  },
+  {
+   "name": "broadband/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected only down to 5.1 Hz; content continues to 4.2 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected only down to 5.1 Hz; content continues to 4.2 Hz",
+     "section 1 (low_shelf at 12.3 Hz) contributes 0.66 dB across 5-27.97 Hz \u2014 has not earned its slot"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "broadband",
+   "seed": 9,
+   "injected": null,
+   "seconds": 272.3
+  },
+  {
+   "name": "sparse_dialogue/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "sparse_dialogue",
+   "seed": 9,
+   "injected": null,
+   "seconds": 2.7
+  },
+  {
+   "name": "varying_source/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "parametric": [
+     "introduces a cliff of 17.3 dB/oct at 25.4 Hz where the input's worst was 13.2 \u2014 relocates the discontinuity rather than removing it"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "varying_source",
+   "seed": 9,
+   "injected": null,
+   "seconds": 133.7
+  },
+  {
+   "name": "rumble/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "rumble",
+   "seed": 9,
+   "injected": null,
+   "seconds": 2.0
+  },
+  {
+   "name": "stationary_noise/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {},
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "stationary_noise",
+   "seed": 9,
+   "injected": null,
+   "seconds": 0.9
+  },
+  {
+   "name": "natural_droop/9",
+   "negative": true,
+   "excerpt": false,
+   "selected": null,
+   "false_acceptance": false,
+   "abstained": true,
+   "recovery_rms_db": null,
+   "max_boost_noise_dominated_db": null,
+   "evidence_score": null,
+   "candidate_failures": {
+    "flatten": [
+     "corrected level -11.8 dB against the -3.7 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 17.2 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "introduces a cliff of 47.5 dB/oct at 11.0 Hz where the input's worst was 44.4 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 47.6 Hz; content continues to 5.7 Hz"
+    ],
+    "counterfactual/25dB": [
+     "corrected level -12.0 dB against the -4.7 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 14.5 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "corrected only down to 43.9 Hz; content continues to 5.7 Hz"
+    ],
+    "counterfactual/35dB": [
+     "corrected level -12.1 dB against the -4.3 intended, outside the 3 dB allowed",
+     "corrected low end wobbles 16.3 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "introduces a cliff of 48.1 dB/oct at 11.0 Hz where the input's worst was 44.4 \u2014 relocates the discontinuity rather than removing it",
+     "corrected only down to 47.4 Hz; content continues to 5.7 Hz"
+    ],
+    "parametric": [
+     "corrected only down to 22.0 Hz; content continues to 5.7 Hz"
+    ]
+   },
+   "peak_boost_db": null,
+   "sections": null,
+   "shape": "natural_droop",
+   "seed": 9,
+   "injected": null,
+   "seconds": 357.5
+  },
+  {
+   "name": "filtered/9",
+   "negative": false,
+   "excerpt": false,
+   "selected": "flatten",
+   "false_acceptance": false,
+   "abstained": false,
+   "recovery_rms_db": 1.2598330603014138,
+   "max_boost_noise_dominated_db": 0.0,
+   "evidence_score": 0.9351076111184186,
+   "candidate_failures": {
+    "flatten": [],
+    "counterfactual/25dB": [],
+    "counterfactual/35dB": []
+   },
+   "peak_boost_db": 25.9,
+   "sections": 3,
+   "shape": "filtered",
+   "seed": 9,
+   "injected": "LR2@18.7647Hz",
+   "seconds": 304.4
+  }
+ ]
+}
