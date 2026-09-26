@@ -540,3 +540,74 @@ def test_design_declines_with_no_channel_decomposition() -> None:
     response = design(request)
     assert response.candidates is None
     assert response.decline_reason == "channel_evidence_unavailable"
+
+
+# ---- provenance (IMPROVEMENT_PLAN R1) --------------------------------------
+
+
+def _small_request(mono_mix: np.ndarray | None = None) -> DesignRequest:
+    return DesignRequest(
+        contract_version=CONTRACT_VERSION,
+        fs=1000,
+        mono_mix=np.zeros(10) if mono_mix is None else mono_mix,
+        coverage="complete_programme",
+    )
+
+
+def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None:
+    report = _report([_candidate()])
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
+    commentary = design(_small_request()).candidates[0].commentary
+    assert commentary["beqforge_revision"] == "abc123+src:def456"
+    assert commentary["strategy"] == "flatten"  # added to, not replaced
+    assert "run_record" not in commentary  # nothing asked for one
+
+
+def test_a_decline_names_the_build_that_made_it(monkeypatch) -> None:
+    failing = dataclasses.replace(
+        _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
+    )
+    monkeypatch.setattr(
+        "beqforge.designer.run", lambda material, params: _report([failing])
+    )
+    monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
+    response = design(_small_request())
+    assert response.decline_message.startswith("flatten: overshoot")
+    assert response.decline_message.endswith("[beqforge_revision: abc123+src:def456]")
+    validate_response(response)
+
+
+def test_a_request_writes_a_replayable_record_named_by_its_audio(tmp_path) -> None:
+    """The fast no-channels abstention, through the real pipeline and the real writer."""
+    from beqforge import record
+
+    mono = np.random.default_rng(0).normal(scale=0.05, size=1000 * 60)
+    request = _small_request(mono_mix=mono)
+    response = design(request, record_dir=tmp_path)
+    assert response.decline_reason == "channel_evidence_unavailable"
+
+    written = list(tmp_path.glob("designer-*.run.json.gz"))
+    assert len(written) == 1
+    assert f"run_record: {written[0]}" in response.decline_message
+    document = record.read(written[0])
+    fingerprint = record.Fingerprint.from_json(document["fingerprint"])
+    assert fingerprint.material_path == ""
+    assert fingerprint.material_sha256.startswith(written[0].name[9:25])
+    assert fingerprint.revision == record.revision()
+    assert record.stale_against(fingerprint) == []
+
+    # the same request is the same file; a different mix is a different one
+    design(request, record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 1
+    design(_small_request(mono_mix=mono * 0.5), record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 2
+
+
+def test_an_unwritable_record_dir_does_not_fail_the_design(tmp_path) -> None:
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory")
+    mono = np.random.default_rng(0).normal(scale=0.05, size=1000 * 60)
+    response = design(_small_request(mono_mix=mono), record_dir=blocked)
+    assert response.decline_reason == "channel_evidence_unavailable"
+    assert "run_record: not written" in response.decline_message

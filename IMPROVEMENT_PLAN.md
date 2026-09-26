@@ -112,6 +112,16 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   Probe at `--tol 0`: nothing moved on any title. `flatten`, `diagnose` and the judged band
   still read §2's stored mix, deliberately — it is the contract's analysis signal, and
   cached analysis does not depend on playback flags.
+* **R1 — done.** Every designer response names its build: `beqforge_revision` in the
+  accepted candidate's commentary, or a trailing `[beqforge_revision: …]` on a decline
+  message. `serve-designer --record-dir DIR` writes each request's run record there, named by
+  a digest of the request audio (`designer-<digest>.run.json.gz`), and the response names the
+  file. `record.revision()` never raises; a frozen build reads a revision `beqforge.spec` bakes
+  in at build time. This fixed a real crash: the deployed PyInstaller build dies with
+  `FileNotFoundError: …/tools/design_beq.py` on `beqforge replay` (and on any record write),
+  because `_source_digest` read sources a onefile build does not carry. Checked by a scratch
+  PyInstaller build through `smoke_test_exe.py`, which now asserts both the baked revision and
+  the record. Probe: nothing moved (no decision logic touched).
 
 ## Baseline: 2026-09-26 track set
 

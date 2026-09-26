@@ -35,6 +35,7 @@ from beqforge.designer import (  # noqa: E402
     response_to_json,
     validate_response,
 )
+from beqforge import record  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -45,6 +46,7 @@ DESIGN_PATH = "/design"
 
 class _Handler(BaseHTTPRequestHandler):
     params: PipelineParams  # set on the class before serving
+    record_dir: Path | None = None
 
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
@@ -71,7 +73,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
             return
 
-        response = design(request, self.params)
+        response = design(request, self.params, record_dir=self.record_dir)
         try:
             validate_response(response)
         except ContractViolation as bug:
@@ -138,6 +140,15 @@ def main() -> int:
             f"One of {', '.join(sorted(STRATEGIES))}, or 'all'. Default: all"
         ),
     )
+    parser.add_argument(
+        "--record-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "write each request's run record here (designer-<digest>.run.json.gz), "
+            "replayable with `beqforge replay`; responses name the file"
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="only warnings and above")
     args = parser.parse_args()
 
@@ -173,6 +184,7 @@ def main() -> int:
     )
 
     _Handler.params = params
+    _Handler.record_dir = args.record_dir
     # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
     # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
     # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
@@ -183,7 +195,9 @@ def main() -> int:
     server = HTTPServer((args.host, args.port), _Handler)
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
-        f"(strategies: {', '.join(strategies)})"
+        f"(strategies: {', '.join(strategies)}; build {record.revision()}"
+        + (f"; records to {args.record_dir}" if args.record_dir else "")
+        + ")"
     )
     try:
         server.serve_forever()

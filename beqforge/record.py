@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -131,6 +132,48 @@ def _git_revision() -> str:
     return f"{described}+src:{_source_digest()}"
 
 
+BUILD_REVISION_FILE = "BUILD_REVISION"
+"""Written beside the package by `beqforge.spec` at build time; read only by a frozen build."""
+
+
+def _baked_revision_path() -> Path:
+    return Path(__file__).resolve().parent / BUILD_REVISION_FILE
+
+
+def revision() -> str:
+    """Which code this is: `git describe` plus a source digest, or a frozen build's baked stamp.
+
+    A frozen executable has neither a git checkout nor its `.py` sources to digest, so
+    `beqforge.spec` bakes this function's answer into `BUILD_REVISION` at build time and a
+    frozen process reads that back. Never raises: a record or a designer response that cannot
+    say which code made it says so, rather than failing the run it describes.
+    """
+    if getattr(sys, "frozen", False):
+        baked = _baked_revision_path()
+        try:
+            return f"{baked.read_text(encoding='utf-8').strip()} (frozen build)"
+        except OSError:
+            return "unknown (frozen build without BUILD_REVISION)"
+    try:
+        return _git_revision()
+    except OSError:
+        return "unknown (sources unreadable)"
+
+
+def array_digest(material: Material) -> str:
+    """SHA-256 over a material's audio as it is held in memory, for material with no file.
+
+    A designer request arrives as arrays, not an extraction on disk, so `material_digest`
+    has nothing to hash. Covers the rate, each signal's name and its float64 samples, so the
+    same request always gives the same digest and a different mix never does.
+    """
+    digest = hashlib.sha256(f"beqforge-arrays-v1\0{material.fs}\0".encode())
+    for name, samples in (("mono_mix", material.mono_mix), *material.channels.items()):
+        digest.update(name.encode("utf-8") + b"\0")
+        digest.update(np.ascontiguousarray(samples, dtype=np.float64).tobytes())
+    return digest.hexdigest()
+
+
 def material_digest(path: Path | str) -> str:
     """SHA-256 of the extraction, so a record cannot be read against different material."""
     digest = hashlib.sha256()
@@ -197,7 +240,7 @@ def stale_against(
         reasons.append("the material has changed since it was written")
     if params is not None and fingerprint.params != repr(params):
         reasons.append(f"parameters differ: recorded {fingerprint.params}")
-    current = _git_revision()
+    current = revision()
     if fingerprint.revision != current:
         reasons.append(f"code was {fingerprint.revision}, now {current}")
     return reasons
@@ -323,24 +366,35 @@ def write(
     path: Path | str,
     report,
     params: object,
-    material_path: Path | str,
+    material_path: Path | str | None,
     curves: dict[str, Any] | None = None,
+    *,
+    material_sha256: str | None = None,
 ) -> Path:
     """Write the run record, gzipped, and return where it went.
 
     `curves` is the chart data from `charts.programme_levels_db`, stored so a chart can be
     redrawn without the extraction. It is optional only so a caller that genuinely wants the
     numbers and not the pictures can skip the cost.
+
+    Material that never touched disk — a designer request — has no `material_path`; pass
+    its `array_digest` as `material_sha256` instead, and the path is recorded as empty.
     """
+    if material_path is None and material_sha256 is None:
+        raise ValueError("a record needs the material's path or its digest")
     path = Path(path)
     accepted = report.accepted
     document = {
         "fingerprint": Fingerprint(
             schema=SCHEMA,
-            material_sha256=material_digest(material_path),
-            material_path=str(material_path),
+            material_sha256=(
+                material_sha256
+                if material_path is None
+                else material_digest(material_path)
+            ),
+            material_path="" if material_path is None else str(material_path),
             params=repr(params),
-            revision=_git_revision(),
+            revision=revision(),
             written_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         ).to_json(),
         "material": {

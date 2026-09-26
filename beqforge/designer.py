@@ -18,16 +18,20 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import logging
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 
-from beqforge import BiquadSpec
+from beqforge import BiquadSpec, record
 from beqforge.design import DesignMethod
 from beqforge.material import Material
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
+
+logger = logging.getLogger(__name__)
 
 CONTRACT_VERSION = "1.0"
 
@@ -177,8 +181,46 @@ def _to_design_candidate(
     )
 
 
+def _provenance(
+    report: Report,
+    params: PipelineParams,
+    material: Material,
+    record_dir: Path | None,
+) -> dict[str, str]:
+    """Which build answered, and where its run record went — so a response can be replayed.
+
+    A response carries only the accepted candidate (or a decline) and nothing about the code,
+    so a review queue built from responses cannot say which build made an entry or why the
+    other candidates lost. The record is named by the request audio's digest: the same
+    request writes the same file, and it replays with `tools/replay.py` (charts from the mix
+    only; the material itself never touched disk). A failed write is logged and reported in
+    the provenance, never raised — the design is the product, the record is a receipt.
+    """
+    provenance = {"beqforge_revision": record.revision()}
+    if record_dir is None:
+        return provenance
+    digest = record.array_digest(material)
+    path = Path(record_dir) / f"designer-{digest[:16]}.run.json.gz"
+    try:
+        curves = record.curves_from(
+            material,
+            {c.label: c.filters for c in report.candidates},
+            (),
+            params.realisation,
+        )
+        record.write(path, report, params, None, curves, material_sha256=digest)
+        provenance["run_record"] = str(path)
+    except (OSError, ValueError) as failed:
+        logger.warning(f"run record not written to {path}: {failed}")
+        provenance["run_record"] = f"not written: {failed}"
+    return provenance
+
+
 def design(
-    request: DesignRequest, params: PipelineParams | None = None
+    request: DesignRequest,
+    params: PipelineParams | None = None,
+    *,
+    record_dir: Path | None = None,
 ) -> DesignResponse:
     """designer-interface.md §1: one call, one title, one answer.
 
@@ -193,6 +235,10 @@ def design(
     without real per-channel audio to build the actual sub feed from, which this repo always
     has when `channels` is supplied; `lpf_position`/`clip_before`/`clip_after` have no
     equivalent in `PlaybackParams`' always-on mains+bus LR4 model. Not modelled, not guessed.
+
+    Every response says which build produced it (`beqforge_revision` in the accepted
+    candidate's commentary, or a trailing bracket on a decline message); with `record_dir`,
+    the full run record is written there too and named the same way — see `_provenance`.
     """
     params = params or PipelineParams()
 
@@ -217,6 +263,7 @@ def design(
         params = dataclasses.replace(params, playback=playback)
 
     report = run(material, params)
+    provenance = _provenance(report, params, material, record_dir)
 
     accepted = report.accepted
     if accepted is None:
@@ -224,14 +271,18 @@ def design(
             reason, message = _decline_for_blockers(report.evidence_notes)
         else:
             reason, message = _decline_for_no_passing_candidate(report)
+        stamp = "; ".join(f"{k}: {v}" for k, v in provenance.items())
         return DesignResponse(
             contract_version=request.contract_version,
             decline_reason=reason,
-            decline_message=message,
+            decline_message=f"{message} [{stamp}]",
         )
 
     candidate = _to_design_candidate(
         accepted, params, report_gain_reduction=report_gain_reduction
+    )
+    candidate = dataclasses.replace(
+        candidate, commentary={**(candidate.commentary or {}), **provenance}
     )
     return DesignResponse(
         contract_version=request.contract_version, candidates=[candidate]

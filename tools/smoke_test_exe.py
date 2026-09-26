@@ -18,8 +18,10 @@ import argparse
 import base64
 import http.client
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -115,6 +117,7 @@ def main() -> int:
         print(f"FAIL: {args.executable} does not exist", file=sys.stderr)
         return 1
 
+    records = Path(tempfile.mkdtemp(prefix="beqforge-smoke-"))
     proc = subprocess.Popen(
         [
             str(args.executable),
@@ -123,6 +126,8 @@ def main() -> int:
             str(args.port),
             "--strategy",
             "flatten",
+            "--record-dir",
+            str(records),
             "--quiet",
         ]
     )
@@ -150,6 +155,22 @@ def main() -> int:
             f"OK: accepted a real candidate (method={candidate['method']!r}, "
             f"confidence={candidate['confidence']:.2f})"
         )
+        # a frozen build has no git checkout and no sources: the revision must be the one
+        # beqforge.spec baked in, and writing a record must not need either
+        commentary = candidate.get("commentary") or {}
+        build = commentary.get("beqforge_revision", "")
+        if not build.endswith("(frozen build)") or build.startswith("unknown"):
+            print(f"FAIL: no baked build revision, got {build!r}", file=sys.stderr)
+            return 1
+        print(f"OK: build revision {build!r}")
+        written = Path(commentary.get("run_record", ""))
+        if not written.is_file():
+            print(
+                f"FAIL: no run record written, got {commentary.get('run_record')!r}",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"OK: run record {written.name}")
         return 0
     finally:
         proc.terminate()
@@ -158,6 +179,7 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        shutil.rmtree(records, ignore_errors=True)
 
 
 if __name__ == "__main__":
