@@ -167,6 +167,18 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `evidence_validation.json`). `_prune` still measures contribution over the score band, a
   superset of the placement band. It keeps nothing the judge would now refuse, because a
   section placed inside its band does its work there.
+* **E8 — done.** All-zero frames are excluded from the scene floor and from both frame
+  classes. Digital silence is absent programme, not a quiet scene. Share of exact-silence
+  frames on the baseline: LFE 98% (Dossier), 67% (Black Bag), 42% (Send Help), 26% (Bugonia),
+  Dossier's surrounds 42%; the mix never above 0.4%, so no title's boost ceiling was ever
+  affected. The ~2,900 dB channel margins become 42-71 dB. Probe: no verdict or selection
+  moves; targets move on three titles (Black Bag counterfactual 0.06 dB, Dossier flatten 0.36,
+  Obsession counterfactual 0.41). Full runs on those three: same accept/decline on every
+  title. Black Bag's accepted `flatten` takes a different four-section route to the same curve
+  (within 0.6 dB everywhere; peak boost 9.0 against 9.2 dB). Obsession's losing
+  counterfactual/35 fails for a different set of reasons. Synthetic protocol, both seeds:
+  identical decisions and recovery. A new test reproduces the real 2,937 dB median margin on the
+  old code.
 * **E6 (report) — done.** The judge's own notes now reach the designer response as
   `verdict_notes`. They were in the run record but never in the response, so the review queue
   showed `shaping_fraction` as a bare number. On the baseline, Send Help's accepted filter now

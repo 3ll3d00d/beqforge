@@ -21,6 +21,7 @@ correct answer, so the criterion is part of the abstain logic rather than a step
 """
 
 import logging
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -332,10 +333,20 @@ def extract(
     keep = unexcluded(freqs, params.exclude_bands_hz)
     in_scene_band &= keep
     band_energy_db = 10.0 * np.log10(power[in_scene_band].sum(axis=0) + 1e-300)
-
-    floor_db = float(np.percentile(band_energy_db, params.floor_percentile))
-    loud = band_energy_db >= floor_db + params.scene_margin_db
-    quiet = band_energy_db <= floor_db + params.quiet_margin_db
+    # Digital silence is the absence of programme, not a quiet scene. Classed as quiet, an
+    # all-zero frame sits at the 1e-300 floor (-3000 dB): with more than `floor_percentile`
+    # of them the floor lands there, every audible frame reads as loud, and the contrast runs
+    # to ~2,900 dB — seen on four of nine real titles' LFE and surround channels, where it
+    # left a channel's restoration bounded only by the cap (IMPROVEMENT_PLAN E8).
+    silent = ~(power.sum(axis=0) > 0)
+    audible = band_energy_db[~silent]
+    floor_db = (
+        float(np.percentile(audible, params.floor_percentile))
+        if audible.size
+        else math.inf
+    )
+    loud = (band_energy_db >= floor_db + params.scene_margin_db) & ~silent
+    quiet = (band_energy_db <= floor_db + params.quiet_margin_db) & ~silent
     logger.debug(
         f"floor {floor_db:.1f} dB, {loud.sum()} loud and {quiet.sum()} quiet "
         f"of {len(band_energy_db)} frames"
