@@ -162,6 +162,28 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   rounding moves its low-frequency gain by 4.4 dB"); Obsession's says 28.9 dB below 24.2 Hz.
   No threshold was added: the note is the one `assess` already writes. The quantitative part
   of E6 (false-accept rate on natural-droop variants) waits for E2.
+* **E5 — checked; the hold stays.** Ablated `flatten`'s hold below the tracking floor on the
+  six titles that have a floor. The evidence ceiling alone would license up to 14.1 dB more
+  boost below the floor on 28 Years Later (at 4.9 Hz), 13.1 dB on Ballad of Wallis Island,
+  6.2 dB on Alto Knights, 2.1 dB on Bugonia and 0.6 dB on Black Bag; the hold binds on 117 of
+  157 sub-floor bins on 28 Years Later. Temporal contrast licenses bins that do not track the
+  programme, so the hold is the only thing carrying the tracking evidence into the target.
+  Not redundant, and the ceiling is doing what it claims — it was never a tracking test.
+* **E7 — checked; fixed bands kept for now.** Deriving extraction's scene band (ending at the
+  mix plateau) and reference band (the plateau itself) per title moves loud-frame counts a lot
+  (Ballad 104 → 517, Caught Stealing 927 → 1534, Obsession 928 → 1724) but the priced `flatten`
+  target barely at all: at most 0.87 dB (Black Bag), zero on six titles. On Dossier it is
+  worse (loud frames 260 → 4), because the derived bands inherit the wrong plateau. The fixed
+  constants are not deciding an outcome today; revisit once T4's open question is settled.
+* **T5 — checked; folded into T4.** Injected ripple on a flat, unfiltered spectrum. At 3 dB
+  peak-to-peak the anchor stays at the plateau's lower edge (4-8.5 Hz). At 6 dB and more the
+  plateau either vanishes (abstain) or, with octave-period ripple, latches onto one crest
+  (127-185 Hz) and the anchor follows it to 68 Hz, so `flatten` would lift ripple valleys by
+  up to 4.9 dB on unfiltered material. The anchor logic is sound; what moves is the plateau
+  choice, which is T4's crest-picking. No hysteresis added.
+* **T7 — checked; stays low priority.** The only extent failure among 28 baseline candidates
+  (Obsession `counterfactual/35dB`, "corrected only down to 24.9 Hz") is on a title with no
+  tracking floor, so no verdict depends on the floor's resolution or the frame length.
 
 ## Baseline: 2026-09-26 track set
 
