@@ -392,44 +392,11 @@ def verify(
     reference_samples: np.ndarray | None = None,
     playback_model: str | None = None,
 ) -> Correction:
-    """Apply `filters` to `samples` and measure the corrected low end.
+    """Apply the published device response and measure the corrected sub spectrum.
 
-    The band has to be wide enough to see a slope. An earlier default of 5-16 Hz was not: two
-    designs measured +0.17 and +0.05 dB/octave there and looked identical in shape, while over
-    5-45 Hz they separate to -1.17 and +0.10 — one rising into the bottom, the other flat. A
-    window narrower than the shape being judged reads a step as a slope and a slope as nothing.
-
-    `exclude_bands_hz` drops authored emphasis, which is content: correcting a hump at 20 Hz is
-    not the job and including it would penalise a correct filter.
-
-    The reference used to be a single fixed point, `before`/`after` each anchored to their own
-    value at 40 Hz — a fixed point that was long known to be wrong before it was fixed. On Predator that single point sits on the
-    shoulder of a local bump 1.7-2.3 dB above the mix's own plateau, which read as `level_db`
-    running 4 dB under reference when the corrected curve was in fact flat within 2 dB of it —
-    a shape that passed R1 everywhere else and failed only because the ruler had a bump in it.
-    `plateau_reference` is the fix already used for exactly this on `flatten`'s own target and
-    on every per-channel reference in `diagnose`; verification judging the result by a
-    different rule than construction judged the target was the gap, not two separate bugs.
-    One reference, from `before` alone so a filter cannot move its own goalposts, applied to
-    both curves so what's compared is how far `after` closed on where `before` already stood.
-
-    With `reference_samples`, `samples` is the post-bass-management sub feed and the reference
-    is the aligned full-band programme used to construct targets. The fixed baseline is
-    PSD(sub_before) - PSD(programme_before), measured before correction: it includes the
-    model's crossover and coherent channel sum, not a target or fitted cascade. Sub spectra
-    are judged relative to this unchanged baseline and the programme's own plateau. Thus
-    independent wrong-filter checks retain the same house/material meaning, and a crossover
-    does not become a deficit. Raw playback spectra and the baseline remain in Correction.
-    This describes the sub output, not the combined sub-plus-mains acoustic response.
-
-    The corrected waveform uses the device-rate complex response, including publication
-    rounding and coefficient quantisation, on the band-limited extracted signal. Magnitude
-    and phase therefore include the full rate difference. An unstable publication retains
-    only a frequency-response diagnostic for rejection; it has no finite waveform/headroom.
-
-    `priced_target_db` is the evidence-priced target the fitter was handed, if any (§14.2) — on
-    `DESIGN_GRID`, `None` for a caller-supplied candidate with no target. Only reaches
-    `Correction.concerns`'s smoke test here; `assess` takes it directly.
+    Use the quantised complex transfer on the extracted waveform, then compare
+    before and after against one programme plateau and an unchanged playback
+    baseline. The resulting curve feeds the independent acceptance checks.
     """
     if any(a <= band_hz[1] and b >= band_hz[0] for a, b in exclude_bands_hz):
         raise ValueError(
@@ -486,6 +453,7 @@ def verify(
 
 
 def _mean_db(samples: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
+    """Measure the waveform's Welch mean spectrum for before/after comparison."""
     freqs, power = signal.welch(samples, fs=fs, nperseg=4096, noverlap=2048)
     keep = freqs > 0
     return freqs[keep], 10.0 * np.log10(power[keep] + 1e-300)

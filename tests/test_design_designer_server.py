@@ -167,6 +167,19 @@ def test_request_missing_a_required_field_is_400(server) -> None:
     assert "error" in body
 
 
+def test_channel_length_mismatch_is_a_bad_request(server) -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros(8)),
+        "channels": {"L": _ndarray_to_json(np.zeros(5))},
+    }
+    status, response = _request(server, "POST", DESIGN_PATH, body=body)
+    assert status == 400
+    assert "channel 'L' has 5 samples; mono_mix has 8" in response["error"]
+
+
 def test_declines_over_a_real_connection_with_no_channels(server) -> None:
     status, body = _request(server, "POST", DESIGN_PATH, body=_no_evidence_request())
     assert status == 200

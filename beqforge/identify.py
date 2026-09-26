@@ -153,7 +153,12 @@ class Identification:
 def identify_rolloff(
     envelopes: Envelopes, params: IdentifyParams | None = None
 ) -> Identification:
-    """Fit `N + A` to the extracted envelope and compare it against `N` alone."""
+    """Test whether attenuation improves on a smooth-content explanation.
+
+    Fit a smooth natural spectrum `N` and a joint `N + A` rolloff model to
+    unexcluded bins in the fit band. The result informs diagnosis and the parametric proposal;
+    it does not license boost by itself.
+    """
     params = params or IdentifyParams()
     freqs, values, weights = _fit_inputs(envelopes, params)
     if len(freqs) < 3 * (params.envelope_order + 4):
@@ -188,11 +193,7 @@ def identify_rolloff(
 def _fit_inputs(
     envelopes: Envelopes, params: IdentifyParams
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Bins worth fitting, and how much each is worth.
-
-    Weighting is the coherence of §3.4 rather than any absolute noise-floor threshold: where
-    coherence collapses the weight goes to zero on its own.
-    """
+    """Select unexcluded mean-spectrum bins with uniform fit weights."""
     band = (envelopes.freqs >= params.fit_band_hz[0]) & (
         envelopes.freqs <= params.fit_band_hz[1]
     )

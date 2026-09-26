@@ -166,7 +166,12 @@ def design(
     *,
     price_target: Callable[[np.ndarray], tuple[np.ndarray, list[str]]] | None = None,
 ) -> Design:
-    """Invert an identified rolloff into a publishable cascade."""
+    """Turn a supported parametric rolloff into a bounded filter proposal.
+
+    Terminate the inverse with a protective high-pass, then cap its target by
+    measured evidence. Use an exact shelf inverse when it meets the section
+    limits and target; otherwise fit biquads to the priced curve.
+    """
     params = params or DesignParams()
     fit = identification.fit
 
@@ -332,19 +337,10 @@ implied order and ignoring it, which read as though the alignment were being cho
 def _noise_ceiling(
     envelopes: Envelopes, fit, params: DesignParams
 ) -> tuple[bool, np.ndarray]:
-    """How much boost the measured noise floor allows, per §4.1.
+    """Bound parametric inversion by per-bin peak–quiet contrast and its error.
 
-    Computed and applied unconditionally. If it binds that is a signal, not merely a limit:
-    a filter whose shape is set by the noise ceiling says the title is in the marginal regime
-    and confidence should fall accordingly.
-
-    **One ceiling, derived the same way on both paths.** This was `margin_db - 12.0`, a flat
-    haircut, while `flatten` moved to `margin_db - confidence_z * margin_se_db` — per bin, from
-    a block bootstrap over the evidence each bin actually has. §13.7 recorded the two as "two
-    boost caps, differently applied"; keeping the flat one here would have left the parametric
-    route asserting a number the rest of the system had stopped asserting.
-
-    Missing and omitted measurements license no boost, as on the shared target path.
+    Compare the fitted inverse with `Envelopes.boost_ceiling`; missing and
+    omitted measurements allow zero boost, as for every other target strategy.
     """
     ceiling = envelopes.boost_ceiling(params.confidence_z)
     wanted = -attenuation_db(

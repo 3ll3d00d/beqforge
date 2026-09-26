@@ -362,28 +362,11 @@ def _smooth(values: np.ndarray, window: int) -> np.ndarray:
 def turnover_db_per_octave(
     correction: Correction, params: AcceptParams
 ) -> tuple[float, float, float]:
-    """Slope below the corrected curve's in-band peak, the material's slope over that same
-    segment, and where the peak is.
+    """Compare low-side turnover below the corrected curve's interior peak.
 
-    "Too much too soon and then a rolloff": a correction that reaches full boost above the
-    bottom of the band and then falls away below it. `tilt` cannot see this — fitted across
-    the whole band, the rise above the peak and the fall below it average out, and the third
-    title's turnover measured -0.72 dB/octave overall while falling at +4.11 below its peak.
-
-    **Both slopes come from one segment, and that is what makes the clause comparative.**
-    Locating a peak on each curve separately and measuring the slope below *each* was not a
-    comparison. A mix rises toward its own plateau, so its in-band peak lands at the top edge
-    of the judged band — within half an octave of it on seven of the eight titles measured —
-    the interior guard below then returned 0.0 for the material, and the clause silently
-    collapsed into the absolute 2.0 dB/octave test it was written to replace. Only title 1,
-    whose authored hump at 20 Hz sits inside the band, ever measured a real baseline (+12.23
-    dB/oct); every other title compared a segment chosen on the corrected curve against a
-    number that meant "not measurable here". Taking the material over the segment the
-    corrected curve's peak defines keeps it like for like by construction, and costs one
-    further `polyfit`.
-
-    Slopes are signed as `tilt`: positive falls toward the bottom. Both are 0.0 when the
-    segment is degenerate, so a clause reading them cannot fire on an unmeasurable turnover.
+    Smooth to locate that peak, then fit input and corrected slopes over the
+    same segment beneath it. Positive slopes fall toward the bottom; an edge
+    peak or insufficient span gives no measurable turnover.
     """
     band = (correction.freqs >= correction.band_hz[0]) & (
         correction.freqs <= correction.band_hz[1]
@@ -391,18 +374,8 @@ def turnover_db_per_octave(
     freqs = correction.freqs[band]
     if len(freqs) < 4:
         return 0.0, 0.0, math.nan
-    # Smoothed, and for the same reason the extent clause is: the material scatters by ~6 dB,
-    # and `argmax` of a raw curve locates a bin rather than a peak. Measured on the third
-    # title's corrected curve, the raw argmax put the peak at 36.6 Hz and read the turnover as
-    # +0.00 dB/oct; the same curve through the same 9-bin window put it at 18.8 Hz and read
-    # +1.70, against a rejection threshold of 2.0. One bin of scatter moved the segment being
-    # measured by an octave, and the clause this sits in was written because a segment chosen
-    # wrongly is the whole failure mode.
     after = _smooth(correction.after_db[band], params.extent_smoothing_bins)
     peak = int(np.argmax(after))
-    # the peak has to be interior. At the band's top edge this measure degenerates into the
-    # overall tilt, and reports plain under-correction as "too much too soon" — which the
-    # tilt clause has already said, and said correctly.
     below_top = math.log2(freqs[-1] / freqs[peak])
     above_bottom = math.log2(freqs[peak] / freqs[0])
     if min(above_bottom, below_top) < params.turnover_min_octaves:
@@ -532,24 +505,12 @@ def assess(
     required_offset_db: float = 0.0,
     target_db: np.ndarray | None = None,
 ) -> Verdict:
-    """Judge one candidate against R1 and R3.
+    """Judge the published cascade against its licensed intent and the material.
 
-    `noise_floor_hz` is where R1's "down to the noise floor" terminates — from `diagnose`,
-    not assumed. NaN means content was found all the way down, so the correction is expected
-    to reach the bottom of the band.
-
-    `filter_floor_hz` is R2's boundary, and it produces a *note* rather than a failure. Below
-    it the mix response is not level-invariant. This descriptive feature neither proves nor
-    disproves mastering attenuation and does not enter the correction evidence score.
-
-    `target_db` is the evidence-priced target the fitter was handed, on `DESIGN_GRID`, or
-    `None` for a candidate with no target (the parametric route). The tilt, level and extent
-    clauses measure departure from *intent* — `before_db + target_db`, plus the house curve —
-    rather than from the house curve alone (§14.2); `None` falls back to the house curve
-    exactly as every clause did before intent existed. Overshoot, cliff, wobble-against-
-    material, turnover, section contribution and drift/realisability are unaffected — those
-    ask whether the filter is wrong, not whether it achieved what it was asked to, and must
-    not be judged against a target that could itself be wrong (§6.2).
+    Compare tilt, level and extent with the evidence-priced target. Test
+    overshoot, cliffs, turnover and wobble against the material or house curve;
+    check section contribution and device stability/drift separately. The
+    tracking floor bounds expected extent; the invariance floor is diagnostic.
     """
     params = params or AcceptParams()
     filters = publication_filters(filters)
@@ -557,10 +518,6 @@ def assess(
     failures: list[str] = []
     notes: list[str] = []
 
-    # Nothing below is meaningful on a band too short to carry a slope, so this returns rather
-    # than adding a sixth failure to five arbitrary ones. See `min_judge_octaves`: the width is
-    # what the material left after its own noise floor, so a band this narrow is a statement
-    # about the title and not about the candidate.
     octaves = math.log2(correction.band_hz[1] / correction.band_hz[0])
     if octaves < params.min_judge_octaves:
         return Verdict(
@@ -582,11 +539,6 @@ def assess(
     # while `tilt_db_per_octave` is positive when the curve falls toward it.
     quantum = params.decision_quantum_db
     wanted = params.target_tilt_db_per_octave
-    # Intent (§14.2): a target that only partially recovers the deficit is not itself flat, so
-    # what "was asked for" here is the intended curve's own slope and level — before_db plus
-    # the priced target, plus the house curve — not the dial's bare number. `target_db is None`
-    # (no target) collapses `intent_*` back to the house curve exactly as `wanted`/
-    # `requested_level_db` did before this existed, so a candidate with no target is unaffected.
     intent_tilt = -correction.intent_tilt_db_per_octave(target_db, wanted)
     achieved = -correction.tilt_db_per_octave
     if _at(abs(achieved - intent_tilt), quantum) > _at(
@@ -608,21 +560,7 @@ def assess(
             f"intended, outside the {params.level_tolerance_db:g} dB allowed"
         )
 
-    # Comparative, like the cliff clause and for the same reason: the peak the corrected curve
-    # turns over from may be one the correction never touched. On title 1 the mix is +8.6 dB
-    # at 20 Hz against its own 40 Hz level — an authored hump, +14.2 dB in the LFE — so
-    # `flatten` correctly asks for no boost across 12-31 Hz, the hump survives into the
-    # corrected curve as its in-band peak, and everything below it reads as falling away from
-    # something the filter did not put there. The input turns over at +12.23 dB/oct on its
-    # own; the candidate left +3.2 and was rejected for a fourfold improvement.
-    #
-    # Both slopes are measured over the one segment the corrected peak defines — see
-    # `turnover_db_per_octave` for why measuring each curve below its own peak left this
-    # comparing unlike things on seven of eight titles.
-    #
-    # The tolerance is `tilt_tolerance_db_per_octave` rather than a new constant, which makes
-    # this identical to the old absolute test whenever the material is flat below that peak —
-    # title 3's input is flat there, so its parametric candidate at +4.1 still fails.
+    # Compare turnover over the same segment of input and corrected material.
     turnover, material_turnover, peak_hz = turnover_db_per_octave(correction, params)
     if _at(turnover, params.decision_quantum_db) > _at(
         material_turnover + params.tilt_tolerance_db_per_octave,
@@ -634,17 +572,7 @@ def assess(
             "rolloff"
         )
 
-    # Overshoot, over the correction's whole extent rather than only the judged band — the one
-    # clause that looks below `noise_floor_hz`. The judged band starts at that floor because the
-    # correction is not expected to have *achieved* anything underneath it, but a low shelf acts
-    # there whether or not it was asked to, and nothing else was watching: Blazing Saddles has no
-    # programme content below 33.7 Hz and a candidate that lifted 5-20 Hz by +5 to +11 dB passed
-    # every other clause, because every other clause had stopped looking at 33.7 Hz.
-    #
-    # Comparative on both sides and so needing no constant of its own: the bar is the shape that
-    # was asked for, or where the material already sat if that is higher — which is what lets an
-    # authored hump through. Title 1's mix is +5.8 dB at 20 Hz and its filter leaves +5.0 there;
-    # the filter did not put it there and is not charged for it.
+    # Guard below the judged floor too: a shelf can still boost that region.
     guard = (correction.freqs >= DESIGN_GRID[0]) & (
         correction.freqs <= correction.band_hz[1]
     )

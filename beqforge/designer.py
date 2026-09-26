@@ -49,6 +49,27 @@ class DesignRequest:
     bass_management: dict | None = None
 
 
+def _validate_audio_arrays(
+    mono_mix: np.ndarray, channels: dict[str, np.ndarray] | None
+) -> None:
+    """Enforce the interface's shared, time-aligned 1-D audio-array contract."""
+    arrays = [("mono_mix", mono_mix), *((channels or {}).items())]
+    expected_length: int | None = None
+    for name, samples in arrays:
+        array = np.asarray(samples)
+        if array.ndim != 1:
+            raise ValueError(f"{name} must be a 1-D audio array, got shape {array.shape}")
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} must contain only finite samples")
+        if name == "mono_mix":
+            expected_length = len(array)
+        elif len(array) != expected_length:
+            raise ValueError(
+                f"channel {name!r} has {len(array)} samples; "
+                f"mono_mix has {expected_length}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class DesignCandidate:
     """designer-interface.md §3."""
@@ -175,6 +196,8 @@ def design(
     """
     params = params or PipelineParams()
 
+    _validate_audio_arrays(request.mono_mix, request.channels)
+
     material = Material(
         name="designer-request",
         fs=request.fs,
@@ -236,7 +259,7 @@ def _ndarray_to_json(arr: np.ndarray) -> dict:
 def request_from_json(body: dict) -> DesignRequest:
     """designer-interface.md §7.1's request body, as POSTed by `http_designer(url)`."""
     channels = body.get("channels")
-    return DesignRequest(
+    request = DesignRequest(
         contract_version=body["contract_version"],
         fs=int(body["fs"]),
         coverage=body["coverage"],
@@ -248,6 +271,8 @@ def request_from_json(body: dict) -> DesignRequest:
         ),
         bass_management=body.get("bass_management"),
     )
+    _validate_audio_arrays(request.mono_mix, request.channels)
+    return request
 
 
 def _candidate_to_json(c: DesignCandidate) -> dict:

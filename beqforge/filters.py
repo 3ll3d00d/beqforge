@@ -336,21 +336,10 @@ def correction_band_hz(
     threshold_db: float = 0.5,
     widen_octaves: float = WIDEN_OCTAVES,
 ) -> tuple[float, float]:
-    """The span over which a target actually asks for something.
+    """Constrain section placement to the target's active frequency span.
 
-    Sections belong where the correction is, not merely inside the band the residual is scored
-    over. A bass correction that is flat above 25 Hz has no business placing a section at
-    105 Hz, and one that does is spending budget to achieve nothing.
-
-    Widened upward by `widen_octaves` but **never downward below `evidence_floor_hz`**. The
-    asymmetry is the point. A section reaching up is harmless — its skirt still does its work
-    lower down, it is better conditioned there, and it is what blends the correction into the
-    rest of the programme. A section placed below the lowest measured frequency has its defining
-    parameters in a region where nothing was observed: only its skirt is fitted, and its corner
-    and Q rest on no evidence at all. Unbounded, the fit does exactly that — it once returned a
-    low shelf at 3.22 Hz with +45 dB of gain to express a correction that is under 5 dB
-    anywhere above 10 Hz, using the shelf's transition as a ramp rather than using it as a
-    shelf.
+    Find bins above the target threshold, widen upward for a smooth transition,
+    and keep the lower edge at or above the measured evidence floor.
     """
     active = np.abs(target_db) >= threshold_db
     if not active.any():
@@ -571,27 +560,11 @@ def fit_minimal_biquads(
     min_contribution_db: float = 1.0,
     max_drift_db: float | None = None,
 ) -> tuple[list[BiquadSpec], float]:
-    """The fewest sections that reach `residual_target_db`, or the best within the budget.
+    """Fit one target with the fewest sections meeting the residual limit.
 
-    `fit_to_biquads` spends whatever budget it is given, so asking it for four sections when
-    three will do parks the fourth somewhere harmless at a fraction of a dB. A section that
-    does nothing is not free: it occupies a slot, it has to be published, and it invites the
-    reader to believe it means something.
-
-    `max_drift_db` screens the candidates on the statistic that will actually judge them.
-    The cost function scores quantisation drift at the optimiser's exact coefficients, but a
-    published cascade is rounded first, and the two differ: on the third title the most
-    accurate cascade in the budget measured 0.43 dB in the fit and 3.44 dB at the p90 of the
-    rounding it will undergo, so selecting on residual alone chose a filter the acceptance
-    model then rejected, over a slightly less accurate one that passes.
-
-    Widening the *cost* to cover that was tried and is worse on every axis (see
-    `_fit_structure`) — a max over sampled roundings is non-smooth and degrades the search.
-    Measuring it once per surviving candidate instead costs a few evaluations rather than
-    millions, which is where a statistic this expensive belongs.
-
-    One target. `fit_minimal_biquads_all` is the same thing over several, and is what the
-    pipeline uses; alone, a target escalating on its own leaves most of the machine idle.
+    Delegates to the shared escalation; screens each surviving cascade for drift
+    after publication rounding. If none meets the limit, returns the best within
+    the section budget for independent verification.
     """
     return fit_minimal_biquads_all(
         [FitRequest(target_db, placement_band_hz)],
@@ -623,24 +596,11 @@ def fit_minimal_biquads_all(
     min_contribution_db: float = 1.0,
     max_drift_db: float | None = None,
 ) -> list[tuple[list[BiquadSpec], float]]:
-    """Fit every target, escalating the section budget across all of them together.
+    """Escalate section counts across all targets until each fit settles.
 
-    Two things at once, and they only work as a pair.
-
-    **Escalate rather than enumerate.** The budget goes as the cube of `max_sections` — the
-    four-section tier alone is 59% of it — and most targets never need it: of eleven fits over
-    the four titles, five settle at two sections and seven at three. Fitting a tier only when
-    the tiers below it have failed to settle spends about half the CPU. `settle` argues why
-    that is the same answer rather than an approximation of it.
-
-    **One tier, every target.** Escalating a single target starves the pool: its first tier is
-    two tasks for seven workers, which is why this was enumerated up front in the first place.
-    Escalating all of them in step puts every undecided target's tier into one submission, so
-    the width comes from the number of targets rather than from spending budget nothing needs.
-    A run fits four targets, so a tier is 8 to 32 tasks instead of 2 to 8.
-
-    Deterministic and order-preserving: `_run_fits` returns in submission order, tasks are
-    seeded, and results are handed back to the target that asked for them.
+    For each tier, search shelf/peak splits and seeds for every pending target;
+    stop a target at the first publishable tier within the residual limit.
+    Return results in request order for the proposal and verdict stages.
     """
     states = [_Escalation(request) for request in requests]
     widest = len(requests) * max_sections * len(seeds)
@@ -869,23 +829,10 @@ def fit_to_biquads(
     realisation: "Realisation | None" = None,
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> tuple[list[BiquadSpec], float]:
-    """Minimax fit of `sections` publishable biquads to an arbitrary target.
+    """Minimise the worst dB target error for a fixed section count.
 
-    The fallback for when `invert_to_shelves` does not apply. Searches every split of the
-    budget between low shelves and peaking sections, since a shelf-only cascade cannot always
-    reach the target — a steep rolloff terminated by a shallower protective filter needs the
-    peaking sections to carry the transition.
-
-    The objective is multimodal and the search is stochastic, so it is run from several seeds
-    and the best kept. That matters more than it looks: on an extreme target — a high-order
-    rolloff terminated by a much lower-order protective filter, spanning 100 dB — results vary
-    by an order of magnitude between seeds, and a single lucky run is not evidence the fit is
-    good. Trust `residual_db`, not the section count. Matching the protective filter's
-    alignment and order to the rolloff avoids this path entirely (see `invert_to_shelves`).
-
-    Returns the cascade and its maximum absolute error in dB over `band_hz`, which is the
-    `residual_db` the contract asks for. Deterministic: the seeds are fixed, so repeat calls on
-    identical input reproduce the same answer.
+    Search shelf/peak splits from fixed seeds and return the lowest maximum
+    error over `band_hz`. This fits targets without a closed-form shelf inverse.
     """
     placement = placement_band_hz or band_hz
     results = _run_fits(
@@ -1042,11 +989,10 @@ def _fit_structure(
     realisation: "Realisation | None",
     seed: int,
 ) -> tuple[list[BiquadSpec], float, float, int]:
-    """One stochastic fit of a fixed shelf/peak split, with its own cost.
+    """Optimise one shelf/peak structure against worst target and device error.
 
-    Returns its timing and evaluation count rather than accumulating into `FIT_STATS`: these
-    run in worker processes, where a module-level counter would be incremented in the wrong
-    interpreter and silently report zero.
+    Differential evolution searches frequency, Q and gain bounds; bounded
+    Nelder-Mead polishes the result. Return the fit and worker-local cost stats.
     """
     started = time.perf_counter()
     evaluations = 0
@@ -1071,27 +1017,7 @@ def _fit_structure(
         response = magnitude_db(sos, freqs, fs)
         worst = float(np.max(np.abs((response - target_db)[mask])))
         if realisation is not None:
-            # Drift at the exact coefficients, deliberately, though `accept` gates on the p90
-            # over publication rounding and the two are therefore not the same statistic.
-            # Widening this one to match was tried and is worse on every axis. Adding the two
-            # antipodal roundings to the max, on the third title's flatten target:
-            #
-            #   point only          28.2 s   residual 0.432   3 sections   drift p90 1.893
-            #   same sign both ways 64.8 s   residual 0.771   2 sections   drift p90 2.712
-            #   alternating signs   55.5 s   residual 0.591   2 sections   drift p90 2.590
-            #
-            # A max over samples makes the objective non-smooth, and the optimiser converges
-            # to a worse point on accuracy *and* on the drift the term was added to control,
-            # at twice the cost of a stage that is already ~90% of the run. A sensitivity
-            # penalty that helped would have to be smooth — the derivative of the response
-            # with respect to the coefficients — not a maximum over jittered evaluations.
-            #
-            # The realised cascade is the published one whenever the two rates agree, which
-            # they do by default — `PUBLISH_FS` and `Realisation.fs` are both 96 kHz. Built
-            # and evaluated again regardless, that was a second `biquad_sos` and a third
-            # `magnitude_db` per evaluation, some ten million times a run, for an answer
-            # already in hand. Branching rather than assuming, so a `Realisation` at another
-            # rate still gets its own.
+            # Score exact-coefficient device drift here; publication drift is screened later.
             if realisation.fs == fs:
                 device, undrifted = sos, response
             else:
@@ -1104,27 +1030,10 @@ def _fit_structure(
             worst = max(worst, float(np.max(np.abs(drift[mask]))))
         return worst
 
-    # 300 generations, not 600. `tol` never fires — a minimax population's energies do not
-    # collapse, so the run always reaches `maxiter` and `maxiter` is therefore the only lever
-    # on how much of the budget is spent. Measured on a real target, best over every split and
-    # both seeds at three sections:
-    #
-    #   maxiter 600  660,036 evaluations  residual 0.2721
-    #   maxiter 300  337,536 evaluations  residual 0.2879
-    #   maxiter 150  175,227 evaluations  residual 0.5362
-    #   maxiter  80  101,445 evaluations  residual 0.4678
-    #
-    # Half the budget for 0.016 dB, against a `residual_target_db` of 0.5. Below 300 it stops
-    # being a trade: the search is noisy enough there that 80 beats 150, which is a sign the
-    # budget is no longer sufficient rather than a reason to prefer 80.
     coarse = optimize.differential_evolution(
         cost, bounds, seed=seed, maxiter=300, popsize=20, tol=1e-10, polish=True
     )
-    # Bounded, because Nelder-Mead is otherwise free to leave the box differential evolution
-    # searched, and `BiquadSpec` refuses a non-positive frequency or Q. That is not theoretical:
-    # a four-shelf fit of a plain soft-knee target reaches `q must be > 0, got -0.012` and takes
-    # the fit down with it — inside a worker, the run. The bounds are the ones the search was
-    # given, so a point outside them was never a candidate anyway.
+    # Keep the polish inside the physical parameter bounds.
     fine = optimize.minimize(
         cost,
         coarse.x,

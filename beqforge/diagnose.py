@@ -240,10 +240,11 @@ def plateau_reference(
     params: DiagnoseParams,
     exclude_bands_hz: tuple[tuple[float, float], ...] = (),
 ) -> tuple[float, tuple[float, float]]:
-    """A channel's own reference level, and the band over which it holds it.
+    """Find this spectrum's contiguous plateau and its median level.
 
-    The level a channel's attenuation is measured against has to come from that channel on
-    that title. See `DiagnoseParams.reference_percentile` for why a fixed band cannot do it.
+    Median-filter for discovery, retain near-high-percentile flat regions,
+    then prefer the widest, flattest and lowest one. Its raw median anchors
+    measured deficits and keeps targets and verification on the same reference.
     """
     grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
     bands = (*params.exclude_bands_hz, *exclude_bands_hz)
@@ -559,7 +560,12 @@ def diagnose(
     params: DiagnoseParams | None = None,
     extraction_params: "ExtractionParams | None" = None,
 ) -> Diagnosis:
-    """Decompose the mix per channel and locate the two floors R1 and R2 depend on."""
+    """Locate each channel's attenuation and the mix's correction boundaries.
+
+    Reference spectra to their own plateaus, measure local knees and signed mix
+    shares, then test level invariance and event tracking. These measurements
+    constrain channel restoration and the band over which a filter is judged.
+    """
     params = params or DiagnoseParams()
     freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
     band = (freqs >= params.band_hz[0]) & (freqs <= params.band_hz[1])
@@ -649,7 +655,12 @@ def _temporal_evidence(
     reference_hz: tuple[float, float],
     freqs: np.ndarray,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, float, float, np.ndarray]:
-    """Measure each subject against its own plateau, including the actual combined mix."""
+    """Find level-invariance and programme-tracking floors below a subject's plateau.
+
+    Compare spectra across scene levels for the first floor; descend in bands and
+    correlate each band's time envelope with the plateau for the second. Failed or
+    unavailable tracking ends the band in which correction can be judged.
+    """
     unavailable = np.full_like(freqs, np.nan)
     if not all(math.isfinite(f) for f in reference_hz) or len(subject) < WELCH_NPERSEG:
         return {}, unavailable, math.nan, params.band_hz[1], unavailable

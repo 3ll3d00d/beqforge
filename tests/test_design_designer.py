@@ -150,6 +150,33 @@ def test_request_from_json_round_trips_channels_and_bass_management() -> None:
     assert request.bass_management["lpf_fs"] == 80.0
 
 
+def test_request_from_json_rejects_channel_length_mismatch() -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros(8)),
+        "channels": {"L": _ndarray_to_json(np.zeros(5))},
+    }
+    with pytest.raises(ValueError, match=r"channel 'L' has 5 samples; mono_mix has 8"):
+        request_from_json(body)
+
+
+def test_request_from_json_rejects_non_1d_and_non_finite_audio() -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros((2, 3))),
+    }
+    with pytest.raises(ValueError, match="mono_mix must be a 1-D"):
+        request_from_json(body)
+
+    body["mono_mix"] = _ndarray_to_json(np.array([0.0, np.inf]))
+    with pytest.raises(ValueError, match="mono_mix must contain only finite"):
+        request_from_json(body)
+
+
 def test_request_from_json_leaves_absent_fields_none() -> None:
     body = {
         "contract_version": "1.0",

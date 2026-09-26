@@ -262,7 +262,10 @@ class Envelopes:
         return states
 
     def boost_ceiling(self, z: float) -> np.ndarray:
-        """Temporal-contrast allowance; absent evidence never supplies permission."""
+        """Allow peak–quiet contrast minus `z` bootstrap errors per supported bin.
+
+        A bin with no positive, finite evidence contributes zero to every target.
+        """
         supported = self.evidence_states(z) == "support"
         ceiling = np.zeros_like(self.freqs)
         ceiling[supported] = (
@@ -316,7 +319,12 @@ class Envelopes:
 def extract(
     samples: np.ndarray, fs: float, params: ExtractionParams | None = None
 ) -> Envelopes:
-    """Reduce a signal to the envelopes of §3.3 and the coherence weighting of §3.4."""
+    """Measure spectral shape and per-bin evidence for a correction.
+
+    Classify frames by energy relative to a low-percentile scene floor, then measure
+    peak and quiet spectra. Their contrast and block-bootstrap error set the boost
+    ceiling; partial level coherence checks whether bins track programme events.
+    """
     params = params or ExtractionParams()
     freqs, power = _spectrogram(samples, fs, params)
     in_scene_band = (freqs >= params.scene_band_hz[0]) & (
@@ -395,6 +403,7 @@ def extract(
 def _spectrogram(
     samples: np.ndarray, fs: float, params: ExtractionParams
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-frame STFT power used for scene and spectral measurements."""
     freqs, _, spectra = signal.stft(
         samples,
         fs=fs,
@@ -408,6 +417,7 @@ def _spectrogram(
 def _envelope_db(
     power: np.ndarray, frames: np.ndarray, percentile: float
 ) -> np.ndarray:
+    """Estimate each bin's selected-frame power percentile in dB."""
     if not frames.any():
         return np.full(power.shape[0], -np.inf)
     return 10.0 * np.log10(np.percentile(power[:, frames], percentile, axis=1) + 1e-300)
@@ -416,18 +426,11 @@ def _envelope_db(
 def _coherence(
     freqs: np.ndarray, power: np.ndarray, reference_band_hz: tuple[float, float]
 ) -> np.ndarray:
-    """Per-bin partial correlation of level against the reference band, holding the overall
-    programme level fixed.
+    """Measure each bin's level tracking beyond overall programme loudness.
 
-    The partial is what makes this a measurement rather than a tautology. Raw correlation
-    scores 0.5-0.9 at *every* frequency on real material, because every bin rises and falls
-    with the programme — it measures loud scenes against quiet ones, not whether a bin carries
-    event-related content. Regressing out the total level leaves only what co-varies with the
-    reference band beyond that common mode.
-
-    Correlated in dB rather than in power so that a single loud event cannot dominate the
-    statistic — the question is whether a bin rises and falls *with* the content, not whether
-    it happens to share one big transient.
+    Regress log power in the bin and reference band against total log power, then
+    correlate their residuals. This avoids treating every loud scene as evidence
+    that every frequency carries related content.
     """
     bins_db = 10.0 * np.log10(power + 1e-300)
     total_db = 10.0 * np.log10(power.sum(axis=0) + 1e-300)
