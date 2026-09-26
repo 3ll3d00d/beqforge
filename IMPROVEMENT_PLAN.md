@@ -327,10 +327,11 @@ is ground truth for E2 or A1.
 | Send Help | 7.1 (Atmos), 113 min | accept | accept | `flatten` 2, +13.1 dB | 0.93 / 1.00 | 24.1-41.7 | none → 5-45 |
 
 **Records refreshed after E3 (d68eba0).** The table above is the state at 4858a45. The
-`data/*.run.json.gz` records the probe re-judges against now come from d68eba0. Winners at
-that commit: `parametric` on 28 Years Later, Caught Stealing and Send Help; `flatten` on Alto
-Knights, Ballad of Wallis Island, Black Bag, Bugonia and Obsession; Dossier 137 abstains
-(`no_usable_plateau`, see Progress). The next refresh is due when a change is accepted that
+`data/*.run.json.gz` records the probe re-judges against now come from d68eba0, with
+Bugonia, Caught Stealing, Obsession and Send Help refreshed again at b168669. Current winners:
+`parametric` on 28 Years Later; `flatten` on Alto Knights, Ballad of Wallis Island, Black Bag,
+Bugonia, Caught Stealing, Obsession and Send Help; Dossier 137 abstains (`no_usable_plateau`,
+see Progress). The next refresh is due when a change is accepted that
 moves targets.
 
 **Dossier 137 should not have been declined.** *(Superseded — see "Dossier 137 — decided" in
