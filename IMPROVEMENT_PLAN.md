@@ -245,6 +245,13 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   Re-ranking by `correction_support_score` was not adopted: it is near-identical across one
   title's candidates (0.91-0.92 on 28 Years Later), so it cannot separate them. A separate
   "recovered fraction above 1 fails" rule is unnecessary once the cap exists.
+* **C1 — opt-in rejected; shared computation done.** `parametric` stays on by default. Since
+  E3 it wins three of eight accepted titles with results flatter than `flatten`'s, so making it
+  opt-in would change those answers for the worse. The recomputation half is done: `analyse`
+  finds the mix plateau once (it asked twice), and `run` hands every `_judge` the judged band
+  `analyse` already found. Honest size: a mean spectrum is 0.12 s, so this saves under a
+  second on a 70-170 s run; it is done for one source of truth, not for speed. Exact: probe
+  at `--tol 0` unchanged, Bugonia's full record byte-identical.
 
 ## Baseline: 2026-09-26 track set
 

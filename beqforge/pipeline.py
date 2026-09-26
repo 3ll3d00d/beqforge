@@ -1123,7 +1123,7 @@ def analyse(
     )
     blockers = []
     mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
-    mix_level, _ = plateau_reference(
+    mix_level, region = plateau_reference(
         mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
     )
     if not math.isfinite(mix_level):
@@ -1139,12 +1139,8 @@ def analyse(
         blockers.append("no qualifying loud events; restoration withheld")
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
-    region = (math.nan, math.nan)
     judged = None
     if math.isfinite(mix_level):
-        _, region = plateau_reference(
-            mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
-        )
         limitations.append(
             f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
             f"median {mix_level:.6f} dB; shared by targets and verification"
@@ -1326,6 +1322,7 @@ def run(
                     unpriced_target=proposal.unpriced_target_db,
                     method=proposal.method,
                     effective_params=proposal.effective_params,
+                    judged_band=analysed.judged_band_hz,
                 )
             )
 
@@ -1444,6 +1441,7 @@ def _judge(
     unpriced_target: np.ndarray | None = None,
     method: DesignMethod | None = None,
     effective_params: str | None = None,
+    judged_band: tuple[float, float] | None = None,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
@@ -1460,7 +1458,8 @@ def _judge(
         filters,
         sub,
         float(material.fs),
-        band_hz=judged_band_hz(material, diagnosis, params),
+        # the same for every candidate, so `run` passes the one `analyse` found
+        band_hz=judged_band or judged_band_hz(material, diagnosis, params),
         diagnose_params=params.diagnose,
         exclude_bands_hz=params.exclude_bands_hz,
         accept_params=params.accept,
