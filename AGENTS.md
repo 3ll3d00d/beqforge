@@ -48,7 +48,7 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
 | `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
-| `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, and the two record comparison tools. See "Performance" under "Working on `design/`" below. |
+| `tools/experiments/` | Approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian, the two record comparison tools, and `probe.py`, the cheap regression probe. See "Performance" under "Working on `design/`" below. |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
 | `tests/` | `uv run pytest`. |
@@ -368,6 +368,15 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   timings (`tools/experiments/compare_records.py`); validate a trade by checking the
   *decisions*, not the numbers — which candidates passed, which was accepted, what it
   published (`tools/experiments/compare_verdicts.py`).
+* **Regression without a full pass: `tools/experiments/probe.py`.** A change to decision logic
+  usually moves something before the fit (plateau, floors, judged band, evidence ceiling, the
+  priced target) or after it (the verdict on a given cascade), and the probe measures both
+  without fitting: `pipeline.analyse` from the stage cache, `pipeline.propose` for every
+  strategy's priced target (summarised with a digest), and every recorded candidate's
+  *published* filters put back through the current `_judge` (headroom skipped — it is never
+  gated). `snapshot` before and after, then `compare`; it names the titles whose targets moved,
+  and only those need a real `design_beq.py` run. On an unchanged tree the rejudge reproduces
+  every recorded verdict exactly — check that first if the probe itself is ever in doubt.
 * The fit pool leaves a core free (`FIT_WORKERS`); `PARALLEL_FITS = False` forces serial for
   profiling. **Already measured and rejected — don't redo:** replacing the optimiser with a
   smooth surrogate (fragile, or too slow), greedy section placement (this objective is

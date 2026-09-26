@@ -56,7 +56,7 @@ from beqforge.diagnose import (
     supported_mix_change,
     unexcluded,
 )
-from beqforge.extraction import ExtractionParams, extract
+from beqforge.extraction import Envelopes, ExtractionParams, extract
 from beqforge.filters import (
     FIT_STATS,
     FitRequest,
@@ -872,18 +872,37 @@ def _fit_all(
     )
 
 
-def run(
+@dataclass(frozen=True, slots=True)
+class Analysed:
+    """Everything `run` knows before any strategy proposes a target.
+
+    `params` is the run's effective configuration — exclusions merged into every stage — so a
+    caller holding this cannot accidentally judge against a different contract than the one
+    the analysis used. `blockers` non-empty means the run abstains without proposing anything.
+    """
+
+    params: PipelineParams
+    identify_params: IdentifyParams
+    diagnosis: Diagnosis
+    envelopes: Envelopes
+    identification: Identification | None
+    limitations: tuple[str, ...]
+    blockers: tuple[str, ...]
+
+
+def analyse(
     material: Material,
     params: PipelineParams | None = None,
     cache_path: Path | None = None,
     fresh: bool = False,
-) -> Report:
-    """Run diagnosis, evidence-priced target strategies, fitting and acceptance.
+    timings: Timings | None = None,
+) -> Analysed:
+    """Diagnose, extract and identify (from the stage cache when valid), then list blockers.
 
-    Refuse proposals when programme coverage or spectral evidence is missing.
-    Cache reusable analysis by material, parameters and source hashes; publish
-    each fitted cascade before verifying it on the modelled sub feed.
+    The first half of `run`, separable so a regression probe can read the decisions that
+    precede fitting — plateau, floors, judged band, evidence ceiling — without paying for a fit.
     """
+    timings = timings or Timings()
     params = params or PipelineParams()
     # One effective exclusion contract at every stage, including directly configured omissions.
     bands = tuple(
@@ -910,8 +929,6 @@ def run(
         raise ValueError(
             f"unknown strategy {sorted(unknown)!r}; have {', '.join(sorted(STRATEGIES))}"
         )
-    timings = Timings()
-    FIT_STATS.reset()
     logger.info("=" * 80)
     logger.info(f"Material: {material}")
 
@@ -1032,18 +1049,32 @@ def run(
     limitations.extend(blockers)
     for note in limitations:
         logger.info(note)
-    if blockers:
-        return Report(
-            material,
-            diagnosis,
-            identification,
-            [],
-            timings,
-            FIT_STATS,
-            accept=params.accept,
-            evidence_notes=tuple(limitations),
-        )
+    return Analysed(
+        params=params,
+        identify_params=identify_params,
+        diagnosis=diagnosis,
+        envelopes=envelopes,
+        identification=identification,
+        limitations=tuple(limitations),
+        blockers=tuple(blockers),
+    )
 
+
+def propose(
+    material: Material,
+    analysed: Analysed,
+    cache_path: Path | None = None,
+    fresh: bool = False,
+    timings: Timings | None = None,
+) -> list[Proposal]:
+    """Every selected strategy's proposals, each carrying the run's limitations as notes."""
+    timings = timings or Timings()
+    params = analysed.params
+    diagnosis = analysed.diagnosis
+    envelopes = analysed.envelopes
+    identification = analysed.identification
+    identify_params = analysed.identify_params
+    limitations = list(analysed.limitations)
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
     proposals: list[Proposal] = []
@@ -1088,6 +1119,40 @@ def run(
             dataclasses.replace(p, notes=tuple(dict.fromkeys((*p.notes, *limitations))))
             for p in produced
         )
+    return proposals
+
+
+def run(
+    material: Material,
+    params: PipelineParams | None = None,
+    cache_path: Path | None = None,
+    fresh: bool = False,
+) -> Report:
+    """Run diagnosis, evidence-priced target strategies, fitting and acceptance.
+
+    Refuse proposals when programme coverage or spectral evidence is missing.
+    Cache reusable analysis by material, parameters and source hashes; publish
+    each fitted cascade before verifying it on the modelled sub feed.
+    """
+    timings = Timings()
+    FIT_STATS.reset()
+    analysed = analyse(material, params, cache_path, fresh, timings)
+    params = analysed.params
+    diagnosis = analysed.diagnosis
+    envelopes = analysed.envelopes
+    identification = analysed.identification
+    if analysed.blockers:
+        return Report(
+            material,
+            diagnosis,
+            identification,
+            [],
+            timings,
+            FIT_STATS,
+            accept=params.accept,
+            evidence_notes=analysed.limitations,
+        )
+    proposals = propose(material, analysed, cache_path, fresh, timings)
 
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
@@ -1141,7 +1206,7 @@ def run(
         timings=timings,
         fit_stats=FIT_STATS,
         accept=params.accept,
-        evidence_notes=tuple(limitations),
+        evidence_notes=analysed.limitations,
     )
 
 
