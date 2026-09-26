@@ -126,18 +126,76 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 `multiprocessing` `spawn` inside a frozen executable, which only a real fit exercises. To build
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
+## How a filter is designed
+
+The idea in one line: **find out how much low bass the film's own soundtrack is missing, work
+out how much of that is safe to put back, and build the simplest filter that does it.**
+
+**1. Look at what the soundtrack actually contains.** A well-mastered mix has a level it
+holds across the bass range, its "plateau". Many film mixes then sag below some frequency —
+sometimes by design, sometimes because a rolloff was applied in mastering. The gap between
+that sag and the plateau is the *deficit*, and it is what a BEQ (bass EQ) exists to fill. The
+plateau is found from each title's own audio; no frequency range is assumed in advance.
+
+**2. Decide how much of the deficit is believable.** Boosting is only safe where there is real
+bass to lift. The tool compares the loudest passages with the quietest ones, frequency by
+frequency: where big bass events clearly stand out from the background, the boost is
+justified; where they don't, whatever is down there is probably noise, and boosting it would
+just make the noise louder. So every frequency gets a *ceiling* on how much boost the evidence
+supports, and the wanted correction is cut down to fit under it — a boost may be smaller than
+the sag it aims at, but never larger than the evidence allows. If there is no evidence at all
+(a short excerpt, no channel information, no real bass events), no boost is allowed and the
+tool declines to design anything.
+
+**3. Propose targets in more than one way.** Three strategies each say "this is the boost
+curve we want", and all of them go through the same ceiling:
+
+* **flatten** — take the mix's own low end and simply raise the sag back to the plateau.
+* **counterfactual** — look at the individual channels, undo the attenuation that appears to
+  have been applied to any that look filtered, rebuild the mix, and see how much the low end
+  would have gained. It tries several limits on how far to undo each channel.
+* **parametric** — fit a textbook rolloff shape to the mix and invert it.
+
+They often disagree, and that disagreement is information, so the tool keeps them all.
+
+**4. Fit a filter you could actually publish.** Each target is matched with the fewest
+biquad sections that follow it closely (up to four), using values rounded the way a real
+device would store them. It has to be stable, and it can't lean on a tiny bass boost far below
+where the film has any content.
+
+**5. Check the filter, not just the fit.** The finished filter is applied to the film's real
+audio and the corrected low end is examined. It is rejected if it does not achieve what the
+evidence allowed, boosts something that isn't content, leaves a step or sharp cliff, is wobblier
+than the original material, stops short of where content continues, or has a section doing
+almost nothing. A filter that matches its target perfectly still fails if the target itself
+was wrong — which is why the check is made on the corrected result, not on the match.
+
+**6. Pick one, or none.** Of the candidates that pass, the tool prefers the one closest to
+the requested shape (flat unless you ask for a tilt), and where two are effectively tied, the
+one with fewer sections. If nothing passes, it says so and gives the reasons; that is a valid
+answer, not a failure.
+
+Two things are reported alongside the answer rather than folded into a score: how much of the
+sag the filter actually recovers (it is often only part), and how much headroom the boosted
+subwoofer signal would need. Headroom is measured on the bass-managed sub feed, which is where
+a BEQ really runs, and it is reported, never used to reject a filter. The tool also cannot tell
+from the audio alone whether a sag was a deliberate mastering choice, so choosing to restore it
+is always a preference; the guarantee is only that the boost stays within what was measured.
+[AGENTS.md](AGENTS.md) has the precise rules behind each step.
+
 ## How it works, and why
 
 [AGENTS.md](AGENTS.md)'s "Working on `design/`" section is the full account — principles,
 strategies and evidence pricing, the evidence/confidence model, publication/playback/
 verification, and performance. [TODO.md](TODO.md) is the live backlog of what's still open and
-unevidenced.
+unevidenced, and [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) is the reviewed list of weaknesses in
+the process itself, each with a check, and the kinds of test material needed to run them.
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest              # ~2 minutes, ~420 tests
+uv run pytest              # ~2 minutes, ~460 tests
 uv run ruff check beqforge tools tests
 uv run ruff format beqforge tools tests
 ```

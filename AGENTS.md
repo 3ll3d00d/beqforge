@@ -56,6 +56,10 @@ still holds: no other API, no other service, and the server is a thin transport 
 [TODO.md](TODO.md) is the live backlog — genuinely open questions, backlog items and known rough
 edges. Everything in "Working on `design/`" below is what the shipped implementation actually
 does today, not a plan for something still to be built.
+[IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) is the reviewed list of weaknesses and
+inconsistencies in the process itself — each with a testable check — and the stress-track shapes
+needed to run them. Read it before changing decision logic (targets, ceiling, acceptance,
+selection).
 
 ## Running things
 
@@ -167,6 +171,22 @@ getting them wrong first.
 * Past catalogue-authored filters are a test of a design, never its target. The catalogue
   contains no negatives (nothing known to be unfiltered), so calibrating against it teaches
   nothing about false positives.
+
+### Order of a run
+
+`pipeline.run`: `diagnose` → `extract` → `identify` (diagnostic only) → **blockers** (no plateau,
+excerpt, no channels, no loud events, no positively-supported bins, exclusions fragmenting the
+judged band, silent sub feed — any one returns an empty `Report` with the reasons) → each
+strategy's proposals → one shared fit (`_fit_all`, section count escalated 1 → `max_sections`
+across every target at once) → `_judge` per candidate (publish, verify on the device response,
+headroom, `assess`). `Report.accepted` then takes the passing candidate whose corrected curve
+departs least from the *requested* shape, and within `ranking_tie_db` the one with fewest
+sections. Details worth knowing that are easy to miss elsewhere: `flatten` scans upward from the
+bottom for the first settled end of the deficit, tapers to nothing a quarter-octave above it,
+and holds the boost flat below the mix's tracking floor before pricing; `counterfactual` sweeps
+`restore_caps_db` (one candidate each, identical priced targets deduplicated) and only restores
+a channel as far as that channel's own contrast allows; the judged band runs from the tracking
+floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
 
 ### Strategies and evidence pricing
 
