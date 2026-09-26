@@ -415,6 +415,10 @@ class Report:
     judged_band_hz: tuple[float, float] | None = None
     """The band every candidate's corrected curve was judged over; `None` if never set."""
 
+    blockers: tuple[str, ...] = ()
+    """Why the run abstained before proposing anything — also in `evidence_notes`, where they
+    come last. Kept apart so a decline can lead with its reason."""
+
     @property
     def accepted(self) -> Candidate | None:
         """The best of the candidates the acceptance model let through.
@@ -1096,6 +1100,22 @@ def analyse(
             f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
             f"median {mix_level:.6f} dB; shared by targets and verification"
         )
+        # A BEQ acts on the sub feed. A reference that starts above the band the sub plays is
+        # not a bass passband, so a deficit read against it is the shape of whatever carries
+        # the mix up there — typically a dialogue-led mix with no authored bass, where the
+        # centre carries the plateau and the LFE is empty — not a rolloff to restore.
+        sub_edge = min(
+            corner
+            for corner in (params.playback.crossover_hz, params.playback.bus_lowpass_hz)
+            if corner is not None
+        )
+        if region[0] >= sub_edge:
+            blockers.append(
+                "no usable contiguous mix plateau in the band the sub plays: the mix's only "
+                f"flat region is {region[0]:.1f}-{region[1]:.1f} Hz, above the "
+                f"{sub_edge:g} Hz sub-feed low-pass, so there is no bass passband to restore "
+                "towards; restoration withheld"
+            )
     if math.isfinite(mix_level):
         judged = judged_band_hz(material, diagnosis, params)
         if any(a <= judged[1] and b >= judged[0] for a, b in bands):
@@ -1222,6 +1242,7 @@ def run(
             mix_reference_db=analysed.mix_reference_db,
             mix_plateau_hz=analysed.mix_plateau_hz,
             judged_band_hz=analysed.judged_band_hz,
+            blockers=analysed.blockers,
         )
     proposals = propose(material, analysed, cache_path, fresh, timings)
 

@@ -384,3 +384,27 @@ def test_proposals_carry_their_own_notes_and_not_the_runs(walled) -> None:
     assert analysed.limitations, "the run should report its limitations somewhere"
     for proposal in propose(walled, analysed):
         assert not set(proposal.notes) & set(analysed.limitations), proposal.label
+
+
+def test_a_reference_above_the_sub_band_is_no_reference(walled) -> None:
+    """A mix whose only flat region starts above the sub-feed low-pass has no bass passband.
+
+    Dossier 137: the centre carries 74% of a plateau at 143-200 Hz and the LFE is 98% digital
+    silence. Measured against that plateau the whole sub band reads as a deficit, and the run
+    declined only because the judged band collapsed to 0.12 octaves — the right answer for a
+    wrong reason. The reason is that the band a BEQ acts on has nothing to restore towards.
+    """
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    dialogue_led = material_from(
+        {"C": high_passed(scened_noise(23, samples), 120.0, order=8)}
+    )
+    params = PipelineParams(strategies=("flatten",))
+    analysed = analyse(dialogue_led, params)
+    assert analysed.mix_plateau_hz[0] >= 80.0, analysed.mix_plateau_hz
+    assert any("in the band the sub plays" in b for b in analysed.blockers)
+
+    assert not any(
+        "in the band the sub plays" in b for b in analyse(walled, params).blockers
+    )

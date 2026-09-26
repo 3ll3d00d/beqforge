@@ -146,7 +146,7 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   passband be referenced? Options: allow a tilted reference (fit the passband's slope and
   measure the deficit against the extrapolated line), reference the mix to its main
   contributors' own plateaus (L 80-198 Hz, R 102-198 Hz here), or keep abstaining but say
-  why. Open until decided.
+  why. **Decided: keep abstaining, and say why** — see "Dossier 137" below.
 * **T8 — checked; chained tracking rejected.** Comparing each band's envelope with the band
   directly above it, instead of with the plateau, removes the tracking floor on eight of nine
   titles. Adjacent bands always correlate above 0.5, which is the stopband-leakage failure
@@ -209,6 +209,21 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
 * **T7 — checked; stays low priority.** The only extent failure among 28 baseline candidates
   (Obsession `counterfactual/35dB`, "corrected only down to 24.9 Hz") is on a title with no
   tracking floor, so no verdict depends on the floor's resolution or the frame length.
+* **Designer diagnosis — done.** Every accepted response now leads with `found`,
+  `correction` and `alternatives` (`beqforge/explain.py`). A decline carries `found` after its
+  reason, and a blocked run's decline message is its blockers rather than every caveat. Probe
+  at `--tol 0`: nothing moved.
+* **Dossier 137 — decided: abstain, for the real reason.** Its low end is a dialogue-led mix
+  with no authored bass. The centre carries 74% of the plateau, and the LFE contributes
+  nothing and is digital silence 98% of the time. Its only flat region, 143-200 Hz, lies
+  entirely above the 80 Hz sub-feed low-pass. New blocker: a mix plateau that starts at or
+  above the sub band's upper edge (the lower of the crossover and the bus low-pass, taken from
+  the declared playback model rather than a calibrated constant) leaves nothing in the band
+  a BEQ acts on to restore towards. Dossier now declines `no_usable_plateau` with that
+  sentence and the channel composition, instead of "only 0.12 octaves left to judge". Probe:
+  only Dossier moves (the other eight plateaus start at 18-50 Hz). This settles T4's open
+  question for Dossier. A sloping passband *inside* the sub band remains unhandled until a
+  title needs it.
 
 ## Baseline: 2026-09-26 track set
 

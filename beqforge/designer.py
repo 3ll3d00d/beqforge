@@ -282,7 +282,10 @@ def design(
     accepted = report.accepted
     if accepted is None:
         if not report.candidates:
-            reason, message = _decline_for_blockers(report.evidence_notes)
+            # the blockers alone when the report has them: the reason, not every caveat
+            reason, message = _decline_for_blockers(
+                report.blockers or report.evidence_notes
+            )
         else:
             reason, message = _decline_for_no_passing_candidate(report)
         stamp = "; ".join(f"{k}: {v}" for k, v in provenance.items())
