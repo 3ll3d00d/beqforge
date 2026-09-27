@@ -62,9 +62,10 @@ def found(report: Report) -> str:
         )
     if math.isfinite(d.filter_floor_hz):
         parts.append(
-            f"the loss behaves like a fixed filter (the same in loud and quiet scenes) down "
-            f"to {_hz(d.filter_floor_hz)}; below that, correcting rests on the goal rather "
-            "than on a measured rolloff"
+            f"loud and quiet scenes agree on the shape of the low end down to "
+            f"{_hz(d.filter_floor_hz)}, as they would under a fixed filter; below that they "
+            "disagree, so any correction there is not backed by this check and rests on the "
+            "goal"
         )
 
     knees = [
@@ -198,9 +199,9 @@ def correction(candidate: Candidate, report: Report | None = None) -> str:
             else "below the level-invariance floor"
         )
         parts.append(
-            f"{min(shaping, 1.0):.0%} of the boost lies {where}, where the loss stops "
-            "behaving like a fixed filter: that part rests on the goal, not on a measured "
-            "rolloff"
+            f"{min(shaping, 1.0):.0%} of the boost lies {where}, where loud and quiet scenes "
+            "disagree about the shape of the low end: that part is not backed by the "
+            "fixed-filter check and rests on the goal"
         )
     return "; ".join(parts)
 

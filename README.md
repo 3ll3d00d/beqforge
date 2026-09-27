@@ -128,9 +128,9 @@ diagnosis, in this order:
   stops being level-invariant; which channels show a steep knee; the judged band; the goal.
 * `correction` — how much boost the deficit asked for against how much the evidence allowed
   (as a share of what the low end is missing), the filter, the low end against the reference
-  before → after, and how much of the boost lies below the frequency where the loss stops
-  behaving like a fixed filter — the part that rests on your goal rather than on a measured
-  rolloff.
+  before → after, and how much of the boost lies below the frequency where loud and quiet
+  scenes stop agreeing on the shape of the low end — the part not backed by that fixed-filter
+  check, which rests on your goal instead.
 * `alternatives` — why each other candidate was rejected or not chosen.
 
 The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves

@@ -483,7 +483,10 @@ def shaping_fraction(
     below = grid < filter_floor_hz
     if not below.any():
         return 0.0
-    at_floor = float(np.interp(filter_floor_hz, grid, full_db))
+    # the boost already reached at the floor; a cascade dipping slightly negative there has
+    # reached none, and subtracting a negative would count boost that does not exist — it
+    # read 1.019 on Obsession, a "share" above one
+    at_floor = max(float(np.interp(filter_floor_hz, grid, full_db)), 0.0)
     shaping = max(float(np.max(full_db[below])) - at_floor, 0.0)
     total = float(np.max(full_db))
     return shaping / total if total > 1e-9 else 0.0
@@ -694,7 +697,7 @@ def assess(
     shaping_frac = shaping_fraction(full, grid, filter_floor_hz)
     if not math.isnan(filter_floor_hz):
         below = grid < filter_floor_hz
-        at_floor = float(np.interp(filter_floor_hz, grid, full))
+        at_floor = max(float(np.interp(filter_floor_hz, grid, full)), 0.0)
         shaping = float(np.max(full[below])) - at_floor if below.any() else 0.0
         if shaping >= params.shaping_note_db:
             notes.append(

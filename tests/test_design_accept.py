@@ -636,3 +636,12 @@ def test_device_stability_is_required_even_when_the_corrected_shape_passes(
         assert all("not stable" in failure for failure in verdict.failures)
     else:
         assert verdict.passed, verdict.failures
+
+
+def test_the_shaping_fraction_is_a_share_even_when_the_floor_gain_is_negative() -> None:
+    """A cascade dipping below 0 dB at the floor read 1.019 on Obsession — no share exceeds one."""
+    from beqforge import DESIGN_GRID
+    from beqforge.accept import shaping_fraction
+
+    full = np.where(DESIGN_GRID < 20.0, 28.0, -0.5)
+    assert shaping_fraction(full, DESIGN_GRID, 24.0) == pytest.approx(1.0)

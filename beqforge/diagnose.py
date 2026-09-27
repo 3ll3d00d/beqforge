@@ -667,7 +667,20 @@ def _temporal_evidence(
     if len(strata) < 2:
         spread = np.full_like(strata_freqs, np.nan)
     else:
-        spread = np.ptp(np.vstack(list(strata.values())), axis=0)
+        # Each stratum smoothed as the deficit is before the spread is taken. Per bin, the
+        # spread between strata is estimator noise as much as anything — on Obsession it swung
+        # 2-19 dB from one 0.24 Hz bin to the next — and the first bin over tolerance ends the
+        # run below. Unsmoothed, a single noisy bin just under the plateau put the floor at
+        # 24.2 Hz on strata that agree within 5 dB down to 13 Hz.
+        spread = np.ptp(
+            np.vstack(
+                [
+                    smooth_unexcluded(v, strata_freqs, params.exclude_bands_hz, 15)
+                    for v in strata.values()
+                ]
+            ),
+            axis=0,
+        )
     # searched downward from the *bottom* of the channel's plateau, not from the top of the
     # spectrum or the top of the plateau. Above it the strata diverge because loud scenes have
     # a different content spectrum, not because anything was filtered, and the spread is

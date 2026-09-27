@@ -365,6 +365,27 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   every strategy's cascade relocates the cliff to 5-10 Hz. Their priced targets likely end in
   a steep edge where the evidence stops licensing boost, and the fitter reproduces it. That is
   a target-shape problem, not a tolerance one.
+* **Shaping fraction and the level-invariance floor — fixed (reporting only).** Obsession
+  reported a shaping fraction of 1.019 on what is plainly a corrected rolloff. Two faults:
+  1. The fraction subtracted the cascade's gain at the floor, so a floor gain of −0.53 dB
+     counted boost that does not exist. That gain is now floored at zero, so the fraction
+     stays in [0, 1]; the shaping note had the same arithmetic.
+  2. The floor itself was set by single-bin estimator noise. The spread between loudness
+     strata was taken per 0.24 Hz bin unsmoothed, swinging 2-19 dB between neighbours, and the
+     first bin over tolerance ended the run. Each stratum is now smoothed as the deficit is
+     before the spread is taken.
+
+  Probe: no verdict or winner moves (the floor feeds only notes and reporting). Floors:
+  28 Years Later, Alto Knights and Caught Stealing 22-25 Hz → the bottom of the band (their
+  shaping fractions of 0.60-0.85 were noise and are now about 0); Dossier 142.8 → 59.3 Hz;
+  small moves elsewhere. **Obsession stays near 24 Hz, and rightly.** Its loudest scenes carry
+  extra energy at 20.5-23.5 Hz that quieter scenes do not (a real 8-19 dB spread that survives
+  smoothing), and the rule stops at the first break below the plateau, although the strata
+  agree again from 20 Hz down to 13 Hz. The response now says what the check measures ("loud
+  and quiet scenes agree on the shape of the low end down to X Hz…") instead of claiming the
+  loss "stops behaving like a fixed filter". **Open:** whether a narrow band of
+  level-dependent *content* just under the plateau should end the run when agreement resumes
+  below it.
 
 ## Baseline: 2026-09-26 track set
 

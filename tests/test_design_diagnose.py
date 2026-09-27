@@ -276,3 +276,28 @@ def test_the_moving_average_handles_degenerate_widths() -> None:
     assert np.array_equal(_moving_average(values, 1), values)
     assert np.array_equal(_moving_average(values, 99), values)
     assert _moving_average(values, 5) == pytest.approx([2.0])
+
+
+def test_one_noisy_bin_does_not_end_the_level_invariance_run(monkeypatch) -> None:
+    """Strata that agree everywhere but one 0.24 Hz bin are level-invariant to the bottom.
+
+    Unsmoothed, the per-bin spread on Obsession swung 2-19 dB between neighbouring bins, and
+    the first bin over tolerance just under the plateau put the floor at 24.2 Hz.
+    """
+    import beqforge.diagnose as d
+
+    params = d.DiagnoseParams()
+    freqs = np.fft.rfftfreq(d.WELCH_NPERSEG, 1 / FS)[1:]
+    loud = np.zeros_like(freqs)
+    quiet = np.zeros_like(freqs)
+    quiet[np.argmin(np.abs(freqs - 23.9))] = 12.0  # one noisy bin just under the plateau
+    monkeypatch.setattr(
+        d,
+        "stratified_response",
+        lambda *a, **k: (freqs, {"p40-80": quiet, "p80-99": loud, "p99-100": loud}),
+    )
+    monkeypatch.setattr(d, "band_tracking", lambda *a, **k: 1.0)
+    monkeypatch.setattr(d, "scene_envelope", lambda *a, **k: np.zeros(10))
+    subject = np.random.default_rng(0).standard_normal(int(FS * 60))
+    _, _, floor, _, _ = d._temporal_evidence(subject, FS, params, (24.3, 40.0), freqs)
+    assert floor < 5.0, floor
