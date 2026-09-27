@@ -365,7 +365,7 @@ class Correction:
         roughness = self.wobble_db(self.before_db)
         if wobble > roughness + spread_margin_db:
             found.append(
-                f"corrected low end wobbles {wobble:.1f} dB over "
+                f"corrected low end is uneven: {wobble:.1f} dB of ripple about its trend over "
                 f"{self.band_hz[0]:.0f}-{self.band_hz[1]:.0f} Hz against {roughness:.1f} dB "
                 "in the material; expected flat"
             )

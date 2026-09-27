@@ -607,7 +607,7 @@ def assess(
     wobble = corrected_wobble(correction, params.roughness_degree)
     if wobble > roughness + params.spread_margin_db:
         failures.append(
-            f"corrected low end wobbles {wobble:.1f} dB over "
+            f"corrected low end is uneven: {wobble:.1f} dB of ripple about its trend over "
             f"{correction.band_hz[0]:g}-{correction.band_hz[1]:g} Hz against "
             f"{roughness:.1f} dB in the material; expected flat"
         )

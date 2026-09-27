@@ -458,13 +458,16 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   only. Probe: only counterfactual targets move. Full runs on the four titles concerned: no
   winner changes; losing counterfactual candidates' verdicts shift. Corpus and frozen protocol
   unchanged.
-* **T6 — measured, awaiting a decision.** Replacing the judged band's fixed 45 Hz floor with
-  "the deficit anchor, at least `min_judge_octaves` above the floor" narrows the band to where
-  the correction is (Send Help 5-15.5 Hz; spread 12.6 → 5.7 dB). No real winner changes,
-  corpus unchanged. But on the frozen protocol natural_bass_light (a negative that is
-  observationally a filter) becomes a false acceptance on both seeds: parametric had been
-  failing it only on wobble, by 0.1-0.7 dB, over the over-wide band. Patch saved;
-  accept-with-record or reject is the user's call.
+* **T6 — done.** The judged band's fixed 45 Hz floor is replaced by "the deficit anchor, at
+  least `min_judge_octaves` above the floor" (`verify_band_hz` → `verify_floor_hz`), so checks
+  measure where the correction is (Send Help 5-15.5 Hz; spread 12.6 → 5.7 dB). No real winner
+  changes and the corpus is unchanged. On the frozen protocol, natural_bass_light is now
+  accepted on both seeds: parametric had only been failing it on unevenness, by 0.1-0.7 dB,
+  over the over-wide band. Under the content principle that case is real, attenuated programme
+  and correcting it is the goal dial working, so it is reported like `natural_droop` rather
+  than counted as a false acceptance. The protocol file is untouched, and noise and broadband
+  still abstain (AGENTS.md). Failure messages now say "uneven: X dB of ripple about its trend"
+  instead of "wobbles".
 * **Item 1 (content edge vs steep leakage) — first real-texture evidence, from injection.**
   An unfiltered original of a real title is almost never available, so ground truth comes
   from differential injection instead: `tools/experiments/inject_variants.py` applies known
@@ -492,6 +495,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   remains open is steep filters (8th order and up): lift partway to where content allows, or
   abstain. That is a fitting limit plus a policy call. **Next:** repeat on two or three more
   real titles (a sparse one such as Black Bag, and Send Help) before closing item 1 on one.
+* **Injection on two more real titles (Black Bag, Send Help), compared as shapes.** Each
+  variant's corrected curve against the original's own corrected curve, each relative to its
+  own reference (an injection near the plateau lowers the reference too, which no pipeline
+  could detect):
+  * **Hulk (full bandwidth):** BW2 and LR4 restored within ~1 dB down to 8-13 Hz.
+  * **Send Help (content to the bottom):** within ~3 dB, except a consistent 4-8 dB hole around
+    20 Hz on the LR4 variants. Send Help has a +7.9 dB content hump there; once the filter
+    flattens it, restoration aims at the goal's shape and cannot know it existed.
+  * **Black Bag (sparse; nothing tracks below 25 Hz):** restored within ~1 dB above 25 Hz and
+    not below, which is correct by the content rule. LR4 @ 35 and BW8 are accepted but 9-16 dB
+    short (partial targets the evidence limited).
+  * **Steep (BW8/BW12):** decline, or come out heavily partial, on all three.
+
+  **Finding — the sub-band blocker false-declines a filtered real title.** On Black Bag with
+  LR4 @ 30 the injection turns its 50-83 Hz plateau into a slope, so the only flat region left
+  lies above 80 Hz and "no reference in the band the sub plays" declines, although content
+  still tracks down to 25 Hz. A plateau above the sub band is not always "no bass passband";
+  the rule needs a content condition (e.g. only when nothing below the plateau tracks the
+  programme). **Item 1 conclusion so far:** moderate filters are handled well wherever there
+  is content, on all three titles, with no rule change; only steep filters remain open.
 
 ## Baseline: 2026-09-26 track set
 

@@ -50,7 +50,7 @@ def test_nondefault_shared_settings_reach_both_fit_paths(monkeypatch):
     monkeypatch.setattr(D, "fit_minimal_biquads", fit)
     # white noise sits within a few dB of its own plateau, so the measured-deficit cap would
     # bind before the contrast ceiling this test reads confidence_z off (6 - 2.5 * 1 = 3.5)
-    monkeypatch.setattr(pipeline, "low_end_deficit_db", lambda material, params: None)
+    monkeypatch.setattr(pipeline, "low_end_deficit_db", lambda *a, **k: None)
     (proposal,) = pipeline.parametric_targets(*inputs(), params)
     effective = pipeline.STRATEGIES["parametric"].effective_params(params)
     assert effective.max_boost_db == 12.0
@@ -143,7 +143,7 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
     monkeypatch.setattr(pipeline, "design", design)
     # white noise is all texture, so the ripple blocker would (rightly) stop the run before
     # the stage this test is about — caching — is ever reached
-    monkeypatch.setattr(pipeline, "passband_ripple_db", lambda material, params: None)
+    monkeypatch.setattr(pipeline, "passband_ripple_db", lambda *a, **k: None)
     params = pipeline.PipelineParams(
         strategies=("parametric",), max_sections=1, confidence_z=2.0, fit_seeds=(3,)
     )

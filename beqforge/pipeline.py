@@ -277,7 +277,14 @@ class PipelineParams:
     because `_fit_all` now has to guarantee it contains every derived placement band, and a
     constant it cannot see is one it cannot check."""
 
-    verify_band_hz: tuple[float, float] = (5.0, 45.0)
+    verify_floor_hz: float = 5.0
+    """Lowest frequency any result is judged at; the tracking floor may raise it.
+
+    The top of the judged band is not a setting: it is the deficit's first settled end, widened
+    to at least `AcceptParams.min_judge_octaves` above the floor (`_judged_top_hz`). It was
+    `max(45 Hz, anchor)`, which judged a correction ending at 15 Hz out to 45 Hz and diluted
+    every shape check with an octave and a half of untouched passband (IMPROVEMENT_PLAN T6)."""
+
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored intervals omitted from evidence, with zero requested correction.
 
@@ -571,13 +578,24 @@ def _flat_deficit(material: Material, params: "PipelineParams"):
     return freqs, response, level, plateau_hz, on_grid, anchor
 
 
-def _judged_top_hz(anchor_hz: float, params: "PipelineParams") -> float:
-    """Upper edge of the judged band — and the pivot of the goal below the knee."""
-    return min(max(params.verify_band_hz[1], anchor_hz), float(DESIGN_GRID[-1]))
+def _judged_top_hz(
+    anchor_hz: float, params: "PipelineParams", noise_floor_hz: float = math.nan
+) -> float:
+    """Upper edge of the judged band — and the pivot of the goal below the knee.
+
+    The deficit's first settled end (where the correction stops), but at least
+    `min_judge_octaves` above the band's floor, so there is always enough band to read a
+    slope over. No fixed frequency.
+    """
+    low = params.verify_floor_hz
+    if not math.isnan(noise_floor_hz):
+        low = max(low, noise_floor_hz)
+    widest = low * 2.0**params.accept.min_judge_octaves
+    return min(max(anchor_hz, widest), float(DESIGN_GRID[-1]))
 
 
 def low_end_deficit_db(
-    material: Material, params: "PipelineParams"
+    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
 ) -> np.ndarray | None:
     """What the mix's low end is missing: the most any strategy may ask a filter to restore.
 
@@ -601,7 +619,9 @@ def low_end_deficit_db(
     freqs, response, level, plateau_hz, on_grid, anchor = measured
     tilt = params.accept.target_tilt_db_per_octave
     if tilt != 0.0:
-        goal = house_curve_db(freqs, _judged_top_hz(anchor, params), tilt)
+        goal = house_curve_db(
+            freqs, _judged_top_hz(anchor, params, noise_floor_hz), tilt
+        )
         deficit = smooth_unexcluded(
             np.maximum(level + goal - response, 0.0),
             freqs,
@@ -614,7 +634,7 @@ def low_end_deficit_db(
 
 
 def passband_ripple_db(
-    material: Material, params: "PipelineParams"
+    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
 ) -> tuple[float, tuple[float, float]] | None:
     """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
 
@@ -632,7 +652,10 @@ def passband_ripple_db(
     if measured is None:
         return None
     freqs, response, _, _, _, anchor = measured
-    low, high = _judged_top_hz(anchor, params), params.diagnose.band_hz[1]
+    low, high = (
+        _judged_top_hz(anchor, params, noise_floor_hz),
+        params.diagnose.band_hz[1],
+    )
     band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, params.exclude_bands_hz)
     if band.sum() < 8:
         return None
@@ -767,7 +790,7 @@ def flatten_targets(
     The plateau-relative deficit, tapered where it closes, then priced — held below the
     tracking floor and clipped to measured contrast — like every other strategy's target.
     """
-    unpriced = low_end_deficit_db(material, params)
+    unpriced = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     if unpriced is None:
         return []
     target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, unpriced)
@@ -797,7 +820,7 @@ def counterfactual_targets(
         return []
     # Reuse channel spectra across restoration caps.
     restoration = _Restoration(material, diagnosis, params.playback, names)
-    deficit = low_end_deficit_db(material, params)
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
         unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
@@ -855,7 +878,7 @@ def parametric_targets(
     """Propose the identified rolloff's protected and evidence-priced inverse."""
     if identification is None or not identification.detected:
         return []
-    deficit = low_end_deficit_db(material, params)
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     result = design(
         identification,
         envelopes,
@@ -1267,8 +1290,8 @@ def analyse(
                 f"{sub_edge:g} Hz sub-feed low-pass, so there is no bass passband to restore "
                 "towards; restoration withheld"
             )
-        texture = passband_ripple_db(material, params)
-        low_end = low_end_deficit_db(material, params)
+        texture = passband_ripple_db(material, params, diagnosis.noise_floor_hz)
+        low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
         if texture is not None and low_end is not None:
             ripple, (edge_low, edge_high) = texture
             deepest = float(np.max(low_end))
@@ -1546,14 +1569,14 @@ def judged_band_hz(
     first settled end of its plateau-relative deficit. A shared band keeps
     candidate shape measurements comparable.
     """
-    low = params.verify_band_hz[0]
+    low = params.verify_floor_hz
     floor = diagnosis.noise_floor_hz
     if not math.isnan(floor):
         low = max(low, floor)
     measured = _flat_deficit(material, params)
     if measured is None:
         raise ValueError("no usable contiguous mix plateau")
-    return low, _judged_top_hz(measured[-1], params)
+    return low, _judged_top_hz(measured[-1], params, floor)
 
 
 def _judge(

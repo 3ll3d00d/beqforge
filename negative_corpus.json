@@ -1,7 +1,7 @@
 {
  "protocol": "negative-corpus-v1",
- "revision": "c0ba66a591ef-dirty+src:fa3c1523ab83",
- "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, goal_tolerance_db=1.5, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), verify_band_hz=(5.0, 45.0), exclude_bands_hz=())",
+ "revision": "4c6d5c356d80-dirty+src:716bed720956",
+ "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, goal_tolerance_db=1.5, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), verify_floor_hz=5.0, exclude_bands_hz=())",
  "seeds": "1-9",
  "duration_s": 240.0,
  "gate": 0.1,
@@ -104,7 +104,7 @@
    "shape": "broadband",
    "seed": 1,
    "injected": null,
-   "seconds": 5.3
+   "seconds": 6.2
   },
   {
    "name": "sparse_dialogue/1",
@@ -122,7 +122,7 @@
    "shape": "sparse_dialogue",
    "seed": 1,
    "injected": null,
-   "seconds": 1.3
+   "seconds": 1.9
   },
   {
    "name": "varying_source/1",
@@ -140,7 +140,7 @@
    "shape": "varying_source",
    "seed": 1,
    "injected": null,
-   "seconds": 6.1
+   "seconds": 4.7
   },
   {
    "name": "rumble/1",
@@ -158,7 +158,7 @@
    "shape": "rumble",
    "seed": 1,
    "injected": null,
-   "seconds": 4.1
+   "seconds": 2.9
   },
   {
    "name": "stationary_noise/1",
@@ -176,7 +176,7 @@
    "shape": "stationary_noise",
    "seed": 1,
    "injected": null,
-   "seconds": 2.0
+   "seconds": 1.2
   },
   {
    "name": "natural_droop/1",
@@ -190,16 +190,12 @@
    "evidence_score": 0.9242170579396776,
    "candidate_failures": {
     "flatten": [
-     "tilts -1.7 dB/oct where -4.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
-     "corrected level -5.1 dB against the -1.6 intended, outside the 3 dB allowed",
-     "corrected only down to 42.7 Hz; content continues to 5.0 Hz"
+     "corrected only down to 33.7 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [],
     "counterfactual/35dB": [
-     "tilts -1.4 dB/oct where -4.2 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
-     "corrected level -5.3 dB against the -2.0 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 10.1 dB over 5-45 Hz against 8.0 dB in the material; expected flat",
-     "corrected only down to 44.9 Hz; content continues to 5.0 Hz"
+     "tilts -3.5 dB/oct where -5.7 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected only down to 33.7 Hz; content continues to 5.0 Hz"
     ],
     "parametric": []
    },
@@ -208,7 +204,7 @@
    "shape": "natural_droop",
    "seed": 1,
    "injected": null,
-   "seconds": 664.5
+   "seconds": 517.9
   },
   {
    "name": "filtered/1",
@@ -223,22 +219,22 @@
    "candidate_failures": {
     "flatten": [
      "corrected level -4.6 dB against the -0.9 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 12.0 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "corrected low end is uneven: 12.0 dB of ripple about its trend over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
      "introduces a cliff of 39.6 dB/oct at 9.0 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 46.9 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [
      "peaks at 16.1 Hz then falls at 26.2 dB/oct below it against 23.4 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 13.1 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "corrected low end is uneven: 13.1 dB of ripple about its trend over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
      "introduces a cliff of 38.9 dB/oct at 10.3 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 35.6 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
-     "corrected low end wobbles 11.9 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "corrected low end is uneven: 11.9 dB of ripple about its trend over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
      "introduces a cliff of 55.4 dB/oct at 6.6 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it"
     ],
     "counterfactual/45dB": [
-     "corrected low end wobbles 12.1 dB over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
+     "corrected low end is uneven: 12.1 dB of ripple about its trend over 5-84.2754 Hz against 7.4 dB in the material; expected flat",
      "introduces a cliff of 54.5 dB/oct at 6.6 Hz where the input's worst was 31.9 \u2014 relocates the discontinuity rather than removing it"
     ],
     "parametric": []
@@ -248,7 +244,7 @@
    "shape": "filtered",
    "seed": 1,
    "injected": "LR4@24.8999Hz",
-   "seconds": 712.4
+   "seconds": 566.4
   },
   {
    "name": "broadband/2",
@@ -266,7 +262,7 @@
    "shape": "broadband",
    "seed": 2,
    "injected": null,
-   "seconds": 6.5
+   "seconds": 6.3
   },
   {
    "name": "sparse_dialogue/2",
@@ -284,7 +280,7 @@
    "shape": "sparse_dialogue",
    "seed": 2,
    "injected": null,
-   "seconds": 2.1
+   "seconds": 2.0
   },
   {
    "name": "varying_source/2",
@@ -302,7 +298,7 @@
    "shape": "varying_source",
    "seed": 2,
    "injected": null,
-   "seconds": 7.3
+   "seconds": 5.1
   },
   {
    "name": "rumble/2",
@@ -320,7 +316,7 @@
    "shape": "rumble",
    "seed": 2,
    "injected": null,
-   "seconds": 5.0
+   "seconds": 4.2
   },
   {
    "name": "stationary_noise/2",
@@ -338,7 +334,7 @@
    "shape": "stationary_noise",
    "seed": 2,
    "injected": null,
-   "seconds": 2.2
+   "seconds": 1.2
   },
   {
    "name": "natural_droop/2",
@@ -352,12 +348,12 @@
    "evidence_score": 0.9137228379453892,
    "candidate_failures": {
     "flatten": [
-     "corrected low end wobbles 10.3 dB over 5-48.534 Hz against 7.3 dB in the material; expected flat",
+     "corrected low end is uneven: 10.3 dB of ripple about its trend over 5-48.534 Hz against 7.3 dB in the material; expected flat",
      "introduces a cliff of 42.5 dB/oct at 5.4 Hz where the input's worst was 32.7 \u2014 relocates the discontinuity rather than removing it"
     ],
     "counterfactual/25dB": [],
     "counterfactual/35dB": [
-     "corrected low end wobbles 10.2 dB over 5-48.534 Hz against 7.3 dB in the material; expected flat",
+     "corrected low end is uneven: 10.2 dB of ripple about its trend over 5-48.534 Hz against 7.3 dB in the material; expected flat",
      "introduces a cliff of 44.8 dB/oct at 5.4 Hz where the input's worst was 32.7 \u2014 relocates the discontinuity rather than removing it"
     ],
     "parametric": []
@@ -367,7 +363,7 @@
    "shape": "natural_droop",
    "seed": 2,
    "injected": null,
-   "seconds": 601.9
+   "seconds": 474.4
   },
   {
    "name": "filtered/2",
@@ -382,12 +378,12 @@
    "candidate_failures": {
     "flatten": [],
     "counterfactual/25dB": [
-     "corrected low end wobbles 8.0 dB over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
+     "corrected low end is uneven: 8.0 dB of ripple about its trend over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
      "corrected only down to 45.2 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
      "lifts 11.5 Hz to +6.8 dB, 1.1 dB above anything the material or the requested shape supports there \u2014 boosting what is not content",
-     "corrected low end wobbles 8.9 dB over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
+     "corrected low end is uneven: 8.9 dB of ripple about its trend over 5-96.4458 Hz against 5.3 dB in the material; expected flat",
      "corrected only down to 45.4 Hz; content continues to 5.0 Hz"
     ]
    },
@@ -396,7 +392,7 @@
    "shape": "filtered",
    "seed": 2,
    "injected": "LR2@36.9366Hz",
-   "seconds": 568.9
+   "seconds": 414.0
   },
   {
    "name": "broadband/3",
@@ -414,7 +410,7 @@
    "shape": "broadband",
    "seed": 3,
    "injected": null,
-   "seconds": 8.4
+   "seconds": 8.7
   },
   {
    "name": "sparse_dialogue/3",
@@ -432,7 +428,7 @@
    "shape": "sparse_dialogue",
    "seed": 3,
    "injected": null,
-   "seconds": 3.6
+   "seconds": 1.3
   },
   {
    "name": "varying_source/3",
@@ -450,7 +446,7 @@
    "shape": "varying_source",
    "seed": 3,
    "injected": null,
-   "seconds": 9.8
+   "seconds": 9.4
   },
   {
    "name": "rumble/3",
@@ -468,7 +464,7 @@
    "shape": "rumble",
    "seed": 3,
    "injected": null,
-   "seconds": 3.0
+   "seconds": 3.5
   },
   {
    "name": "stationary_noise/3",
@@ -486,7 +482,7 @@
    "shape": "stationary_noise",
    "seed": 3,
    "injected": null,
-   "seconds": 1.6
+   "seconds": 1.2
   },
   {
    "name": "natural_droop/3",
@@ -500,18 +496,16 @@
    "evidence_score": 0.9315883610214375,
    "candidate_failures": {
     "flatten": [
-     "corrected low end wobbles 11.1 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
+     "corrected low end is uneven: 10.5 dB of ripple about its trend over 5-39.4013 Hz against 6.2 dB in the material; expected flat",
      "introduces a cliff of 61.2 dB/oct at 7.6 Hz where the input's worst was 45.4 \u2014 relocates the discontinuity rather than removing it"
     ],
     "counterfactual/25dB": [
-     "corrected level -6.1 dB against the -2.7 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 9.5 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
+     "corrected level -6.7 dB against the -3.3 intended, outside the 3 dB allowed",
      "corrected only down to 33.4 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
-     "corrected level -6.5 dB against the -2.1 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 8.5 dB over 5-45 Hz against 6.5 dB in the material; expected flat",
-     "corrected only down to 34.4 Hz; content continues to 5.0 Hz"
+     "corrected level -7.2 dB against the -2.7 intended, outside the 3 dB allowed",
+     "corrected only down to 34.7 Hz; content continues to 5.0 Hz"
     ],
     "parametric": []
    },
@@ -520,7 +514,7 @@
    "shape": "natural_droop",
    "seed": 3,
    "injected": null,
-   "seconds": 668.1
+   "seconds": 505.8
   },
   {
    "name": "filtered/3",
@@ -542,7 +536,7 @@
    "shape": "filtered",
    "seed": 3,
    "injected": "BW2@19.0097Hz",
-   "seconds": 556.1
+   "seconds": 433.1
   },
   {
    "name": "broadband/4",
@@ -560,7 +554,7 @@
    "shape": "broadband",
    "seed": 4,
    "injected": null,
-   "seconds": 6.0
+   "seconds": 5.5
   },
   {
    "name": "sparse_dialogue/4",
@@ -578,7 +572,7 @@
    "shape": "sparse_dialogue",
    "seed": 4,
    "injected": null,
-   "seconds": 6.1
+   "seconds": 2.6
   },
   {
    "name": "varying_source/4",
@@ -596,7 +590,7 @@
    "shape": "varying_source",
    "seed": 4,
    "injected": null,
-   "seconds": 14.0
+   "seconds": 8.8
   },
   {
    "name": "rumble/4",
@@ -614,7 +608,7 @@
    "shape": "rumble",
    "seed": 4,
    "injected": null,
-   "seconds": 2.6
+   "seconds": 3.5
   },
   {
    "name": "stationary_noise/4",
@@ -632,7 +626,7 @@
    "shape": "stationary_noise",
    "seed": 4,
    "injected": null,
-   "seconds": 1.6
+   "seconds": 1.3
   },
   {
    "name": "natural_droop/4",
@@ -654,7 +648,7 @@
    "shape": "natural_droop",
    "seed": 4,
    "injected": null,
-   "seconds": 552.5
+   "seconds": 416.1
   },
   {
    "name": "filtered/4",
@@ -668,7 +662,7 @@
    "evidence_score": null,
    "candidate_failures": {
     "flatten": [
-     "corrected low end wobbles 10.9 dB over 5-135.957 Hz against 8.0 dB in the material; expected flat",
+     "corrected low end is uneven: 10.9 dB of ripple about its trend over 5-135.957 Hz against 8.0 dB in the material; expected flat",
      "introduces a cliff of 35.1 dB/oct at 7.6 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 41.5 Hz; content continues to 5.0 Hz"
     ],
@@ -677,12 +671,12 @@
     ],
     "counterfactual/35dB": [
      "peaks at 12.5 Hz then falls at 25.4 dB/oct below it against 23.0 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 13.8 dB over 5-135.957 Hz against 8.0 dB in the material; expected flat",
+     "corrected low end is uneven: 13.8 dB of ripple about its trend over 5-135.957 Hz against 8.0 dB in the material; expected flat",
      "introduces a cliff of 36.2 dB/oct at 7.6 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 38.1 Hz; content continues to 5.0 Hz"
     ],
     "parametric": [
-     "corrected low end wobbles 10.4 dB over 5-135.957 Hz against 8.0 dB in the material; expected flat",
+     "corrected low end is uneven: 10.4 dB of ripple about its trend over 5-135.957 Hz against 8.0 dB in the material; expected flat",
      "introduces a cliff of 40.1 dB/oct at 9.8 Hz where the input's worst was 28.9 \u2014 relocates the discontinuity rather than removing it"
     ]
    },
@@ -691,7 +685,7 @@
    "shape": "filtered",
    "seed": 4,
    "injected": "LR4@21.8569Hz",
-   "seconds": 635.7
+   "seconds": 505.7
   },
   {
    "name": "broadband/5",
@@ -709,7 +703,7 @@
    "shape": "broadband",
    "seed": 5,
    "injected": null,
-   "seconds": 20.3
+   "seconds": 8.4
   },
   {
    "name": "sparse_dialogue/5",
@@ -727,7 +721,7 @@
    "shape": "sparse_dialogue",
    "seed": 5,
    "injected": null,
-   "seconds": 1.4
+   "seconds": 1.3
   },
   {
    "name": "varying_source/5",
@@ -745,7 +739,7 @@
    "shape": "varying_source",
    "seed": 5,
    "injected": null,
-   "seconds": 7.0
+   "seconds": 6.3
   },
   {
    "name": "rumble/5",
@@ -763,7 +757,7 @@
    "shape": "rumble",
    "seed": 5,
    "injected": null,
-   "seconds": 5.4
+   "seconds": 2.3
   },
   {
    "name": "stationary_noise/5",
@@ -781,7 +775,7 @@
    "shape": "stationary_noise",
    "seed": 5,
    "injected": null,
-   "seconds": 3.8
+   "seconds": 0.8
   },
   {
    "name": "natural_droop/5",
@@ -795,22 +789,19 @@
    "evidence_score": null,
    "candidate_failures": {
     "flatten": [
-     "tilts -2.0 dB/oct where -5.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
-     "corrected level -4.6 dB against the -1.2 intended, outside the 3 dB allowed",
+     "tilts -4.4 dB/oct where -7.9 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
      "peaks at 12.2 Hz then falls at 30.4 dB/oct below it against 27.6 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 16.3 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
+     "corrected low end is uneven: 10.1 dB of ripple about its trend over 5-29.2717 Hz against 7.8 dB in the material; expected flat",
      "introduces a cliff of 52.0 dB/oct at 8.3 Hz where the input's worst was 45.3 \u2014 relocates the discontinuity rather than removing it",
-     "corrected only down to 36.1 Hz; content continues to 5.0 Hz"
+     "corrected only down to 29.1 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [
-     "corrected low end wobbles 12.7 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
-     "corrected only down to 25.9 Hz; content continues to 5.0 Hz"
+     "corrected low end is uneven: 9.8 dB of ripple about its trend over 5-29.2717 Hz against 7.8 dB in the material; expected flat",
+     "corrected only down to 26.1 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
-     "tilts -3.0 dB/oct where -5.7 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
-     "corrected level -5.3 dB against the -2.1 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 12.1 dB over 5-45 Hz against 8.8 dB in the material; expected flat",
-     "corrected only down to 35.9 Hz; content continues to 5.0 Hz"
+     "tilts -3.5 dB/oct where -7.9 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
+     "corrected only down to 29.1 Hz; content continues to 5.0 Hz"
     ]
    },
    "peak_boost_db": null,
@@ -818,7 +809,7 @@
    "shape": "natural_droop",
    "seed": 5,
    "injected": null,
-   "seconds": 558.4
+   "seconds": 411.3
   },
   {
    "name": "filtered/5",
@@ -833,16 +824,16 @@
    "candidate_failures": {
     "flatten": [
      "tilts +0.6 dB/oct where -2.1 was intended, outside the 2 dB/oct allowed (positive rises toward the bottom)",
-     "corrected low end wobbles 9.9 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "corrected low end is uneven: 9.9 dB of ripple about its trend over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
      "introduces a cliff of 33.8 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 51.8 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [
-     "corrected low end wobbles 8.4 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "corrected low end is uneven: 8.4 dB of ripple about its trend over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
      "introduces a cliff of 32.1 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it"
     ],
     "counterfactual/35dB": [
-     "corrected low end wobbles 8.6 dB over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
+     "corrected low end is uneven: 8.6 dB of ripple about its trend over 5-77.3431 Hz against 6.2 dB in the material; expected flat",
      "introduces a cliff of 34.8 dB/oct at 5.6 Hz where the input's worst was 29.9 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 36.9 Hz; content continues to 5.0 Hz"
     ],
@@ -855,7 +846,7 @@
    "shape": "filtered",
    "seed": 5,
    "injected": "LR4@22.0426Hz",
-   "seconds": 587.9
+   "seconds": 456.7
   },
   {
    "name": "broadband/6",
@@ -873,7 +864,7 @@
    "shape": "broadband",
    "seed": 6,
    "injected": null,
-   "seconds": 5.9
+   "seconds": 5.7
   },
   {
    "name": "sparse_dialogue/6",
@@ -891,7 +882,7 @@
    "shape": "sparse_dialogue",
    "seed": 6,
    "injected": null,
-   "seconds": 2.2
+   "seconds": 1.3
   },
   {
    "name": "varying_source/6",
@@ -909,7 +900,7 @@
    "shape": "varying_source",
    "seed": 6,
    "injected": null,
-   "seconds": 6.2
+   "seconds": 7.2
   },
   {
    "name": "rumble/6",
@@ -927,7 +918,7 @@
    "shape": "rumble",
    "seed": 6,
    "injected": null,
-   "seconds": 5.6
+   "seconds": 3.9
   },
   {
    "name": "stationary_noise/6",
@@ -945,7 +936,7 @@
    "shape": "stationary_noise",
    "seed": 6,
    "injected": null,
-   "seconds": 1.0
+   "seconds": 1.2
   },
   {
    "name": "natural_droop/6",
@@ -960,24 +951,24 @@
    "candidate_failures": {
     "flatten": [
      "corrected level -7.9 dB against the -2.3 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 13.6 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected low end is uneven: 13.6 dB of ripple about its trend over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
      "corrected only down to 39.3 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [
      "corrected level -7.7 dB against the -3.2 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 10.6 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected low end is uneven: 10.6 dB of ripple about its trend over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
      "corrected only down to 29.8 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
      "corrected level -7.9 dB against the -2.8 intended, outside the 3 dB allowed",
      "peaks at 14.9 Hz then falls at 28.7 dB/oct below it against 21.5 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 16.5 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected low end is uneven: 16.5 dB of ripple about its trend over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
      "introduces a cliff of 41.3 dB/oct at 11.7 Hz where the input's worst was 36.4 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 39.3 Hz; content continues to 5.0 Hz"
     ],
     "parametric": [
      "corrected level -7.5 dB against the -3.7 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 12.3 dB over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
+     "corrected low end is uneven: 12.3 dB of ripple about its trend over 5.02457-65.9459 Hz against 6.5 dB in the material; expected flat",
      "introduces a cliff of 40.1 dB/oct at 12.5 Hz where the input's worst was 36.4 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 31.7 Hz; content continues to 5.0 Hz"
     ]
@@ -987,7 +978,7 @@
    "shape": "natural_droop",
    "seed": 6,
    "injected": null,
-   "seconds": 635.5
+   "seconds": 500.4
   },
   {
    "name": "filtered/6",
@@ -1009,7 +1000,7 @@
    "shape": "filtered",
    "seed": 6,
    "injected": "BW2@18.7117Hz",
-   "seconds": 546.2
+   "seconds": 422.2
   },
   {
    "name": "broadband/7",
@@ -1027,7 +1018,7 @@
    "shape": "broadband",
    "seed": 7,
    "injected": null,
-   "seconds": 5.1
+   "seconds": 7.5
   },
   {
    "name": "sparse_dialogue/7",
@@ -1045,7 +1036,7 @@
    "shape": "sparse_dialogue",
    "seed": 7,
    "injected": null,
-   "seconds": 3.4
+   "seconds": 1.6
   },
   {
    "name": "varying_source/7",
@@ -1063,7 +1054,7 @@
    "shape": "varying_source",
    "seed": 7,
    "injected": null,
-   "seconds": 4.1
+   "seconds": 7.1
   },
   {
    "name": "rumble/7",
@@ -1081,7 +1072,7 @@
    "shape": "rumble",
    "seed": 7,
    "injected": null,
-   "seconds": 6.8
+   "seconds": 5.1
   },
   {
    "name": "stationary_noise/7",
@@ -1099,7 +1090,7 @@
    "shape": "stationary_noise",
    "seed": 7,
    "injected": null,
-   "seconds": 1.2
+   "seconds": 1.7
   },
   {
    "name": "natural_droop/7",
@@ -1113,12 +1104,12 @@
    "evidence_score": 0.9064540254710534,
    "candidate_failures": {
     "flatten": [
-     "corrected low end wobbles 10.4 dB over 5-45 Hz against 6.3 dB in the material; expected flat",
+     "corrected low end is uneven: 8.9 dB of ripple about its trend over 5-35.964 Hz against 5.6 dB in the material; expected flat",
      "introduces a cliff of 53.9 dB/oct at 5.4 Hz where the input's worst was 37.2 \u2014 relocates the discontinuity rather than removing it"
     ],
     "counterfactual/25dB": [],
     "counterfactual/35dB": [
-     "corrected low end wobbles 10.1 dB over 5-45 Hz against 6.3 dB in the material; expected flat",
+     "corrected low end is uneven: 8.7 dB of ripple about its trend over 5-35.964 Hz against 5.6 dB in the material; expected flat",
      "introduces a cliff of 54.7 dB/oct at 5.4 Hz where the input's worst was 37.2 \u2014 relocates the discontinuity rather than removing it"
     ]
    },
@@ -1127,7 +1118,7 @@
    "shape": "natural_droop",
    "seed": 7,
    "injected": null,
-   "seconds": 540.2
+   "seconds": 407.8
   },
   {
    "name": "filtered/7",
@@ -1148,7 +1139,7 @@
    "shape": "filtered",
    "seed": 7,
    "injected": "LR2@15.7045Hz",
-   "seconds": 389.9
+   "seconds": 301.3
   },
   {
    "name": "broadband/8",
@@ -1166,7 +1157,7 @@
    "shape": "broadband",
    "seed": 8,
    "injected": null,
-   "seconds": 3.2
+   "seconds": 2.6
   },
   {
    "name": "sparse_dialogue/8",
@@ -1184,7 +1175,7 @@
    "shape": "sparse_dialogue",
    "seed": 8,
    "injected": null,
-   "seconds": 1.1
+   "seconds": 0.7
   },
   {
    "name": "varying_source/8",
@@ -1202,7 +1193,7 @@
    "shape": "varying_source",
    "seed": 8,
    "injected": null,
-   "seconds": 3.4
+   "seconds": 2.6
   },
   {
    "name": "rumble/8",
@@ -1220,7 +1211,7 @@
    "shape": "rumble",
    "seed": 8,
    "injected": null,
-   "seconds": 2.0
+   "seconds": 1.2
   },
   {
    "name": "stationary_noise/8",
@@ -1238,7 +1229,7 @@
    "shape": "stationary_noise",
    "seed": 8,
    "injected": null,
-   "seconds": 0.8
+   "seconds": 0.7
   },
   {
    "name": "natural_droop/8",
@@ -1254,25 +1245,25 @@
     "flatten": [
      "corrected level -6.3 dB against the -1.4 intended, outside the 3 dB allowed",
      "peaks at 12.9 Hz then falls at 27.7 dB/oct below it against 23.9 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 11.8 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "corrected low end is uneven: 11.8 dB of ripple about its trend over 5-62.024 Hz against 6.3 dB in the material; expected flat",
      "introduces a cliff of 40.8 dB/oct at 7.6 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 48.3 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/25dB": [
      "corrected level -6.1 dB against the -2.2 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 10.3 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "corrected low end is uneven: 10.3 dB of ripple about its trend over 5-62.024 Hz against 6.3 dB in the material; expected flat",
      "introduces a cliff of 38.3 dB/oct at 7.3 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 39.6 Hz; content continues to 5.0 Hz"
     ],
     "counterfactual/35dB": [
      "corrected level -6.5 dB against the -1.9 intended, outside the 3 dB allowed",
      "peaks at 12.9 Hz then falls at 27.7 dB/oct below it against 23.9 in the material \u2014 too much too soon, then a rolloff",
-     "corrected low end wobbles 11.4 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat",
+     "corrected low end is uneven: 11.4 dB of ripple about its trend over 5-62.024 Hz against 6.3 dB in the material; expected flat",
      "introduces a cliff of 40.8 dB/oct at 7.6 Hz where the input's worst was 34.8 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 44.7 Hz; content continues to 5.0 Hz"
     ],
     "parametric": [
-     "corrected low end wobbles 9.0 dB over 5-62.024 Hz against 6.3 dB in the material; expected flat"
+     "corrected low end is uneven: 9.0 dB of ripple about its trend over 5-62.024 Hz against 6.3 dB in the material; expected flat"
     ]
    },
    "peak_boost_db": null,
@@ -1280,7 +1271,7 @@
    "shape": "natural_droop",
    "seed": 8,
    "injected": null,
-   "seconds": 338.5
+   "seconds": 310.9
   },
   {
    "name": "filtered/8",
@@ -1302,7 +1293,7 @@
    "shape": "filtered",
    "seed": 8,
    "injected": "LR2@16.0264Hz",
-   "seconds": 180.1
+   "seconds": 176.3
   },
   {
    "name": "broadband/9",
@@ -1320,7 +1311,7 @@
    "shape": "broadband",
    "seed": 9,
    "injected": null,
-   "seconds": 2.9
+   "seconds": 3.0
   },
   {
    "name": "sparse_dialogue/9",
@@ -1338,7 +1329,7 @@
    "shape": "sparse_dialogue",
    "seed": 9,
    "injected": null,
-   "seconds": 1.4
+   "seconds": 1.9
   },
   {
    "name": "varying_source/9",
@@ -1356,7 +1347,7 @@
    "shape": "varying_source",
    "seed": 9,
    "injected": null,
-   "seconds": 3.7
+   "seconds": 3.4
   },
   {
    "name": "rumble/9",
@@ -1374,7 +1365,7 @@
    "shape": "rumble",
    "seed": 9,
    "injected": null,
-   "seconds": 1.7
+   "seconds": 1.6
   },
   {
    "name": "stationary_noise/9",
@@ -1392,7 +1383,7 @@
    "shape": "stationary_noise",
    "seed": 9,
    "injected": null,
-   "seconds": 0.7
+   "seconds": 0.6
   },
   {
    "name": "natural_droop/9",
@@ -1407,18 +1398,18 @@
    "candidate_failures": {
     "flatten": [
      "corrected level -11.8 dB against the -3.7 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 17.2 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "corrected low end is uneven: 17.2 dB of ripple about its trend over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
      "introduces a cliff of 47.5 dB/oct at 11.0 Hz where the input's worst was 44.4 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 47.6 Hz; content continues to 5.7 Hz"
     ],
     "counterfactual/25dB": [
      "corrected level -12.0 dB against the -4.7 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 14.5 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "corrected low end is uneven: 14.5 dB of ripple about its trend over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
      "corrected only down to 43.9 Hz; content continues to 5.7 Hz"
     ],
     "counterfactual/35dB": [
      "corrected level -12.1 dB against the -4.3 intended, outside the 3 dB allowed",
-     "corrected low end wobbles 16.3 dB over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
+     "corrected low end is uneven: 16.3 dB of ripple about its trend over 5.66877-64.1348 Hz against 10.3 dB in the material; expected flat",
      "introduces a cliff of 48.1 dB/oct at 11.0 Hz where the input's worst was 44.4 \u2014 relocates the discontinuity rather than removing it",
      "corrected only down to 47.4 Hz; content continues to 5.7 Hz"
     ],
@@ -1431,7 +1422,7 @@
    "shape": "natural_droop",
    "seed": 9,
    "injected": null,
-   "seconds": 251.4
+   "seconds": 248.3
   },
   {
    "name": "filtered/9",
@@ -1453,7 +1444,7 @@
    "shape": "filtered",
    "seed": 9,
    "injected": "LR2@18.7647Hz",
-   "seconds": 198.5
+   "seconds": 192.5
   }
  ]
 }

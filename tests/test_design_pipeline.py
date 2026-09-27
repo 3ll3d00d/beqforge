@@ -332,15 +332,16 @@ def test_the_judged_band_starts_at_the_measured_noise_floor() -> None:
 
     # NaN means content was found all the way down, so the bottom does not move
     unfloored = replace(bare, noise_floor_hz=math.nan)
-    assert judged_band_hz(material, unfloored, params)[0] == params.verify_band_hz[0]
+    assert judged_band_hz(material, unfloored, params)[0] == params.verify_floor_hz
 
     # and a floor below the nominal bottom cannot widen the band past what was measured
     shallow = replace(bare, noise_floor_hz=2.0)
-    assert judged_band_hz(material, shallow, params)[0] == params.verify_band_hz[0]
+    assert judged_band_hz(material, shallow, params)[0] == params.verify_floor_hz
 
-    # the top edge never contracts below the nominal one
+    # the band is always at least min_judge_octaves wide, whatever the anchor
     for d in (floored, unfloored, shallow):
-        assert judged_band_hz(material, d, params)[1] >= params.verify_band_hz[1]
+        low, high = judged_band_hz(material, d, params)
+        assert high >= low * 2.0**params.accept.min_judge_octaves - 1e-9
 
 
 def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
@@ -361,9 +362,7 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
     live = np.flatnonzero(target > 1e-9)
     assert live.size, "the fixture's LFE is high-passed; there should be a deficit"
     # the old rule put the last live point exactly at the share band's top edge
-    assert DESIGN_GRID[live[-1]] != pytest.approx(
-        35.0, rel=0.02
-    )
+    assert DESIGN_GRID[live[-1]] != pytest.approx(35.0, rel=0.02)
     # tapered rather than cut: no single-point step at the top of the correction
     steps = np.abs(np.diff(target[: live[-1] + 1]))
     assert steps.max() < 1.0, (
@@ -427,7 +426,9 @@ def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> N
         return low_end_deficit_db(walled, PipelineParams(accept=accept))
 
     flat, rise, rolloff = asked(0.0), asked(2.0), asked(-2.0)
-    pivot = _judged_top_hz(_flat_deficit(walled, PipelineParams())[-1], PipelineParams())
+    pivot = _judged_top_hz(
+        _flat_deficit(walled, PipelineParams())[-1], PipelineParams()
+    )
     well_below = DESIGN_GRID < pivot / 4  # two octaves under the pivot: +/-4 dB of goal
     assert np.all(rise[well_below] >= flat[well_below] + 3.0)
     assert np.all(rolloff[well_below] <= flat[well_below])

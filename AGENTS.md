@@ -285,7 +285,8 @@ every strategy's target is then held flat below the mix's tracking floor and cap
 mix's measured deficit inside `priced_by_evidence`, before the contrast ceiling; `counterfactual` sweeps
 `restore_caps_db` (one candidate each, identical priced targets deduplicated) and only restores
 a channel as far as that channel's own contrast allows; the judged band runs from the tracking
-floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
+floor (at least `verify_floor_hz`) to the same deficit anchor `flatten` uses, widened to at
+least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6).
 
 ### Strategies and evidence pricing
 
@@ -431,6 +432,15 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   proves restoration" reading; it does not establish safe automatic restoration of arbitrary
   source material, and **generalisation to sparse real programmes remains unvalidated** — see
   `TODO.md`.
+* **Reading the frozen protocol under the content principle.** `natural_bass_light` is a
+  programme *recorded* with a 24 Hz 4th-order rolloff. The protocol counts it as a negative by
+  provenance, from when the question was "was a mastering filter applied?". Under the content
+  principle (above) its low end is real, attenuated programme, and lifting it toward a flat
+  goal is the dials working. So, like the corpus's `natural_droop`, it is **reported, not
+  counted as a false acceptance**. Since IMPROVEMENT_PLAN T6 it is accepted on both seeds (it
+  had only been rejected by a sub-dB unevenness margin over an over-wide judged band). The
+  protocol file and its predeclared results are left untouched; the guards that matter still
+  hold — `stationary_coloured_noise` and `broadband` abstain on both seeds.
 
 ### Publication, playback and verification
 
