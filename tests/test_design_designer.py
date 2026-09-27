@@ -640,3 +640,13 @@ def test_the_judges_own_notes_reach_the_response() -> None:
     candidate.verdict.notes.append(shaping)
     mapped = _to_design_candidate(candidate, PipelineParams(), report_gain_reduction=False)
     assert shaping in mapped.commentary["verdict_notes"]
+
+
+def test_the_response_says_the_fractions_in_words_not_bare_numbers(monkeypatch) -> None:
+    """'Recovered fraction 0.981' meant nothing to a reviewer; the sentence has to carry it."""
+    monkeypatch.setattr(
+        "beqforge.designer.run", lambda material, params: _report([_candidate()])
+    )
+    commentary = design(_small_request()).candidates[0].commentary
+    assert "recovered_fraction" not in commentary
+    assert "shaping_fraction" not in commentary

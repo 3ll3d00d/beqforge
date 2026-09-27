@@ -126,14 +126,16 @@ diagnosis, in this order:
 * `found` — the reference plateau and its level; which channels carry it, and which are
   absent or digital silence; how far down the programme tracks it; where the attenuation
   stops being level-invariant; which channels show a steep knee; the judged band; the goal.
-* `correction` — how much boost the deficit asked for against how much the evidence allowed,
-  the filter, and the low end against the reference, before → after.
+* `correction` — how much boost the deficit asked for against how much the evidence allowed
+  (as a share of what the low end is missing), the filter, the low end against the reference
+  before → after, and how much of the boost lies below the frequency where the loss stops
+  behaving like a fixed filter — the part that rests on your goal rather than on a measured
+  rolloff.
 * `alternatives` — why each other candidate was rejected or not chosen.
 
 The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves
-noticed, such as how much of the correction sits below the level-invariance floor),
-`recovered_fraction`, `shaping_fraction`, `effective_params` and `beqforge_revision` (which
-build answered). A decline's `decline_message` gives the reason first, then `| found: …` with
+noticed), `effective_params` and `beqforge_revision` (which build answered). The raw
+recovered and shaping fractions are kept in the run record, not the response. A decline's `decline_message` gives the reason first, then `| found: …` with
 the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.

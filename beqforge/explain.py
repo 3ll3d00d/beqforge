@@ -50,16 +50,21 @@ def found(report: Report) -> str:
 
     parts.extend(_carriage(report))
     if math.isnan(d.noise_floor_hz):
-        parts.append("the programme tracks that reference to the bottom of the band")
+        parts.append(
+            "the film's bass rises and falls with the rest of the soundtrack all the way "
+            "down, so there is real content to restore to the bottom of the band"
+        )
     else:
         parts.append(
-            f"the programme tracks that reference down to {_hz(d.noise_floor_hz)}; "
-            "below it nothing is recovered and any boost is held flat"
+            f"the film's bass rises and falls with the rest of the soundtrack down to "
+            f"{_hz(d.noise_floor_hz)}; below that there is nothing to recover, so any boost "
+            "is held flat"
         )
     if math.isfinite(d.filter_floor_hz):
         parts.append(
-            f"the attenuation is level-invariant down to {_hz(d.filter_floor_hz)}; "
-            "correction below that is shaping, not the inverse of a measured filter"
+            f"the loss behaves like a fixed filter (the same in loud and quiet scenes) down "
+            f"to {_hz(d.filter_floor_hz)}; below that, correcting rests on the goal rather "
+            "than on a measured rolloff"
         )
 
     knees = [
@@ -143,7 +148,7 @@ def digital_silence(material, frame: int = 1024) -> dict[str, float]:
     return shares
 
 
-def correction(candidate: Candidate) -> str:
+def correction(candidate: Candidate, report: Report | None = None) -> str:
     """What the chosen candidate was asked for, what it did, and what the low end became."""
     parts: list[str] = []
     asked = candidate.unpriced_target_db
@@ -154,9 +159,14 @@ def correction(candidate: Candidate) -> str:
             f"the deficit asks for up to {asked[at]:.1f} dB (at {_hz(DESIGN_GRID[at])}); "
             f"the measured evidence licenses up to {float(np.max(licensed)):.1f} dB"
         )
+    # a ratio of the *target* to the deficit: what the filter was allowed to aim for, not
+    # something measured on the result — the before → after table below is that
     recovered = candidate.verdict.recovered_fraction
     if math.isfinite(recovered):
-        parts.append(f"{recovered:.0%} of the measured deficit is corrected")
+        parts.append(
+            f"the evidence allowed aiming for {recovered:.0%} of what the low end is missing "
+            "against the goal"
+        )
     sections = ", ".join(
         f"{f.type} {f.freq_hz:g} Hz {f.gain_db:+.1f} dB Q {f.q:.2f}"
         for f in candidate.filters
@@ -177,10 +187,20 @@ def correction(candidate: Candidate) -> str:
 
     shaping = candidate.verdict.shaping_fraction
     if math.isfinite(shaping) and shaping > 0:
+        floor = (
+            None
+            if report is None or report.diagnosis is None
+            else report.diagnosis.filter_floor_hz
+        )
+        where = (
+            f"below {floor:.1f} Hz"
+            if floor is not None and math.isfinite(floor)
+            else "below the level-invariance floor"
+        )
         parts.append(
-            f"{min(shaping, 1.0):.0%} of the correction lies below the level-invariance "
-            "floor, where it rests on the preference for a flat result rather than on a "
-            "measured filter"
+            f"{min(shaping, 1.0):.0%} of the boost lies {where}, where the loss stops "
+            "behaving like a fixed filter: that part rests on the goal, not on a measured "
+            "rolloff"
         )
     return "; ".join(parts)
 

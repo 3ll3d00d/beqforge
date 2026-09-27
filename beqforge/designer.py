@@ -180,10 +180,9 @@ def _to_design_candidate(
     # the fraction as a bare number and never saw the sentence saying what it means
     if candidate.verdict.notes:
         commentary["verdict_notes"] = "; ".join(dict.fromkeys(candidate.verdict.notes))
-    if not math.isnan(candidate.verdict.recovered_fraction):
-        commentary["recovered_fraction"] = f"{candidate.verdict.recovered_fraction:.3f}"
-    if not math.isnan(candidate.verdict.shaping_fraction):
-        commentary["shaping_fraction"] = f"{candidate.verdict.shaping_fraction:.3f}"
+    # recovered_fraction and shaping_fraction are deliberately not here as bare numbers: read
+    # out of context they mean nothing to a reviewer. `explain.correction` says both in words,
+    # and the run record keeps the numbers.
 
     return DesignCandidate(
         filters=list(candidate.filters),
@@ -307,7 +306,7 @@ def design(
     # correction before the notes and parameters that qualify it
     account = {
         "found": explain.found(report),
-        "correction": explain.correction(accepted),
+        "correction": explain.correction(accepted, report),
         "alternatives": explain.alternatives(report, accepted),
     }
     candidate = dataclasses.replace(
