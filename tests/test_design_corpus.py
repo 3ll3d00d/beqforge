@@ -76,3 +76,22 @@ def test_texture_is_left_alone_and_a_filter_is_not() -> None:
 
     filtered = analyse(corpus_case("filtered", 3).material(), PipelineParams())
     assert not any("ripple" in b for b in filtered.blockers)
+
+
+def test_a_channel_is_restored_for_a_missing_low_end_not_a_steep_slope() -> None:
+    """IMPROVEMENT_PLAN T3: the fixed 14 dB/octave slope decided on noise.
+
+    filtered/3's LFE carries an injected filter yet its steepest slope reads 13.5; broadband/4's
+    LFE is unfiltered yet reads 22.9. Against each channel's own texture, both come out right.
+    """
+    from beqforge.diagnose import diagnose
+    from beqforge.pipeline import PipelineParams, channels_missing_low_end
+
+    params = PipelineParams()
+    filtered = corpus_case("filtered", 3).material()
+    assert not diagnose(filtered).channels["LFE"].is_filtered  # the slope missed it
+    assert "LFE" in channels_missing_low_end(filtered, params)
+
+    unfiltered = corpus_case("broadband", 4).material()
+    assert diagnose(unfiltered).channels["LFE"].is_filtered  # the slope flagged it
+    assert channels_missing_low_end(unfiltered, params) == []

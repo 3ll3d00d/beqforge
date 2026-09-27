@@ -445,6 +445,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   (4.0-4.2 Hz on three natural-droop cases) no extent could ever pass. It now uses
   `max(floor, band low)`. Real titles unchanged (probe `--tol 0`); corpus natural droop
   4/9 → 5/9, everything else unchanged; frozen protocol identical.
+* **T3 — done.** Which channels `counterfactual` restores is now decided by each channel's own
+  texture, not a fixed 14 dB/octave steepest slope. A channel is restored when its low-end
+  deficit against its own plateau exceeds its own passband's crest-to-trough ripple
+  (`channels_missing_low_end`): the texture rule per channel, the same 1× boundary, no
+  constant. Measured first on the corpus. The slope decided on noise: it missed filtered/3's
+  filtered LFE (13.5 dB/oct) and flagged broadband/4's and /9's unfiltered LFE (22.9, 17.5).
+  The texture test separated them completely: filtered channels 4.6-19.1×, unfiltered
+  0.15-0.82×. On real titles it drops mostly-silent or texture-level channels (Black Bag's
+  LFE at 0.13×, surrounds ≈0.45×; Bugonia's and Caught Stealing's LFE) and adds 28 Years
+  Later's centre (8.2×, 13.3 dB/oct). `knee_slope_db_per_octave` stays as a descriptive label
+  only. Probe: only counterfactual targets move. Full runs on the four titles concerned: no
+  winner changes; losing counterfactual candidates' verdicts shift. Corpus and frozen protocol
+  unchanged.
+* **T6 — measured, awaiting a decision.** Replacing the judged band's fixed 45 Hz floor with
+  "the deficit anchor, at least `min_judge_octaves` above the floor" narrows the band to where
+  the correction is (Send Help 5-15.5 Hz; spread 12.6 → 5.7 dB). No real winner changes,
+  corpus unchanged. But on the frozen protocol natural_bass_light (a negative that is
+  observationally a filter) becomes a false acceptance on both seeds: parametric had been
+  failing it only on wobble, by 0.1-0.7 dB, over the over-wide band. Patch saved;
+  accept-with-record or reject is the user's call.
 
 ## Baseline: 2026-09-26 track set
 

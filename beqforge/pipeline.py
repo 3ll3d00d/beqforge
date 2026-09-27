@@ -642,6 +642,30 @@ def passband_ripple_db(
     return float(np.max(about) - np.min(about)), (low, high)
 
 
+def channels_missing_low_end(material: Material, params: "PipelineParams") -> list[str]:
+    """The channels whose own low end falls short by more than their own texture.
+
+    Each channel on its own: its deficit against its own plateau (`low_end_deficit_db`, toward
+    flat) against the crest-to-trough ripple of its own passband (`passband_ripple_db`) — the
+    texture rule applied per channel, the same 1x boundary and no constant. This replaced a
+    fixed 14 dB/octave steepest-slope threshold (IMPROVEMENT_PLAN T3). On the corpus the slope
+    decided on noise — unfiltered channels measured 8.5-22.9 dB/octave, injected 2nd-order
+    filters 13.5-23.3 — while this separated them completely: filtered channels 4.6-19.1x,
+    unfiltered 0.15-0.82x. A channel whose deficit or ripple cannot be measured is not restored.
+    """
+    flat = dataclasses.replace(
+        params, accept=dataclasses.replace(params.accept, target_tilt_db_per_octave=0.0)
+    )
+    names = []
+    for name, samples in material.channels.items():
+        solo = Material(name, material.fs, samples, {}, material.coverage)
+        deficit = low_end_deficit_db(solo, flat)
+        texture = passband_ripple_db(solo, flat)
+        if deficit is not None and texture is not None and deficit.max() > texture[0]:
+            names.append(name)
+    return names
+
+
 def _worth_correcting(target: np.ndarray, params: "PipelineParams") -> bool:
     """Whether an evidence-priced target asks for more than the goal tolerance anywhere."""
     return float(np.max(target)) > params.accept.goal_tolerance_db
@@ -768,10 +792,11 @@ def counterfactual_targets(
     Try each restoration cap, re-sum the channels, price the resulting mix
     deficit by contrast, and deduplicate targets before fitting.
     """
-    if not diagnosis.filtered_channels:
+    names = channels_missing_low_end(material, params)
+    if not names:
         return []
     # Reuse channel spectra across restoration caps.
-    restoration = _Restoration(material, diagnosis, params.playback)
+    restoration = _Restoration(material, diagnosis, params.playback, names)
     deficit = low_end_deficit_db(material, params)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
@@ -902,6 +927,8 @@ class _Restoration:
     three forward and three inverse transforms of a two-hour signal for one answer.
     """
 
+    names: list[str]
+    """The channels to restore — `channels_missing_low_end` in a run."""
     spectra: dict[str, np.ndarray]
     bins: np.ndarray
     before_db: np.ndarray
@@ -923,15 +950,15 @@ class _Restoration:
         material: Material,
         diagnosis: Diagnosis,
         playback: PlaybackParams | None = None,
+        names: list[str] | None = None,
     ) -> None:
+        names = diagnosis.filtered_channels if names is None else names
+        object.__setattr__(self, "names", list(names))
         mix, gains = _restoration_mix(material, playback or PlaybackParams())
         object.__setattr__(self, "mix", mix)
         object.__setattr__(self, "gains", gains)
         length = scipy.fft.next_fast_len(len(mix), real=True)
-        spectra = {
-            name: np.fft.rfft(material.channels[name], length)
-            for name in diagnosis.filtered_channels
-        }
+        spectra = {name: np.fft.rfft(material.channels[name], length) for name in names}
         object.__setattr__(self, "spectra", spectra)
         object.__setattr__(self, "length", length)
         object.__setattr__(
@@ -988,7 +1015,7 @@ def counterfactual_target(
     restoration = restoration or _Restoration(material, diagnosis, params.playback)
     freqs = diagnosis.freqs
     restored = restoration.mix.copy()
-    for name in diagnosis.filtered_channels:
+    for name in restoration.names:
         samples = material.channels[name]
         response = diagnosis.channels[name].response_db
         boost = np.where(
