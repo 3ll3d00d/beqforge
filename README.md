@@ -124,13 +124,11 @@ audio), which `beqforge replay` can redraw and export.
 diagnosis, in this order:
 
 * `found` — the reference plateau and its level; which channels carry it, and which are
-  absent or digital silence; how far down the programme tracks it; where the attenuation
-  stops being level-invariant; which channels show a steep knee; the judged band; the goal.
-* `correction` — how much boost the deficit asked for against how much the evidence allowed
-  (as a share of what the low end is missing), the filter, the low end against the reference
-  before → after, and how much of the boost lies below the frequency where loud and quiet
-  scenes stop agreeing on the shape of the low end — the part not backed by that fixed-filter
-  check, which rests on your goal instead.
+  absent or digital silence; down to where there is real bass content (the low end rising and
+  falling with the rest of the soundtrack); the judged band; the goal.
+* `correction` — the filter; how much of what the low end is missing the content supports
+  lifting; and, frequency by frequency, what was wanted, what the content supports, and the
+  low end against the reference before → after.
 * `alternatives` — why each other candidate was rejected or not chosen.
 
 The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves

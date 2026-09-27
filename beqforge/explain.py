@@ -31,7 +31,7 @@ def _hz(value: float) -> str:
 
 
 def found(report: Report) -> str:
-    """The reference, the floors and the channel knees, in the order a correction uses them."""
+    """The reference, what carries it, and down to where there is real content to lift."""
     parts: list[str] = []
     low, high = report.mix_plateau_hz
     if math.isfinite(report.mix_reference_db):
@@ -51,33 +51,15 @@ def found(report: Report) -> str:
     parts.extend(_carriage(report))
     if math.isnan(d.noise_floor_hz):
         parts.append(
-            "the film's bass rises and falls with the rest of the soundtrack all the way "
-            "down, so there is real content to restore to the bottom of the band"
+            "there is real bass content all the way down: at every frequency the low end "
+            "rises and falls with the rest of the soundtrack"
         )
     else:
         parts.append(
-            f"the film's bass rises and falls with the rest of the soundtrack down to "
-            f"{_hz(d.noise_floor_hz)}; below that there is nothing to recover, so any boost "
-            "is held flat"
+            f"there is real bass content down to {_hz(d.noise_floor_hz)}: above it the low "
+            "end rises and falls with the rest of the soundtrack; below it, it does not, so "
+            "nothing there is lifted further than at that frequency"
         )
-    if math.isfinite(d.filter_floor_hz):
-        parts.append(
-            f"loud and quiet scenes agree on the shape of the low end down to "
-            f"{_hz(d.filter_floor_hz)}, as they would under a fixed filter; below that they "
-            "disagree, so any correction there is not backed by this check and rests on the "
-            "goal"
-        )
-
-    knees = [
-        f"{c.name} {c.max_slope_db_per_octave:.0f} dB/oct at {_hz(c.max_slope_hz)}"
-        for c in d.channels.values()
-        if c.is_filtered
-    ]
-    parts.append(
-        "channels with a steep knee: " + ", ".join(knees)
-        if knees
-        else "no channel shows a steep knee"
-    )
     if report.judged_band_hz is not None:
         a, b = report.judged_band_hz
         parts.append(f"results are judged over {a:.1f}-{b:.1f} Hz")
@@ -150,59 +132,46 @@ def digital_silence(material, frame: int = 1024) -> dict[str, float]:
 
 
 def correction(candidate: Candidate, report: Report | None = None) -> str:
-    """What the chosen candidate was asked for, what it did, and what the low end became."""
-    parts: list[str] = []
-    asked = candidate.unpriced_target_db
-    licensed = candidate.target_db
-    if asked is not None and np.any(asked > 0):
-        at = int(np.argmax(asked))
-        parts.append(
-            f"the deficit asks for up to {asked[at]:.1f} dB (at {_hz(DESIGN_GRID[at])}); "
-            f"the measured evidence licenses up to {float(np.max(licensed)):.1f} dB"
-        )
-    # a ratio of the *target* to the deficit: what the filter was allowed to aim for, not
-    # something measured on the result — the before → after table below is that
-    recovered = candidate.verdict.recovered_fraction
-    if math.isfinite(recovered):
-        parts.append(
-            f"the evidence allowed aiming for {recovered:.0%} of what the low end is missing "
-            "against the goal"
-        )
+    """The filter, and frequency by frequency: what was wanted, what the content supports, and
+    what the low end became.
+
+    Framed as content, not cause. Whether a filter removed the bass cannot be told from the
+    audio alone, and it does not decide anything: a boost is justified where there is real
+    programme to lift, by as much as the evidence for that programme allows.
+    """
     sections = ", ".join(
         f"{f.type} {f.freq_hz:g} Hz {f.gain_db:+.1f} dB Q {f.q:.2f}"
         for f in candidate.filters
     )
-    parts.append(
+    parts = [
         f"{candidate.label}: {len(candidate.filters)} section(s) — {sections}; "
         f"peak boost {candidate.mv_adjust_db:+.1f} dB"
-    )
-
-    c = candidate.correction
-    points = [p for p in POINTS_HZ if c.freqs[0] <= p <= c.freqs[-1]]
-    table = ", ".join(
-        f"{p} Hz {np.interp(p, c.freqs, c.before_db):+.1f} → "
-        f"{np.interp(p, c.freqs, c.after_db):+.1f}"
-        for p in points
-    )
-    parts.append(f"low end against the reference, before → after (dB): {table}")
-
-    shaping = candidate.verdict.shaping_fraction
-    if math.isfinite(shaping) and shaping > 0:
-        floor = (
-            None
-            if report is None or report.diagnosis is None
-            else report.diagnosis.filter_floor_hz
-        )
-        where = (
-            f"below {floor:.1f} Hz"
-            if floor is not None and math.isfinite(floor)
-            else "below the level-invariance floor"
-        )
+    ]
+    recovered = candidate.verdict.recovered_fraction
+    if math.isfinite(recovered):
         parts.append(
-            f"{min(shaping, 1.0):.0%} of the boost lies {where}, where loud and quiet scenes "
-            "disagree about the shape of the low end: that part is not backed by the "
-            "fixed-filter check and rests on the goal"
+            f"overall, the content supports lifting {min(recovered, 1.0):.0%} of what the "
+            "low end is missing against the goal"
         )
+    wanted = candidate.unpriced_target_db
+    supported = candidate.target_db
+    c = candidate.correction
+    rows = []
+    for p in POINTS_HZ:
+        if not c.freqs[0] <= p <= c.freqs[-1]:
+            continue
+        row = f"{p} Hz"
+        if wanted is not None:
+            row += (
+                f" wanted {float(np.interp(p, DESIGN_GRID, wanted)):+.1f},"
+                f" content supports {float(np.interp(p, DESIGN_GRID, supported)):+.1f},"
+            )
+        row += (
+            f" low end {np.interp(p, c.freqs, c.before_db):+.1f} →"
+            f" {np.interp(p, c.freqs, c.after_db):+.1f}"
+        )
+        rows.append(row)
+    parts.append("frequency by frequency, dB against the reference: " + ", ".join(rows))
     return "; ".join(parts)
 
 

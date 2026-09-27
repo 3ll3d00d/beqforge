@@ -386,6 +386,19 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   loss "stops behaving like a fixed filter". **Open:** whether a narrow band of
   level-dependent *content* just under the plateau should end the run when agreement resumes
   below it.
+* **The response explains content, not cause.** Whether to boost at a frequency is a question
+  of whether there is real programme there to lift. Tracking answers it (the band moves with
+  the higher-frequency programme, so it is not noise) and contrast bounds it. Whether a filter
+  removed the bass cannot be told from the audio and decides nothing. The response now says,
+  per frequency, what was wanted, what the content supports and the low end before → after,
+  and where real bass content ends. The level-independence floor, "shaping" and the channel
+  "steep knee" line — filter-identification diagnostics — are out of the response, and the
+  shaping note is gone from `assess` (`AcceptParams.shaping_note_db` removed). `shaping_fraction`
+  stays in the record, clamped to [0, 1]. Obsession now reads "real bass content all the way
+  down … content supports +28.2 dB at 5 Hz, low end −28.8 → −1.6", where it used to call a
+  plain corrected rolloff "100% shaping". Probe `--tol 0`: nothing moved. The Obsession
+  question above (a narrow band of level-dependent content ending the level-independence
+  run) no longer touches anything a reviewer sees.
 
 ## Baseline: 2026-09-26 track set
 

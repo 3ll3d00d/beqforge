@@ -188,20 +188,6 @@ class AcceptParams:
     thinnest genuine section can sit only a few thousandths of a dB above it, one rounding away
     from being dropped; that margin is a property of the limit, not something to tune around."""
 
-    shaping_note_db: float = 1.0
-    """Boost claimed below the level-independence floor worth remarking on.
-
-    Not a limit. R2 says where inverting an attenuation stops being *identification* of a
-    filter and becomes shaping, which is a claim about confidence rather than about the
-    target — a filter can rightly boost through that region. But
-    nothing in the system said where the boundary was, so a reader had no way to tell a
-    correction that rests on measured level-independence from one that does not.
-
-    Measured as the boost *in excess of* what the cascade had already reached at the floor,
-    not as the boost below it. Every low shelf plateaus to DC, so the second reads as the
-    full shelf gain for any floor at all and says nothing. The excess is the part of the
-    correction that only the unmeasured region asks for."""
-
     max_drift_db: float = 3.0
     """Quantisation drift the **fitter** prefers to stay under. No longer an acceptance gate.
 
@@ -695,17 +681,6 @@ def assess(
             )
 
     shaping_frac = shaping_fraction(full, grid, filter_floor_hz)
-    if not math.isnan(filter_floor_hz):
-        below = grid < filter_floor_hz
-        at_floor = max(float(np.interp(filter_floor_hz, grid, full)), 0.0)
-        shaping = float(np.max(full[below])) - at_floor if below.any() else 0.0
-        if shaping >= params.shaping_note_db:
-            notes.append(
-                f"{shaping:.1f} dB of the correction is claimed below "
-                f"{filter_floor_hz:.1f} Hz, where the attenuation stops being "
-                "level-invariant; this shaping diagnostic does not identify the cause (R2)"
-            )
-
     if max((abs(f.q) for f in filters), default=0.0) > 4.0:
         notes.append(
             "carries a Q above 4, which is unusual but not itself a defect — check the "

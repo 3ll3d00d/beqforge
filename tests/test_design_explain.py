@@ -72,5 +72,5 @@ def test_alternatives_say_why_each_other_candidate_lost() -> None:
 def test_correction_reads_the_low_end_before_and_after() -> None:
     text = explain.correction(_candidate())
     assert "flatten: 1 section(s) — low_shelf 15.81 Hz +15.9 dB Q 0.71" in text
-    assert "before → after (dB): 5 Hz" in text
+    assert "frequency by frequency, dB against the reference: 5 Hz" in text
     assert np.isfinite(_candidate().correction.before_db).all()

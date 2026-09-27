@@ -306,33 +306,20 @@ def test_a_correction_that_genuinely_stops_is_still_caught() -> None:
     assert 12.0 < corrected_extent_hz(stopping, AcceptParams()) < 16.0
 
 
-def test_a_correction_below_the_level_independence_floor_is_noted_not_failed() -> None:
-    """R2 is a confidence claim, not a bound.
-
-    Title 2's accepted design boosts through the region where the LFE's attenuation stops
-    being level-independent, and is right to — the content there is real, just reproduced
-    14 dB down. What was missing was anything in the output saying which part of a
-    correction rests on a measured filter and which part is shaping.
+def test_the_level_independence_floor_changes_no_verdict_and_writes_no_note() -> None:
+    """R2 is a diagnostic about filter identification, kept for the record — not a bound, and
+    not something to tell a reviewer. Whether to boost is a question of content (tracking and
+    contrast), not of whether a filter can be shown to have removed it.
     """
     flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
     shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
 
     silent = assess(shelf, flat, float("nan"))
-    noted = assess(shelf, flat, float("nan"), filter_floor_hz=19.5)
+    floored = assess(shelf, flat, float("nan"), filter_floor_hz=19.5)
 
-    assert not any("shaping" in n for n in silent.notes)
-    assert any("shaping" in n for n in noted.notes)
-    assert noted.passed == silent.passed, "R2 must not change the verdict"
-
-
-def test_a_correction_entirely_above_the_floor_is_not_noted() -> None:
-    """The note has to mean something, so it only fires where the boost actually is."""
-    flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
-    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
-    assert not any(
-        "shaping" in n
-        for n in assess(shelf, flat, float("nan"), filter_floor_hz=3.5).notes
-    )
+    assert floored.passed == silent.passed
+    assert floored.notes == silent.notes
+    assert 0.0 < floored.shaping_fraction <= 1.0
 
 
 def test_flatness_does_not_re_charge_a_correction_for_its_tilt() -> None:
