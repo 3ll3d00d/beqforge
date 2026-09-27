@@ -365,8 +365,12 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
     A strategy whose priced target never exceeds it proposes nothing, and a run where none do
     abstains with `within_goal_tolerance`.
 
-  A corpus negative that departs from the goal by more than the tolerance is corrected *by
-  design*, so read the negative corpus's small fills in that light (IMPROVEMENT_PLAN E2).
+* **Texture is not a deficit.** A low end whose deepest shortfall is no larger than the
+  programme's own crest-to-trough ripple in the passband above the correction
+  (`pipeline.passband_ripple_db`) is left alone: it abstains with `within_programme_ripple`
+  before any strategy runs. That ripple is the title's own yardstick, so there is no constant.
+  Crest to trough rather than a one-sided dip, because the reference sits on the crests. This
+  is what took the negative corpus from 4 false acceptances in 45 to 0.
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by
   writing another one-off script. The point of the driver is that two titles become comparable;
   twenty scratchpad scripts are how the design was first worked out and none of them survived.

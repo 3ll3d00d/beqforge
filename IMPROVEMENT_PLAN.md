@@ -327,6 +327,20 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   as set, not an error. A user who wants them left alone sets `--goal-tolerance 4`. The
   corpus's gate treats any intervention on a negative as false, which is stricter than the
   dials now say; whether to rescore negatives against the goal is open.
+* **Texture is not a deficit — the corpus gate now passes.** The remaining false acceptances
+  were `flatten` filling 2-4 dB wiggles on unfiltered titles: the programme's own texture,
+  which it shows just as much above the knee. New blocker: a low end whose deepest shortfall is
+  no larger than the passband's crest-to-trough ripple above the correction
+  (`passband_ripple_db`) abstains with `within_programme_ripple`. Measured first (low-end
+  deficit ÷ that ripple): unfiltered corpus titles at most 0.77×, real titles 1.08-4.33×
+  (Dossier 18.9×), injected filters 6.2-20.3×. The boundary is 1× — the title's own yardstick,
+  no constant. A one-sided dip was tried first and rejected: the reference sits on the crests,
+  so noise reached 1.59×. Results: corpus gated false acceptances 4/45 → **0/45** (interval
+  0-0.08; the 0.10 gate **passes**), positives unchanged (7/9, 1.26 dB RMS); frozen protocol
+  identical; probe at `--tol 0` unchanged on all nine real titles. **Watch:** Black Bag
+  (1.08×) and Bugonia (1.09×) clear the line by under 10%. They are the two most marginal real
+  corrections, and a change that tips them to abstain would be the rule working, not a
+  regression — but look.
 
 ## Baseline: 2026-09-26 track set
 

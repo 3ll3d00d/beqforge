@@ -613,6 +613,35 @@ def low_end_deficit_db(
     return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
+def passband_ripple_db(
+    material: Material, params: "PipelineParams"
+) -> tuple[float, tuple[float, float]] | None:
+    """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
+
+    Measured on the same smoothed mean spectrum the deficit is, over the passband above the
+    correction — the top of the judged band to the top of the analysis band — as the spread of
+    the curve about its own log-frequency trend, so a tilted passband is not read as ripple.
+
+    Crest to trough, not a one-sided dip, because the reference sits near the 90th percentile
+    of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
+    negative corpus (IMPROVEMENT_PLAN E2) every unfiltered title's low-end deficit came in
+    under this (at most 0.77x); every real title and injected filter above it (1.08x and up).
+    `None` when there is no passband left above the correction to measure.
+    """
+    measured = _flat_deficit(material, params)
+    if measured is None:
+        return None
+    freqs, response, _, _, _, anchor = measured
+    low, high = _judged_top_hz(anchor, params), params.diagnose.band_hz[1]
+    band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, params.exclude_bands_hz)
+    if band.sum() < 8:
+        return None
+    smooth = smooth_unexcluded(response, freqs, params.exclude_bands_hz, 15)[band]
+    octaves = np.log2(freqs[band])
+    about = smooth - np.polyval(np.polyfit(octaves, smooth, 1), octaves)
+    return float(np.max(about) - np.min(about)), (low, high)
+
+
 def _worth_correcting(target: np.ndarray, params: "PipelineParams") -> bool:
     """Whether an evidence-priced target asks for more than the goal tolerance anywhere."""
     return float(np.max(target)) > params.accept.goal_tolerance_db
@@ -1211,6 +1240,18 @@ def analyse(
                 f"{sub_edge:g} Hz sub-feed low-pass, so there is no bass passband to restore "
                 "towards; restoration withheld"
             )
+        texture = passband_ripple_db(material, params)
+        low_end = low_end_deficit_db(material, params)
+        if texture is not None and low_end is not None:
+            ripple, (edge_low, edge_high) = texture
+            deepest = float(np.max(low_end))
+            if deepest <= ripple:
+                blockers.append(
+                    "within the programme's own ripple: the low end's deepest shortfall "
+                    f"({deepest:.1f} dB) is no larger than the {ripple:.1f} dB crest-to-trough "
+                    f"swing of the passband above it ({edge_low:.0f}-{edge_high:.0f} Hz), "
+                    "so it is texture, not a missing low end; restoration withheld"
+                )
     if math.isfinite(mix_level):
         judged = judged_band_hz(material, diagnosis, params)
         if any(a <= judged[1] and b >= judged[0] for a, b in bands):

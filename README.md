@@ -197,7 +197,9 @@ it says so and gives the reasons; that is a valid answer, not a failure.
 
 **The goal is yours to set.** "Put the missing bass back" needs a definition of how the low
 end *should* look, and that is a preference, not something the audio can say. By default the
-goal is flat below the knee, and a low end already within 1.5 dB of it is left alone. The goal
+goal is flat below the knee, and a low end already within 1.5 dB of it is left alone. So is a
+low end whose shortfall is no bigger than the ripple the soundtrack shows anyway, higher up
+where nothing is missing — that is texture, not a missing low end. The goal
 can instead rise toward the bottom or roll off gently (`--goal-tilt`), and the tolerance can be
 widened or narrowed (`--goal-tolerance`). Steps 1-3 build toward the goal you set, and steps
 5-6 judge and rank against it, so changing it changes what is proposed, not just what is

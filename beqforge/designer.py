@@ -118,6 +118,7 @@ _BLOCKER_CODES: tuple[tuple[str, str], ...] = (
     ("exclusions fragment the judged band", "exclusions_fragment_band"),
     ("playback verification unavailable", "playback_verification_unavailable"),
     ("nothing worth correcting", "within_goal_tolerance"),
+    ("within the programme's own ripple", "within_programme_ripple"),
 )
 
 

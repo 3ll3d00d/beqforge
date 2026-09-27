@@ -141,6 +141,9 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
         return real_design(*args, **kwargs)
 
     monkeypatch.setattr(pipeline, "design", design)
+    # white noise is all texture, so the ripple blocker would (rightly) stop the run before
+    # the stage this test is about — caching — is ever reached
+    monkeypatch.setattr(pipeline, "passband_ripple_db", lambda material, params: None)
     params = pipeline.PipelineParams(
         strategies=("parametric",), max_sections=1, confidence_z=2.0, fit_seeds=(3,)
     )

@@ -58,3 +58,21 @@ def test_the_gate_is_taken_over_distinguishable_negatives_only() -> None:
     assert summary["gated_negatives"]["false_acceptances"] == 0
     assert summary["natural_droop"]["false_acceptances"] == 1
     assert summary["filtered"]["true_positives"] == 1
+
+
+def test_texture_is_left_alone_and_a_filter_is_not() -> None:
+    """A low-end shortfall no larger than the programme's own ripple is texture, not a deficit.
+
+    Unfiltered broadband titles were "corrected" for 2-4 dB wiggles below the knee — the same
+    texture their passband shows above it. Measured against the passband's crest-to-trough
+    swing, every unfiltered corpus title fell under it and every filter well over.
+    """
+    from beqforge.designer import _decline_for_blockers
+    from beqforge.pipeline import PipelineParams, analyse
+
+    texture = analyse(corpus_case("broadband", 1).material(), PipelineParams())
+    assert any("within the programme's own ripple" in b for b in texture.blockers)
+    assert _decline_for_blockers(texture.blockers)[0] == "within_programme_ripple"
+
+    filtered = analyse(corpus_case("filtered", 3).material(), PipelineParams())
+    assert not any("ripple" in b for b in filtered.blockers)
