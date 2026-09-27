@@ -632,3 +632,14 @@ def test_the_shaping_fraction_is_a_share_even_when_the_floor_gain_is_negative() 
 
     full = np.where(DESIGN_GRID < 20.0, 28.0, -0.5)
     assert shaping_fraction(full, DESIGN_GRID, 24.0) == pytest.approx(1.0)
+
+
+def test_a_tracking_floor_below_the_band_cannot_fail_the_extent() -> None:
+    """The extent is measured inside the judged band, so content "continuing" to a tracking
+    floor below the band's lower edge could never be reached — every candidate failed."""
+    good = correction(lambda f: -12.0, lambda f: 0.0, band=(5.0, 45.0))
+    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
+    below_band = assess(shelf, good, noise_floor_hz=4.05)
+    assert not any("corrected only down to" in f for f in below_band.failures), (
+        below_band.failures
+    )

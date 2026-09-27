@@ -631,7 +631,12 @@ def assess(
         )
 
     extent = corrected_extent_hz(correction, params, target_db)
-    terminus = correction.band_hz[0] if math.isnan(noise_floor_hz) else noise_floor_hz
+    # content continues down to the tracking floor — but never below the judged band's own
+    # lower edge, which the extent is measured within. A floor under that edge (4.0-4.2 Hz
+    # beneath a 5 Hz band) asked for an extent no curve inside the band could ever reach.
+    terminus = correction.band_hz[0]
+    if not math.isnan(noise_floor_hz):
+        terminus = max(terminus, noise_floor_hz)
     if extent > terminus * 1.2:
         failures.append(
             f"corrected only down to {extent:.1f} Hz; content continues to "

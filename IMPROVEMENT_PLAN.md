@@ -440,10 +440,11 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   check judged over the full band is what keeps leakage out. (B) needs a way to tell them
   apart before it is safe. **Also found:** with the edge exempted, flatten still fails on fit
   quality — four sections cannot follow a steep, evidence-limited LR4 inverse (13.5 dB wobble
-  against 5.6) — while `parametric` fits it. **Latent bug, not yet fixed:** the extent check
-  uses the tracking floor as where content ends, so with a floor below the band's 5 Hz edge
-  (4.0-4.2 Hz on three natural-droop cases) no extent can ever pass; `max(floor, band low)`
-  fixes it, as its own measured change.
+  against 5.6) — while `parametric` fits it. **Latent bug, since fixed:** the extent check
+  used the tracking floor as where content ends, so with a floor below the band's 5 Hz edge
+  (4.0-4.2 Hz on three natural-droop cases) no extent could ever pass. It now uses
+  `max(floor, band low)`. Real titles unchanged (probe `--tol 0`); corpus natural droop
+  4/9 → 5/9, everything else unchanged; frozen protocol identical.
 
 ## Baseline: 2026-09-26 track set
 
