@@ -543,7 +543,8 @@ Bugonia, Caught Stealing, Obsession and Send Help refreshed again at b168669. Cu
 `parametric` on 28 Years Later; `flatten` on Alto Knights, Ballad of Wallis Island, Black Bag,
 Bugonia, Caught Stealing, Obsession and Send Help; Dossier 137 abstains (`no_usable_plateau`,
 see Progress). The next refresh is due when a change is accepted that
-moves targets.
+moves targets. **The Incredible Hulk** (5.1, 112 min, fairly full bandwidth) joined the set as a
+tenth title at 0431bbc, the source for the injection experiments.
 
 **Dossier 137 should not have been declined.** *(Superseded — see "Dossier 137 — decided" in
 Progress: abstaining is right; the original reason was wrong.)* Every main channel is steeply rolled off (L 48.5
