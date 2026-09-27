@@ -341,6 +341,30 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   (1.08×) and Bugonia (1.09×) clear the line by under 10%. They are the two most marginal real
   corrections, and a change that tips them to abstain would be the rule working, not a
   regression — but look.
+* **A1 — done: no tolerance moves.** `tools/experiments/a1_sweep.py` collects every candidate
+  once (the corpus with the texture blocker off, plus the nine real titles from their records;
+  95 candidates, about 25 minutes). It then re-assesses them under each tolerance at multiples
+  of its default, with selection re-run, in seconds. It reports two views: as shipped, and
+  acceptance alone. The default reproduces the baseline exactly (as shipped: 0/45 gated, 4/9
+  natural droop, 7/9 positives at 1.26 dB RMS; acceptance alone: 4/45).
+
+  | Tolerance | Effect of moving it | Decision |
+  | --- | --- | --- |
+  | level 3 dB | ×0.5 loses a positive and changes Bugonia's winner; ×2 or off admits a 5th natural droop | keep; the default sits on the safe side |
+  | tilt 2 dB/oct | nothing changes from ×0.5 to off, except droop 4 → 3 at ×0.5 | keep; inert today, a stated preference |
+  | spread margin 2 dB | tighter loses a positive; looser changes nothing | keep |
+  | cliff 2 dB/oct | ×1.5 or more: positives 7/9 → 9/9, no new false acceptances, no real title changes | **keep** — the two it would admit are 11.9 and 13.9 dB RMS from the true inverse (median 1.2): every candidate on both *steepens* the input's worst cliff (29 → 31-40 dB/oct at 5-10 Hz). The clause is doing its job |
+  | section contribution 1 dB | 0-1 identical; 1.5-2 declines Black Bag, loses positives, changes Ballad's winner | keep |
+  | minimum judged octaves 1 | 0-1 identical; 1.5 declines 28 Years Later and Black Bag | keep |
+
+  Acceptance alone never takes false acceptances below 4/45 without losing positives. It is the
+  texture blocker, not these tolerances, that separates unfiltered material. Not swept: the
+  extent clause's 1.2× (hard-coded in `assess`), the overshoot slack (tied to level plus
+  roughness), and the goal dials (they shape targets, so a sweep would need refits).
+  **New finding (for a later item):** the two injected LR4 filters near 22 Hz fail because
+  every strategy's cascade relocates the cliff to 5-10 Hz. Their priced targets likely end in
+  a steep edge where the evidence stops licensing boost, and the fitter reproduces it. That is
+  a target-shape problem, not a tolerance one.
 
 ## Baseline: 2026-09-26 track set
 
