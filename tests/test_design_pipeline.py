@@ -432,3 +432,16 @@ def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> N
     assert np.all(rise[well_below] >= flat[well_below] + 3.0)
     assert np.all(rolloff[well_below] <= flat[well_below])
     assert np.array_equal(asked(0.0), flat)
+
+
+def test_a_low_end_within_the_goal_tolerance_is_left_alone(walled) -> None:
+    """The tolerance dial replaced an unstated 1 dB minimum, and says why it abstained."""
+    import dataclasses
+
+    from beqforge.designer import _decline_for_blockers
+
+    lenient = dataclasses.replace(PipelineParams().accept, goal_tolerance_db=100.0)
+    report = run(walled, PipelineParams(strategies=("flatten",), accept=lenient))
+    assert report.accepted is None and not report.candidates
+    assert report.blockers and "nothing worth correcting" in report.blockers[0]
+    assert _decline_for_blockers(report.blockers)[0] == "within_goal_tolerance"

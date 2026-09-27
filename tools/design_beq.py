@@ -291,6 +291,13 @@ def main() -> int:
         help="assumed sub output gain; full scale is 1",
     )
     parser.add_argument(
+        "--goal-tolerance",
+        type=float,
+        default=1.5,
+        metavar="DB",
+        help="how far from the goal a low end may sit and need no correction (default 1.5)",
+    )
+    parser.add_argument(
         "--goal-tilt",
         type=float,
         default=0.0,
@@ -409,7 +416,10 @@ def main() -> int:
         playback=playback,
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
-        accept=AcceptParams(target_tilt_db_per_octave=args.goal_tilt),
+        accept=AcceptParams(
+            target_tilt_db_per_octave=args.goal_tilt,
+            goal_tolerance_db=args.goal_tolerance,
+        ),
     )
     material = load(args.material)
     if params.realisation.fs < material.fs:

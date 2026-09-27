@@ -316,6 +316,17 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   reference over 13-25 Hz, held flat below the 25 Hz tracking floor, 98% recovered. This
   reframes E2: on a flat goal, a 2-4 dB dip *is* a departure from the preference, so filling it
   is the dial working. What counts as worth correcting is the tolerance dial, next.
+* **Goal tolerance — a preference dial (1.5 dB), replacing an unstated 1 dB minimum.**
+  `AcceptParams.goal_tolerance_db` (CLI `--goal-tolerance`): no strategy proposes a correction
+  whose priced target never exceeds it, and a run where none do abstains with a stated
+  reason, `within_goal_tolerance`. Probe: one target gone, Ballad of Wallis Island's failing
+  `counterfactual/25dB` (1.02 dB); its full run keeps the same winner. Corpus unchanged at
+  4/45, positives unchanged. Frozen protocol identical on both seeds. **On E2's remaining
+  false acceptances:** at the default flat goal and 1.5 dB tolerance, broadband's 2.4-3.7 dB
+  dips depart from the goal by more than the tolerance, so correcting them is the preference
+  as set, not an error. A user who wants them left alone sets `--goal-tolerance 4`. The
+  corpus's gate treats any intervention on a negative as false, which is stricter than the
+  dials now say; whether to rescore negatives against the goal is open.
 
 ## Baseline: 2026-09-26 track set
 

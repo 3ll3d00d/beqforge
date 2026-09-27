@@ -117,6 +117,7 @@ _BLOCKER_CODES: tuple[tuple[str, str], ...] = (
     ("no bins support a positive correction", "insufficient_coherent_bandwidth"),
     ("exclusions fragment the judged band", "exclusions_fragment_band"),
     ("playback verification unavailable", "playback_verification_unavailable"),
+    ("nothing worth correcting", "within_goal_tolerance"),
 )
 
 

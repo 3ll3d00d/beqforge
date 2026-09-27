@@ -78,6 +78,15 @@ class AcceptParams:
     same filters the earlier, cruder window did. Also the tolerance the turnover clause compares against, which
     is why it is one number rather than two."""
 
+    goal_tolerance_db: float = 1.5
+    """How far from the goal a low end may sit and still need nothing. **A preference dial.**
+
+    No strategy proposes a correction whose evidence-priced target never exceeds this: the
+    low end is already within tolerance of the goal (`target_tilt_db_per_octave`), or the
+    evidence licenses no more than that. It replaced an unstated 1 dB minimum in `flatten` and
+    `counterfactual`. 1.5 dB is a stated preference, not a calibrated value. CLI:
+    `--goal-tolerance`."""
+
     level_tolerance_db: float = 3.0
     """How far the corrected mean may sit from the requested shape's own mean.
 

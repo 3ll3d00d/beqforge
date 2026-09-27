@@ -354,6 +354,19 @@ floor (at least `verify_band_hz[0]`) to the same deficit anchor `flatten` uses.
   `AcceptParams.target_tilt_db_per_octave` is positive for a low end *rising* toward the
   bottom, the opposite sign convention to `Correction.tilt_db_per_octave`. `assess` negates
   once, at the comparison. Do not add a second negation somewhere else.
+* **The goal below the knee is a preference, and there are two dials for it**, both on
+  `AcceptParams` and both on the CLI (`--goal-tilt`, `--goal-tolerance`):
+  * `target_tilt_db_per_octave` shapes the goal (0 flat by default; positive a rise, negative a
+    gentle rolloff). It *generates*: every strategy's target is measured against it
+    (`low_end_deficit_db` via `verify.house_curve_db`), and acceptance judges and ranks against
+    the same curve pivoting at the same point, the top of the judged band. `intent_db` must not
+    add it a second time.
+  * `goal_tolerance_db` (1.5 dB) is how far from the goal a low end may sit and need nothing.
+    A strategy whose priced target never exceeds it proposes nothing, and a run where none do
+    abstains with `within_goal_tolerance`.
+
+  A corpus negative that departs from the goal by more than the tolerance is corrected *by
+  design*, so read the negative corpus's small fills in that light (IMPROVEMENT_PLAN E2).
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by
   writing another one-off script. The point of the driver is that two titles become comparable;
   twenty scratchpad scripts are how the design was first worked out and none of them survived.

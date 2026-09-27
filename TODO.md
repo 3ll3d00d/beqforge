@@ -114,9 +114,10 @@ Items 1 (derive `restore_caps_db` from `filter_floor_hz`) and 2 (replace
 
 ### Backlog — real, but nothing on hand is asking for it yet
 
-7. **A fraction dial, and a house curve reaching target construction.** The still-unbuilt half
-   of the partial-correction work (steps 1–5 are built — see AGENTS.md). No title tried has
-   asked for anything but flat, so there's nothing to size this against yet.
+7. **A fraction dial.** The house-curve half is built: the goal below the knee
+   (`--goal-tilt`, `--goal-tolerance`) now generates targets — see AGENTS.md. Still open: a
+   dial for *how much* of the licensed deficit to restore. No title tried has asked for it,
+   so there's nothing to size it against yet.
 8. **Catalogue comparison / disagreement detector.** Not started. Hypothesis to test first:
    38% of authored corrections demand ≥24 dB/octave, a single low shelf can't sustain that
    below its knee, and 92% of authored responses *are* a single low shelf — so a meaningful

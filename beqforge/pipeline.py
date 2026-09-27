@@ -613,6 +613,11 @@ def low_end_deficit_db(
     return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
+def _worth_correcting(target: np.ndarray, params: "PipelineParams") -> bool:
+    """Whether an evidence-priced target asks for more than the goal tolerance anywhere."""
+    return float(np.max(target)) > params.accept.goal_tolerance_db
+
+
 def _held_below_floor(
     target: np.ndarray, floor_hz: float
 ) -> tuple[np.ndarray, list[str]]:
@@ -713,7 +718,7 @@ def flatten_targets(
     if unpriced is None:
         return []
     target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, unpriced)
-    if target.max() < 1.0:
+    if not _worth_correcting(target, params):
         return []
     return [
         Proposal(
@@ -745,8 +750,11 @@ def counterfactual_targets(
         target, capped = priced_by_evidence(
             unpriced, envelopes, diagnosis, params, deficit
         )
-        if target.max() < 1.0:
-            logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
+        if not _worth_correcting(target, params):
+            logger.info(
+                f"  cap {cap:.0f} dB: within {params.accept.goal_tolerance_db:g} dB of the "
+                "goal, nothing to correct"
+            )
             continue
         # Skip caps that produce the same priced target.
         for seen in proposals:
@@ -804,6 +812,9 @@ def parametric_targets(
     )
     if not result.filters:
         logger.info(f"  parametric declined: {result.decline_reason}")
+        return []
+    if result.target_db is not None and not _worth_correcting(result.target_db, params):
+        logger.info("  parametric: within the goal tolerance, nothing to correct")
         return []
     return [
         Proposal(
@@ -1329,6 +1340,26 @@ def run(
             blockers=analysed.blockers,
         )
     proposals = propose(material, analysed, cache_path, fresh, timings)
+    if not proposals:
+        # the reason to abstain, said as one: no strategy found anything worth correcting
+        within = (
+            "nothing worth correcting: no strategy's evidence-priced target departs from the "
+            f"goal by more than {params.accept.goal_tolerance_db:g} dB"
+        )
+        return Report(
+            material,
+            diagnosis,
+            identification,
+            [],
+            timings,
+            FIT_STATS,
+            accept=params.accept,
+            evidence_notes=(*analysed.limitations, within),
+            mix_reference_db=analysed.mix_reference_db,
+            mix_plateau_hz=analysed.mix_plateau_hz,
+            judged_band_hz=analysed.judged_band_hz,
+            blockers=(within,),
+        )
 
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
