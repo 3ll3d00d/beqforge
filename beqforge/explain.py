@@ -175,6 +175,42 @@ def correction(candidate: Candidate, report: Report | None = None) -> str:
     return "; ".join(parts)
 
 
+def clipping(candidate: Candidate, from_request: bool) -> str:
+    """Whether the filtered sub feed clips, in one sentence a reviewer can act on.
+
+    The peak is measured on the bass-managed sub feed with the published filter applied over
+    the whole programme — where a BEQ actually runs — so a large boost on a spike can cost
+    nothing and a modest one on loud content can cost several dB. Reported, never used to
+    reject: clipping here is fixed by turning the sub channel down by the stated amount.
+    `from_request` says whether the bass management is the caller's own or the assumed
+    default, since the answer depends on it.
+    """
+    headroom = candidate.headroom
+    if headroom is None:
+        return "clipping: not measured"
+    if headroom.unavailable_reason is not None:
+        return f"clipping: not measured ({headroom.unavailable_reason})"
+    playback = headroom.playback
+    model = (
+        f"{'your' if from_request else 'the assumed'} bass management (LR4 crossover at "
+        f"{playback.crossover_hz:g} Hz, mains {playback.main_gain_db:+g} dB, LFE "
+        f"{playback.lfe_gain_db:+g} dB)"
+    )
+    peak = headroom.peak or 0.0
+    level = (
+        f"the filtered sub feed peaks at {20 * math.log10(peak):+.1f} dBFS"
+        f" ({peak:.0%} of full scale)"
+        if peak > 0
+        else "the filtered sub feed"
+    )
+    if headroom.offset_db >= 0:
+        return f"with {model}, {level} — it does not clip"
+    return (
+        f"with {model}, {level} — turn the sub channel down by "
+        f"{-headroom.offset_db:.1f} dB to avoid clipping"
+    )
+
+
 def alternatives(report: Report, chosen: Candidate | None) -> str:
     """One line per other candidate: rejected and why, or passed and why it was not chosen."""
     wanted = report.accept.target_tilt_db_per_octave

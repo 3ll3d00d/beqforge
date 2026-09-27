@@ -307,6 +307,7 @@ def design(
     account = {
         "found": explain.found(report),
         "correction": explain.correction(accepted, report),
+        "clipping": explain.clipping(accepted, from_request=report_gain_reduction),
         "alternatives": explain.alternatives(report, accepted),
     }
     candidate = dataclasses.replace(

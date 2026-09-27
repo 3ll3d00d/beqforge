@@ -399,6 +399,24 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   plain corrected rolloff "100% shaping". Probe `--tol 0`: nothing moved. The Obsession
   question above (a narrow band of level-dependent content ending the level-independence
   run) no longer touches anything a reviewer sees.
+* **Overshoot past the goal — checked, no change.** Every accepted filter pushes some point
+  past both its start and the goal band, by 0.4-5.3 dB: smooth shelves lift the narrow content
+  spikes that sit where they act (Bugonia's 8 Hz spike, +7 → +12 dB; Black Bag's 40-50 Hz
+  spikes). Those spikes are content, so restoring the low end lifts them too. The existing
+  overshoot check (a ceiling at the higher of start and goal, plus 3 dB and half the input's
+  roughness) sits 7-11 dB above every curve and trips on none. Swapping its allowance for the
+  title's own ripple would move that ceiling up on some titles and down on others and reject
+  nothing. Left as it is: it guards against gross errors, and what matters for spikes is
+  clipping.
+* **Clipping is now stated in the response.** Headroom was measured on every run but surfaced
+  only as one line buried in `verdict_notes`, and the typed `gain_reduction_db` field was always
+  `None`, because beqdesigner's worklist never sends `bass_management` (`pipeline/library/run.py`
+  `_design` omits it). The commentary now carries `clipping`: the sub-feed peak, and how far to
+  turn the sub down, saying whether the model is the request's or the assumed LR4 80 Hz. Black
+  Bag: "+1.3 dBFS — turn the sub channel down by 1.3 dB"; every other accepted title is under
+  full scale (Bugonia peaks at 42%). **Pending, in beqdesigner:** thread the batch's bass
+  management through `_design` into `design_if_needed`, so the typed field arrives on the
+  listener's own crossover. Waiting for that repo's local work to finish first.
 
 ## Baseline: 2026-09-26 track set
 

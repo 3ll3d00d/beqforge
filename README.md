@@ -129,6 +129,11 @@ diagnosis, in this order:
 * `correction` — the filter; how much of what the low end is missing the content supports
   lifting; and, frequency by frequency, what was wanted, what the content supports, and the
   low end against the reference before → after.
+* `clipping` — whether the filtered sub feed clips, and if so how far to turn the sub channel
+  down, measured over the whole programme on the bass-managed sub feed (yours if the request
+  carried `bass_management`, otherwise the assumed LR4 80 Hz model, and it says which).
+  Clipping is reported, never used to reject a filter. The typed `gain_reduction_db` field is
+  filled only when the request carries `bass_management`, as the contract requires.
 * `alternatives` — why each other candidate was rejected or not chosen.
 
 The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves

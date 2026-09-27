@@ -561,7 +561,7 @@ def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None
     commentary = design(_small_request()).candidates[0].commentary
     assert commentary["beqforge_revision"] == "abc123+src:def456"
     # the plain-language account leads, before the notes and parameters that qualify it
-    assert list(commentary)[:3] == ["found", "correction", "alternatives"]
+    assert list(commentary)[:4] == ["found", "correction", "clipping", "alternatives"]
     assert commentary["strategy"] == "flatten"  # added to, not replaced
     assert "run_record" not in commentary  # nothing asked for one
 
@@ -638,7 +638,9 @@ def test_the_judges_own_notes_reach_the_response() -> None:
     )
     candidate = _candidate()
     candidate.verdict.notes.append(shaping)
-    mapped = _to_design_candidate(candidate, PipelineParams(), report_gain_reduction=False)
+    mapped = _to_design_candidate(
+        candidate, PipelineParams(), report_gain_reduction=False
+    )
     assert shaping in mapped.commentary["verdict_notes"]
 
 
@@ -650,3 +652,30 @@ def test_the_response_says_the_fractions_in_words_not_bare_numbers(monkeypatch) 
     commentary = design(_small_request()).candidates[0].commentary
     assert "recovered_fraction" not in commentary
     assert "shaping_fraction" not in commentary
+
+
+def test_the_clipping_line_says_whether_to_turn_the_sub_down() -> None:
+    """Headroom is reported, never gated; the line has to say what to do and on what model."""
+    import dataclasses as dc
+
+    from beqforge import explain
+
+    clean = dc.replace(_headroom(0.0), peak=0.42)
+    clips = dc.replace(_headroom(-1.29), peak=1.16)
+    quiet = dc.replace(_candidate(), headroom=clean)
+    loud = dc.replace(_candidate(), headroom=clips)
+
+    text = explain.clipping(quiet, from_request=False)
+    assert "the assumed bass management (LR4 crossover at 80 Hz" in text
+    assert "42% of full scale" in text and "does not clip" in text
+
+    text = explain.clipping(loud, from_request=True)
+    assert text.startswith("with your bass management")
+    assert "turn the sub channel down by 1.3 dB to avoid clipping" in text
+
+    unmeasured = dc.replace(
+        _candidate(), headroom=_headroom(0.0, "no channel decomposition")
+    )
+    assert explain.clipping(unmeasured, from_request=False) == (
+        "clipping: not measured (no channel decomposition)"
+    )
