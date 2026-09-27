@@ -69,6 +69,8 @@ when abstaining was the correct output — neither is an error. Key flags:
 | --- | --- |
 | `--strategy NAME` (repeatable) | run only the named strategies (`flatten`, `counterfactual`, `parametric`); default `all` |
 | `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual, see TODO.md |
+| `--goal-tilt DB_PER_OCT` | the low end you want below the knee: `0` flat (default), positive a rise toward the bottom, negative a gentle rolloff. Every target is built toward it, and results are judged and ranked against it |
+| `--goal-tolerance DB` | how far from that goal the low end may already sit and be left alone (default `1.5`); a title with nothing beyond it declines with `within_goal_tolerance` |
 | `--charts DIR` | write peak/average charts per candidate into `DIR/<name>/` |
 | `--record PATH` / `--no-record` | where to write the run record (default: `<material>.run.json.gz` alongside it), or skip writing one |
 | `--cache PATH` / `--fresh` / `--no-cache` | the stage cache: where to keep it (default: `<material>.cache.json.gz`), force a recompute and overwrite it, or use neither |
@@ -111,9 +113,28 @@ from pipeline.designer.http_binding import http_designer
 register_designer('beqforge.v1', http_designer('http://host:8420/design'))
 ```
 
-Device realisation, which strategies run and authored exclusions are server-wide flags (see
-`--help`); everything per-title — the audio itself, its coverage, an optional per-channel
-decomposition and bass-management model — arrives in the request. `beqforge/designer.py` is the
+Device realisation, which strategies run, authored exclusions and the goal (`--goal-tilt`,
+`--goal-tolerance`, as for `design`) are server-wide flags (see `--help`); everything
+per-title — the audio itself, its coverage, an optional per-channel decomposition and
+bass-management model — arrives in the request. `--record-dir DIR` also writes each request's
+full run record into `DIR` (`designer-<digest>.run.json.gz`, named by a digest of the request's
+audio), which `beqforge replay` can redraw and export.
+
+**What a response says.** An accepted candidate's `commentary` opens with a plain-language
+diagnosis, in this order:
+
+* `found` — the reference plateau and its level; which channels carry it, and which are
+  absent or digital silence; how far down the programme tracks it; where the attenuation
+  stops being level-invariant; which channels show a steep knee; the judged band; the goal.
+* `correction` — how much boost the deficit asked for against how much the evidence allowed,
+  the filter, and the low end against the reference, before → after.
+* `alternatives` — why each other candidate was rejected or not chosen.
+
+The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves
+noticed, such as how much of the correction sits below the level-invariance floor),
+`recovered_fraction`, `shaping_fraction`, `effective_params` and `beqforge_revision` (which
+build answered). A decline's `decline_message` gives the reason first, then `| found: …` with
+the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.
 
@@ -171,9 +192,16 @@ almost nothing. A filter that matches its target perfectly still fails if the ta
 was wrong — which is why the check is made on the corrected result, not on the match.
 
 **6. Pick one, or none.** Of the candidates that pass, the tool prefers the one closest to
-the requested shape (flat unless you ask for a tilt), and where two are effectively tied, the
-one with fewer sections. If nothing passes, it says so and gives the reasons; that is a valid
-answer, not a failure.
+the goal, and where two are effectively tied, the one with fewer sections. If nothing passes,
+it says so and gives the reasons; that is a valid answer, not a failure.
+
+**The goal is yours to set.** "Put the missing bass back" needs a definition of how the low
+end *should* look, and that is a preference, not something the audio can say. By default the
+goal is flat below the knee, and a low end already within 1.5 dB of it is left alone. The goal
+can instead rise toward the bottom or roll off gently (`--goal-tilt`), and the tolerance can be
+widened or narrowed (`--goal-tolerance`). Steps 1-3 build toward the goal you set, and steps
+5-6 judge and rank against it, so changing it changes what is proposed, not just what is
+kept.
 
 Two things are reported alongside the answer rather than folded into a score: how much of the
 sag the filter actually recovers (it is often only part), and how much headroom the boosted
