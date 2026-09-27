@@ -417,6 +417,33 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   full scale (Bugonia peaks at 42%). **Pending, in beqdesigner:** thread the batch's bass
   management through `_design` into `design_if_needed`, so the typed field arrives on the
   listener's own crossover. Waiting for that repo's local work to finish first.
+* **The two LR4 positives that abstain — diagnosed; fix tried and reverted.** filtered/4 and
+  /5 (LR4 near 22 Hz) fail because the contrast ceiling pins the target near the bottom
+  (+33 dB at 8.5 Hz, +16 at 5 Hz). The priced target peaks mid-band and *falls* toward the
+  bottom, so the corrected curve drops faster than the input and the cliff check rejects it.
+  Every cliff failure in the corpus has a target falling ≥4.8 dB toward the bottom; every
+  real-title winner falls ≤2 dB. You chose "content first" — lift each frequency as far as
+  its content supports and accept the steep edge where it runs out — over capping the target
+  at the bottom's level. Two implementations were tried and **both reverted**:
+  1. Exempt the cliff check below a per-candidate "content edge" (where the target is pinned
+     at the ceiling). Corpus positives stayed at 7/9 (flatten then fails wobble and extent).
+     On the held-out protocol seed, steep_leakage was accepted and natural_bass_light falsely
+     accepted.
+  2. Start the judged band at a title-level content edge, the contrast counterpart of the
+     tracking floor. Corpus positives 7/9 → 8/9 (filtered/5 via parametric), gated false
+     acceptances still 0/45, natural droop 4 → 6/9, real titles exactly unchanged. But the
+     frozen protocol falsely accepted natural_bass_light on **both** seeds and accepted
+     steep_leakage on both — a case that must abstain.
+
+  **Why:** content running out and stopband leakage from a very steep filter look the same
+  to this evidence. Both pin the target at the ceiling with a steep fall below, and the cliff
+  check judged over the full band is what keeps leakage out. (B) needs a way to tell them
+  apart before it is safe. **Also found:** with the edge exempted, flatten still fails on fit
+  quality — four sections cannot follow a steep, evidence-limited LR4 inverse (13.5 dB wobble
+  against 5.6) — while `parametric` fits it. **Latent bug, not yet fixed:** the extent check
+  uses the tracking floor as where content ends, so with a floor below the band's 5 Hz edge
+  (4.0-4.2 Hz on three natural-droop cases) no extent can ever pass; `max(floor, band low)`
+  fixes it, as its own measured change.
 
 ## Baseline: 2026-09-26 track set
 
