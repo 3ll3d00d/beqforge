@@ -465,6 +465,33 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   observationally a filter) becomes a false acceptance on both seeds: parametric had been
   failing it only on wobble, by 0.1-0.7 dB, over the over-wide band. Patch saved;
   accept-with-record or reject is the user's call.
+* **Item 1 (content edge vs steep leakage) — first real-texture evidence, from injection.**
+  An unfiltered original of a real title is almost never available, so ground truth comes
+  from differential injection instead: `tools/experiments/inject_variants.py` applies known
+  high-passes to every channel of a real title (the mix rebuilt with the extraction's gains).
+  The title before injection is the reference, so its own state cancels. The Incredible Hulk
+  (5.1, 112 min, fairly full bandwidth; accepted itself with `flatten` +5.6 dB). Each variant
+  against the original's own corrected result:
+
+  | Injected | Outcome | Restoration |
+  | --- | --- | --- |
+  | BW2 @ 25 Hz | counterfactual +31 dB | within ~1 dB from 8 Hz up |
+  | LR4 @ 20 | flatten +44 dB | matches from 8 Hz up; −4 dB at 5 Hz where content runs out |
+  | LR4 @ 25 | flatten +45 dB | within ~1.5 dB from 8 Hz up; −12 dB at 5 Hz |
+  | LR4 @ 30 | flatten +45 dB | within ~2 dB from 10 Hz up |
+  | LR4 @ 35 | counterfactual +44.5 dB | within ~2 dB from 13 Hz up; −24 dB at 5 Hz |
+  | BW8 @ 30 | declined (flatten: wobble — 4 sections cannot follow an 8th-order inverse) | — |
+  | BW12 @ 32 | declined (flatten: tilt) — the leakage regime, abstaining as the protocol requires | — |
+
+  None of the accepted filters clips: sub-feed peaks 0.44-0.86 of full scale, against the
+  original's 0.60. A large boost restoring removed content costs little headroom. **Reading:**
+  on real programme, "content first" already happens for moderate filters. Every LR4 is
+  restored down to where the content supports it, with the steep edge below, and the cliff
+  check does not object. The corpus's two LR4 failures look like an artefact of synthetic
+  material, whose ceiling falls off near the bottom in a way this real title's does not. What
+  remains open is steep filters (8th order and up): lift partway to where content allows, or
+  abstain. That is a fitting limit plus a policy call. **Next:** repeat on two or three more
+  real titles (a sparse one such as Black Bag, and Send Help) before closing item 1 on one.
 
 ## Baseline: 2026-09-26 track set
 
