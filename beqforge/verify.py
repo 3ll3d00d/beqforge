@@ -131,6 +131,22 @@ def waveform_peak(samples: np.ndarray) -> float:
     return peak
 
 
+def house_curve_db(
+    freqs: np.ndarray, pivot_hz: float, tilt_db_per_octave: float
+) -> np.ndarray:
+    """The goal below the knee, in dB re the plateau: 0 at and above `pivot_hz`, then sloping.
+
+    **Positive tilt rises toward the bottom** (the audio convention of
+    `AcceptParams.target_tilt_db_per_octave`); negative is a gentle rolloff; zero is flat and
+    identically zero. One definition for both halves: the target a strategy builds
+    (`pipeline.low_end_deficit_db`) and the shape a result is judged and ranked against
+    (`Correction.requested_db`), pivoting at the same point — the top of the judged band.
+    """
+    freqs = np.asarray(freqs, dtype=float)
+    rise = tilt_db_per_octave * np.log2(pivot_hz / np.maximum(freqs, 1e-9))
+    return np.where(freqs < pivot_hz, rise, 0.0)
+
+
 @dataclass(frozen=True, slots=True)
 class Correction:
     """What the low end looks like after the filter is applied."""
@@ -186,9 +202,7 @@ class Correction:
         Zero tilt gives a flat request, which is what every clause compared against before this
         existed, so `requested_db(0.0)` is identically zero and nothing changes.
         """
-        top = self.band_hz[1]
-        rise = target_tilt_db_per_octave * np.log2(top / np.maximum(self.freqs, 1e-9))
-        return np.where(self.freqs < top, rise, 0.0)
+        return house_curve_db(self.freqs, self.band_hz[1], target_tilt_db_per_octave)
 
     def requested_level_db(self, target_tilt_db_per_octave: float = 0.0) -> float:
         """Mean of the requested shape over the judged band — what `level_db` is compared to.
@@ -207,11 +221,10 @@ class Correction:
     ) -> np.ndarray:
         """What the correction was actually asked to achieve (AGENTS.md, "judged against intent").
 
-        `before_db + priced_target_db`, plus the house curve on top of it (inert while
-        nothing builds a house curve into a target — `target_tilt_db_per_octave` defaults to
-        0.0 and `priced_by_evidence` never adds one — but stated once here rather than left to
-        be got right twice when §14.4 wires it in). `priced_target_db` is on `DESIGN_GRID` and
-        is interpolated onto `self.freqs`.
+        `before_db + priced_target_db`. The house curve is *not* added on top: targets are built
+        against it (`pipeline.low_end_deficit_db`), so a priced target already carries whatever
+        of the goal the evidence licensed, and adding it again would ask for the goal twice.
+        `priced_target_db` is on `DESIGN_GRID` and is interpolated onto `self.freqs`.
 
         `priced_target_db is None` means no strategy built a target for this candidate.
         A caller-supplied cascade may have none; intent then falls back to the house curve
@@ -219,14 +232,9 @@ class Correction:
         wrong: zero added to `before_db` is not "no intent", it is "intent to leave the input
         exactly as it was", which is not what a candidate with no target is claiming.
         """
-        house = self.requested_db(target_tilt_db_per_octave)
         if priced_target_db is None:
-            return house
-        return (
-            self.before_db
-            + np.interp(self.freqs, DESIGN_GRID, priced_target_db)
-            + house
-        )
+            return self.requested_db(target_tilt_db_per_octave)
+        return self.before_db + np.interp(self.freqs, DESIGN_GRID, priced_target_db)
 
     def intent_level_db(
         self,

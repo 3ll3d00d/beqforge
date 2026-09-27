@@ -64,11 +64,12 @@ class AcceptParams:
     "flat is the shape; how far past flat to go is the preference dial of §4.3". A non-zero
     default would change accepted answers on no evidence.
 
-    **Acceptance-only, today.** No strategy builds a house curve into its target, so asking for
-    a rise currently discards the flat candidates rather than producing rising ones: asking
-    for +1 dB/octave already loses some flat candidates, and +2 loses more. Making this generate
-    rather than filter means adding the requested rise to `flatten`/`counterfactual`'s targets,
-    and it costs headroom at the bottom — roughly 6 dB for +2 dB/octave."""
+    **A preference dial, and it generates.** Every strategy's target is measured against this
+    goal (`pipeline.low_end_deficit_db`, through `verify.house_curve_db`), pivoting at the top
+    of the judged band — the same point acceptance anchors `Correction.requested_db` at, so the
+    shape asked for and the shape judged cannot disagree. `flatten` builds the goal; the others
+    restore towards it and are capped by it. A rise costs headroom at the bottom — roughly
+    6 dB for +2 dB/octave. CLI: `--goal-tilt`."""
 
     tilt_tolerance_db_per_octave: float = 2.0
     """How far the corrected tilt may sit from `target_tilt_db_per_octave`.
@@ -423,10 +424,13 @@ def recovered_fraction(
     priced_target_db: np.ndarray | None,
     correction: Correction,
     floor_db: float = 1.0,
+    target_tilt_db_per_octave: float = 0.0,
 ) -> float:
     """Priced target over measured deficit, deficit-weighted over the judged band (§14.1).
 
-    The deficit is `max(-before_db, 0)` on `correction`'s own frequency axis; the target is
+    The deficit is `max(requested - before_db, 0)` on `correction`'s own frequency axis, where
+    `requested` is the goal below the knee (`Correction.requested_db`, flat by default) — the
+    same goal the target was built against, or a rise reads as over 100% recovered; the target is
     `priced_target_db` (on `DESIGN_GRID`) interpolated onto that axis. A ratio of sums rather
     than a mean of per-bin ratios, deliberately: a bin with a fraction-of-a-dB deficit would
     otherwise contribute a wildly noisy ratio and could dominate a mean built from bins that
@@ -441,7 +445,8 @@ def recovered_fraction(
     band = (correction.freqs >= correction.band_hz[0]) & (
         correction.freqs <= correction.band_hz[1]
     )
-    deficit = np.maximum(-correction.before_db[band], 0.0)
+    requested = correction.requested_db(target_tilt_db_per_octave)[band]
+    deficit = np.maximum(requested - correction.before_db[band], 0.0)
     target = np.interp(correction.freqs[band], DESIGN_GRID, priced_target_db)
     counted = deficit >= floor_db
     if not counted.any():
@@ -733,6 +738,10 @@ def assess(
         turnover_after=turnover,
         roughness_db=roughness,
         wobble_db=wobble,
-        recovered_fraction=recovered_fraction(target_db, correction),
+        recovered_fraction=recovered_fraction(
+            target_db,
+            correction,
+            target_tilt_db_per_octave=params.target_tilt_db_per_octave,
+        ),
         shaping_fraction=shaping_frac,
     )

@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqforge.material import load  # noqa: E402
+from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import (  # noqa: E402
     STRATEGIES,
@@ -290,6 +291,16 @@ def main() -> int:
         help="assumed sub output gain; full scale is 1",
     )
     parser.add_argument(
+        "--goal-tilt",
+        type=float,
+        default=0.0,
+        metavar="DB_PER_OCT",
+        help=(
+            "the low end asked for below the knee: 0 flat (default), positive a rise toward "
+            "the bottom, negative a gentle rolloff"
+        ),
+    )
+    parser.add_argument(
         "--sub-lowpass",
         default="crossover",
         metavar="HZ|off|crossover",
@@ -398,6 +409,7 @@ def main() -> int:
         playback=playback,
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
+        accept=AcceptParams(target_tilt_db_per_octave=args.goal_tilt),
     )
     material = load(args.material)
     if params.realisation.fs < material.fs:

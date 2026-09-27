@@ -408,3 +408,27 @@ def test_a_reference_above_the_sub_band_is_no_reference(walled) -> None:
     assert not any(
         "in the band the sub plays" in b for b in analyse(walled, params).blockers
     )
+
+
+def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> None:
+    """The preference dial generates: a rise asks for more below the knee, a rolloff less.
+
+    It used to be acceptance-only — asking for a rise discarded flat candidates rather than
+    producing rising ones.
+    """
+    import dataclasses
+
+    from beqforge.pipeline import _flat_deficit, _judged_top_hz, low_end_deficit_db
+
+    def asked(tilt: float) -> np.ndarray:
+        accept = dataclasses.replace(
+            PipelineParams().accept, target_tilt_db_per_octave=tilt
+        )
+        return low_end_deficit_db(walled, PipelineParams(accept=accept))
+
+    flat, rise, rolloff = asked(0.0), asked(2.0), asked(-2.0)
+    pivot = _judged_top_hz(_flat_deficit(walled, PipelineParams())[-1], PipelineParams())
+    well_below = DESIGN_GRID < pivot / 4  # two octaves under the pivot: +/-4 dB of goal
+    assert np.all(rise[well_below] >= flat[well_below] + 3.0)
+    assert np.all(rolloff[well_below] <= flat[well_below])
+    assert np.array_equal(asked(0.0), flat)

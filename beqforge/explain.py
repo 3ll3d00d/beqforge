@@ -75,7 +75,22 @@ def found(report: Report) -> str:
     if report.judged_band_hz is not None:
         a, b = report.judged_band_hz
         parts.append(f"results are judged over {a:.1f}-{b:.1f} Hz")
+    parts.append(goal(report))
     return "; ".join(parts)
+
+
+def goal(report: Report) -> str:
+    """The preference the deficit was measured against — without it "asks for X dB" is unread."""
+    tilt = report.accept.target_tilt_db_per_octave
+    pivot = (
+        ""
+        if report.judged_band_hz is None
+        else f" below {report.judged_band_hz[1]:.1f} Hz"
+    )
+    if tilt == 0:
+        return f"goal: flat{pivot}"
+    shape = "rising" if tilt > 0 else "rolling off"
+    return f"goal: {shape} at {abs(tilt):g} dB/octave toward the bottom{pivot}"
 
 
 SILENCE_MENTION = 0.1

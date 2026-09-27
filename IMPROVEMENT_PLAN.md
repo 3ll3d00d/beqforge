@@ -304,6 +304,18 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   * **Consequence worth knowing:** under a shared cap, `parametric` and `counterfactual` can
     only differ from `flatten` by asking for less. Records refreshed for the four titles;
     `negative_corpus.json` is the new corpus baseline.
+* **Goal below the knee — a preference dial, now generative (TODO 7's house-curve half).**
+  `AcceptParams.target_tilt_db_per_octave` (CLI `--goal-tilt`; 0 flat by default, positive a
+  rise toward the bottom, negative a gentle rolloff) used to be acceptance-only: asking for a
+  rise discarded flat candidates. Now every strategy's target is measured against the goal
+  (`low_end_deficit_db` via `verify.house_curve_db`), pivoting at the top of the judged band —
+  the same point acceptance anchors `requested_db` at. `intent_db` no longer adds the house
+  curve on top of a target that already carries it, and `recovered_fraction` measures the
+  deficit against the goal. Exact at the default (probe `--tol 0` unchanged). Black Bag at
+  +2 dB/octave: `flatten` accepted at +11.9 dB against +9.0 flat, low end 2-4 dB above the
+  reference over 13-25 Hz, held flat below the 25 Hz tracking floor, 98% recovered. This
+  reframes E2: on a flat goal, a 2-4 dB dip *is* a departure from the preference, so filling it
+  is the dial working. What counts as worth correcting is the tolerance dial, next.
 
 ## Baseline: 2026-09-26 track set
 

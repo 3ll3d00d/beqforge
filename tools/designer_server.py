@@ -36,6 +36,7 @@ from beqforge.designer import (  # noqa: E402
     validate_response,
 )
 from beqforge import record  # noqa: E402
+from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -132,6 +133,16 @@ def main() -> int:
         help="authored feature to drop, in Hz; repeatable",
     )
     parser.add_argument(
+        "--goal-tilt",
+        type=float,
+        default=0.0,
+        metavar="DB_PER_OCT",
+        help=(
+            "the low end asked for below the knee: 0 flat (default), positive a rise toward "
+            "the bottom, negative a gentle rolloff"
+        ),
+    )
+    parser.add_argument(
         "--strategy",
         action="append",
         metavar="NAME",
@@ -181,6 +192,7 @@ def main() -> int:
         ),
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
+        accept=AcceptParams(target_tilt_db_per_octave=args.goal_tilt),
     )
 
     _Handler.params = params

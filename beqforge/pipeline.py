@@ -77,7 +77,13 @@ from beqforge.material import (
     PlaybackParams,
     bass_managed_sum,
 )
-from beqforge.verify import Correction, device_waveform, verify, waveform_peak
+from beqforge.verify import (
+    Correction,
+    device_waveform,
+    house_curve_db,
+    verify,
+    waveform_peak,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -545,20 +551,11 @@ def correction_evidence_score(target: np.ndarray, envelopes, z: float) -> float:
     return float(np.sum(weight * on_grid) / weight.sum())
 
 
-def low_end_deficit_db(
-    material: Material, params: "PipelineParams"
-) -> np.ndarray | None:
-    """What the mix's low end is missing: the most any strategy may ask a filter to restore.
+def _flat_deficit(material: Material, params: "PipelineParams"):
+    """The mix against its own plateau: spectrum, reference, smoothed deficit and its anchor.
 
-    The mix's smoothed deficit against its own plateau, on `DESIGN_GRID`, kept from the bottom
-    up to the first settled end of that deficit (`_deficit_anchor`) and tapered off above it.
-    A shortfall *above* that point is not a missing low end. It is the passband's own shape —
-    a bass-heavy source whose plateau sits at the bottom of the band reads everything above
-    it as "deficit" — and a strategy allowed to fill it reshapes the passband. It did: a
-    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (IMPROVEMENT_PLAN E2).
-
-    This is `flatten`'s unpriced target; every strategy's target is capped by it in
-    `priced_by_evidence`. `None` when the mix has no usable plateau.
+    Shared by the target (`low_end_deficit_db`) and the judged band (`judged_band_hz`) so
+    both find the knee in the same place. `None` when the mix has no usable plateau.
     """
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
     level, plateau_hz = plateau_reference(
@@ -571,6 +568,48 @@ def low_end_deficit_db(
     )
     on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
+    return freqs, response, level, plateau_hz, on_grid, anchor
+
+
+def _judged_top_hz(anchor_hz: float, params: "PipelineParams") -> float:
+    """Upper edge of the judged band — and the pivot of the goal below the knee."""
+    return min(max(params.verify_band_hz[1], anchor_hz), float(DESIGN_GRID[-1]))
+
+
+def low_end_deficit_db(
+    material: Material, params: "PipelineParams"
+) -> np.ndarray | None:
+    """What the mix's low end is missing: the most any strategy may ask a filter to restore.
+
+    Measured against the **goal** below the knee: `verify.house_curve_db` at
+    `AcceptParams.target_tilt_db_per_octave`, pivoting at the top of the judged band. Flat by
+    default; a positive tilt asks for a rising low end, a negative one for a gentle rolloff.
+    The deficit is kept from the bottom up to its first settled end (`_deficit_anchor`) and
+    tapered off above it.
+
+    A shortfall *above* that point is not a missing low end. It is the passband's own shape —
+    a bass-heavy source whose plateau sits at the bottom of the band reads everything above
+    it as "deficit" — and a strategy allowed to fill it reshapes the passband. It did: a
+    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (IMPROVEMENT_PLAN E2).
+
+    This is `flatten`'s unpriced target; every strategy's target is capped by it in
+    `priced_by_evidence`. `None` when the mix has no usable plateau.
+    """
+    measured = _flat_deficit(material, params)
+    if measured is None:
+        return None
+    freqs, response, level, plateau_hz, on_grid, anchor = measured
+    tilt = params.accept.target_tilt_db_per_octave
+    if tilt != 0.0:
+        goal = house_curve_db(freqs, _judged_top_hz(anchor, params), tilt)
+        deficit = smooth_unexcluded(
+            np.maximum(level + goal - response, 0.0),
+            freqs,
+            params.exclude_bands_hz,
+            15,
+        )
+        on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+        anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
     return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
@@ -1408,25 +1447,14 @@ def judged_band_hz(
     first settled end of its plateau-relative deficit. A shared band keeps
     candidate shape measurements comparable.
     """
-    low, high = params.verify_band_hz
+    low = params.verify_band_hz[0]
     floor = diagnosis.noise_floor_hz
     if not math.isnan(floor):
         low = max(low, floor)
-    freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    level, plateau_hz = plateau_reference(
-        response, freqs, params.diagnose, params.exclude_bands_hz
-    )
-    if not math.isfinite(level):
+    measured = _flat_deficit(material, params)
+    if measured is None:
         raise ValueError("no usable contiguous mix plateau")
-    levelled = response - level
-    deficit = smooth_unexcluded(
-        np.maximum(-levelled, 0.0), freqs, params.exclude_bands_hz, 15
-    )
-    on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
-    return low, min(
-        max(high, _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)),
-        float(DESIGN_GRID[-1]),
-    )
+    return low, _judged_top_hz(measured[-1], params)
 
 
 def _judge(
