@@ -392,21 +392,52 @@ def test_a_reference_above_the_sub_band_is_no_reference(walled) -> None:
     silence. Measured against that plateau the whole sub band reads as a deficit, and the run
     declined only because the judged band collapsed to 0.12 octaves — the right answer for a
     wrong reason. The reason is that the band a BEQ acts on has nothing to restore towards.
+
+    What the sub band holds there is low-level material unrelated to the programme, so the
+    fixture carries some: a noiseless stopband tracks the programme perfectly, which is
+    leakage the tracking test cannot tell from content, and not what Dossier looks like.
     """
+    from scipy import signal
+
     from beqforge.pipeline import analyse
 
     samples = int(FS * 300.0)
+    unrelated = signal.sosfilt(
+        signal.butter(8, 80.0, btype="low", fs=FS, output="sos"),
+        scened_noise(31, samples),
+    )
     dialogue_led = material_from(
-        {"C": high_passed(scened_noise(23, samples), 120.0, order=8)}
+        {"C": high_passed(scened_noise(23, samples), 120.0, order=8) + 0.3 * unrelated}
     )
     params = PipelineParams(strategies=("flatten",))
     analysed = analyse(dialogue_led, params)
     assert analysed.mix_plateau_hz[0] >= 80.0, analysed.mix_plateau_hz
+    assert analysed.diagnosis.noise_floor_hz >= 80.0, analysed.diagnosis.noise_floor_hz
     assert any("in the band the sub plays" in b for b in analysed.blockers)
 
     assert not any(
         "in the band the sub plays" in b for b in analyse(walled, params).blockers
     )
+
+
+def test_a_reference_above_the_sub_band_still_restores_content_that_tracks() -> None:
+    """A filter can slope a bass passband away until the only flat region is above the sub.
+
+    Black Bag with LR4 @ 30 injected: its 50-83 Hz plateau became a slope, the only flat
+    region left started above 80 Hz, and the sub-band blocker declined — although the mix
+    still tracks the programme down to 9 Hz. That low end is content to restore.
+    """
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    sloped = material_from(
+        {"C": high_passed(scened_noise(23, samples), 120.0, order=2)}
+    )
+    analysed = analyse(sloped, PipelineParams(strategies=("flatten",)))
+    assert analysed.mix_plateau_hz[0] >= 80.0, analysed.mix_plateau_hz
+    # NaN: every band tracked, which must count as content, not as nothing tracking
+    assert not analysed.diagnosis.noise_floor_hz >= 80.0
+    assert not any("in the band the sub plays" in b for b in analysed.blockers)
 
 
 def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> None:

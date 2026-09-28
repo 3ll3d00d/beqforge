@@ -1278,17 +1278,23 @@ def analyse(
         # not a bass passband, so a deficit read against it is the shape of whatever carries
         # the mix up there — typically a dialogue-led mix with no authored bass, where the
         # centre carries the plateau and the LFE is empty — not a rolloff to restore.
+        # Only when nothing in the sub band tracks the programme, though: a filter can slope
+        # a real bass passband away until the only flat region left is above the sub band
+        # (Black Bag with LR4 @ 30 injected — plateau 50-83 Hz gone, content tracking to
+        # 9 Hz), and that low end is content to restore, not an absence of bass. NaN means
+        # every band tracked.
         sub_edge = min(
             corner
             for corner in (params.playback.crossover_hz, params.playback.bus_lowpass_hz)
             if corner is not None
         )
-        if region[0] >= sub_edge:
+        if region[0] >= sub_edge and diagnosis.noise_floor_hz >= sub_edge:
             blockers.append(
                 "no usable contiguous mix plateau in the band the sub plays: the mix's only "
                 f"flat region is {region[0]:.1f}-{region[1]:.1f} Hz, above the "
-                f"{sub_edge:g} Hz sub-feed low-pass, so there is no bass passband to restore "
-                "towards; restoration withheld"
+                f"{sub_edge:g} Hz sub-feed low-pass, and nothing below it tracks the "
+                f"programme (tracking stops at {diagnosis.noise_floor_hz:.1f} Hz), so there "
+                "is no bass passband to restore towards; restoration withheld"
             )
         texture = passband_ripple_db(material, params, diagnosis.noise_floor_hz)
         low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)

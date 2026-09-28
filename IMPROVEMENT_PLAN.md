@@ -513,8 +513,28 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   lies above 80 Hz and "no reference in the band the sub plays" declines, although content
   still tracks down to 25 Hz. A plateau above the sub band is not always "no bass passband";
   the rule needs a content condition (e.g. only when nothing below the plateau tracks the
-  programme). **Item 1 conclusion so far:** moderate filters are handled well wherever there
-  is content, on all three titles, with no rule change; only steep filters remain open.
+  programme); fixed, see below. **Item 1 conclusion so far:** moderate filters are handled
+  well wherever there is content, on all three titles, with no rule change; only steep
+  filters remain open.
+* **Sub-band blocker — fixed: it now needs an absence of content, not just a high plateau.**
+  It fires only when the mix plateau starts at or above the sub edge *and* the mix's tracking
+  floor (`diagnosis.noise_floor_hz`) is there too, so nothing inside the sub band tracks the
+  programme. NaN (every band tracked) counts as content. The two real cases separate
+  cleanly: Dossier 137 stops tracking at 143.3 Hz, the bottom of its plateau, and still
+  declines, now naming that floor; Black Bag + LR4 @ 30 (plateau 100.7-129.9 Hz) tracks to
+  9.2 Hz and is no longer blocked. The synthetic Dossier fixture had to change: noiseless, its
+  8th-order stopband tracked the programme to 10.6 Hz (the leakage case the evidence rules
+  warn about), so it now carries low-level material unrelated to the programme below 80 Hz,
+  as Dossier does; a new test covers a sloped passband above the sub edge that still tracks.
+  Probe at `--tol 0`: only Dossier's blocker text moves. Synthetic protocol, both seeds:
+  identical before and after. Negative corpus: identical to `negative_corpus.json` (gated
+  0/45, gate passes). **Real run, Black Bag + LR4 @ 30:** `flatten` accepted (low shelf
+  33.45 Hz +15.9 dB, peak 50.09 Hz +4.9 dB; judged 9.2-54.9 Hz). Against the original's own
+  corrected curve, each relative to its own reference: within ~1 dB at 25-50 Hz, 1.9 dB short
+  at 20 Hz, 7 dB at 16 Hz and more below, where the priced target licensed no boost. The same
+  pattern as the other LR4 variants. **Watch (T8):** the variant's tracking floor, 9.2 Hz
+  against a 100-130 Hz reference, is lower than the original's 25 Hz against 50-83 Hz. Tracking
+  still inherits the reference.
 
 ## Baseline: 2026-09-26 track set
 
