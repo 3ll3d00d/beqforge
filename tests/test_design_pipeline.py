@@ -440,6 +440,82 @@ def test_a_reference_above_the_sub_band_still_restores_content_that_tracks() -> 
     assert not any("in the band the sub plays" in b for b in analysed.blockers)
 
 
+@pytest.fixture(scope="module")
+def steep_into_noise():
+    """A 12th-order high-pass at 30 Hz, then a stationary floor 60 dB down — the shape of the
+    noise-floored steep injections (IMPROVEMENT_PLAN, steep filters)."""
+    samples = int(FS * 300.0)
+    programme = high_passed(scened_noise(23, samples), 30.0, order=12)
+    floor = 1e-3 * np.std(programme) * np.random.default_rng(5).standard_normal(
+        programme.size
+    )
+    return material_from({"L": programme + floor})
+
+
+def test_the_content_edge_is_opt_in(steep_into_noise) -> None:
+    """Off by default: the judged band is the tracking floor's, exactly as before.
+
+    On, it starts where contrast stops licensing the deficit — above the tracking floor on
+    a steep filter falling into a noise floor, and still below the filter's corner.
+    """
+    from beqforge.pipeline import analyse
+
+    default = analyse(steep_into_noise, PipelineParams(strategies=("flatten",)))
+    floor = default.diagnosis.noise_floor_hz
+    assert default.judged_band_hz[0] == pytest.approx(max(floor, 5.0))
+
+    opted = analyse(
+        steep_into_noise,
+        PipelineParams(strategies=("flatten",), judge_from_content_edge=True),
+    )
+    low, high = opted.judged_band_hz
+    assert floor < low < 30.0, (floor, low)
+    assert high >= low * 2.0 ** PipelineParams().accept.min_judge_octaves - 1e-9
+
+
+def test_the_content_edge_leaves_a_fully_licensed_band_alone(walled) -> None:
+    """Where contrast licenses the deficit all the way down, the band's own edge stands —
+    not the grid bin above it, which moved every real title's band by one bin."""
+    from beqforge.pipeline import analyse
+
+    default = analyse(walled, PipelineParams(strategies=("flatten",)))
+    opted = analyse(
+        walled, PipelineParams(strategies=("flatten",), judge_from_content_edge=True)
+    )
+    assert opted.judged_band_hz == default.judged_band_hz
+
+
+def test_below_the_judged_band_a_cascade_may_not_outboost_contrast() -> None:
+    """The guard that stands in for the shape clauses below the content edge.
+
+    Judged from the bottom of the design range: under it the ceiling reads zero only because
+    nothing was measured, and judging there rejected sound candidates on "boosts 0.2 Hz".
+    """
+    from types import SimpleNamespace
+
+    from beqforge.accept import Verdict
+    from beqforge.pipeline import _within_ceiling
+
+    params = PipelineParams()
+    freqs = np.geomspace(0.2, 100.0, 400)
+    before = np.zeros_like(freqs)
+    ceiling = np.where(DESIGN_GRID < 20.0, 2.0, 40.0)
+    passing = Verdict(True, [], [], 0.0, 0.0, 5.0, 0.0)
+
+    def judged(boost_below_edge: float):
+        after = np.where(freqs < 20.0, boost_below_edge, 10.0)
+        correction = SimpleNamespace(
+            freqs=freqs, before_db=before, after_db=after, band_hz=(20.0, 40.0)
+        )
+        return _within_ceiling(passing, correction, ceiling, params)
+
+    assert judged(2.0 + params.accept.level_tolerance_db - 0.1).passed
+    lifted = judged(12.0)
+    assert not lifted.passed
+    assert "lifting the quiet floor" in lifted.failures[-1]
+    assert float(lifted.failures[-1].split(" Hz")[0].split()[-1]) >= 5.0
+
+
 def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> None:
     """The preference dial generates: a rise asks for more below the knee, a rolloff less.
 

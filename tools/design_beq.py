@@ -322,6 +322,15 @@ def main() -> int:
         help="authored feature to drop, in Hz; repeatable",
     )
     parser.add_argument(
+        "--content-edge",
+        action="store_true",
+        help=(
+            "opt-in: judge from the content edge, not the tracking floor — recovers steep "
+            "filters partway down to where the programme meets the noise, but can lift that "
+            "noise where loud scenes stand clear of it (IMPROVEMENT_PLAN, steep filters)"
+        ),
+    )
+    parser.add_argument(
         "--strategy",
         action="append",
         metavar="NAME",
@@ -416,6 +425,7 @@ def main() -> int:
         playback=playback,
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
+        judge_from_content_edge=args.content_edge,
         accept=AcceptParams(
             target_tilt_db_per_octave=args.goal_tilt,
             goal_tolerance_db=args.goal_tolerance,

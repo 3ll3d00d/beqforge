@@ -28,28 +28,29 @@ likely to be tested):
 The one place to see what is done and what is open. **Update it in the same commit as the
 Progress entry** it summarises; the detail stays in "Progress" below. *Done*: changed and
 merged. *Checked*: the check ran and the decision was no change. *Open*: not started.
+*Parked*: not started, and waiting on the condition given.
 
 | ID | Status | Outcome, in one line (detail under "Progress") |
 | --- | --- | --- |
-| E1 | **open** | Not started. |
+| E1 | **open** | Not started. Priority 6 (insurance). |
 | E2 | done | Corpus built (`negative_corpus.json`). Gated false acceptances 7/45 → 4/45 (low-end cap) → 0/45 (texture blocker); the gate passes. |
 | E3 | done | Hold and deficit cap applied to every strategy; the ranking is unchanged. |
-| E4 | **open** | Not started (effect still a hypothesis). |
+| E4 | parked | Not started; hypothesis with nothing pointing to it. Unparks if priorities 2-3 find single-bin gaps. |
 | E5 | checked | Hold stays: it is the only thing carrying tracking into the target. |
 | E6 | done | Report half: judge's notes reach the response. Rate half: the corpus's `natural_droop`, reported not gated under the content principle. |
 | E7 | checked | Fixed extraction bands kept; the targets barely move. Revisit if the plateau rule changes. |
 | E8 | done | Digital silence excluded from both frame classes. |
 | T1 | done | `counterfactual` re-sums under the playback model. |
-| T2 | **open** | Not started. |
+| T2 | parked | Not started. Joins priority 3 if a cap size explains the weaker winners. |
 | T3 | done | Channels restored on their own texture, not a 14 dB/oct slope. |
 | T4 | checked | No plateau change. Dossier 137 decided: abstain via the sub-band blocker, which since 2026-09-28 fires only when nothing in the sub band tracks. |
 | T5 | checked | Folded into T4. |
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
-| T8 | checked | Chained tracking rejected. **Watch:** the floor still depends on the reference (see open list). |
-| F1 | **open** | Not started. |
-| F2 | **open** | Not started. |
-| F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is open. |
+| T8 | checked | Chained tracking rejected. The floor still depends on the reference: priority 4 checks how much. |
+| F1 | **open** | Not started. Priority 2: now blocks steep recovery (every 2-4 section fit over the drift limit on Hulk BW8 @ 30, −80 dB). |
+| F2 | **open** | Not started. Priority 5: needs a device-behaviour harness first. |
+| F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
 | A1 | done | No tolerance moves. |
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
@@ -58,26 +59,67 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
 and level-invariance floor fixed; goal tilt and goal tolerance dials; texture blocker; the
-sub-band blocker and its content condition; overshoot past the goal (checked, no change).
+sub-band blocker and its content condition; overshoot past the goal (checked, no change);
+noise-floored injection (`inject_variants.py --noise-db`) and its ground-truth scoring
+(`score_injected.py`); the steep-filter opt-in `--content-edge` (default off); the probe
+now judges exactly as `run` does (`snapshot --content-edge` for the opt-in).
 
-**Open questions and watches**, in rough order of weight:
+### Priority order
 
-1. **Steep filters (8th order and up).** Lift partway to where content allows, or abstain?
-   To this evidence, content running out looks the same as a steep filter's stopband leakage.
-   Two fixes were tried and reverted (the two LR4 positives entry). Moderate filters are
-   handled on all three injected real titles.
-2. **F3's second half:** does one more section rescue candidates that fail only on wobble or
-   tilt, when run on targets known to be sound?
-3. **Tracking inherits its reference (T8).** Black Bag + LR4 @ 30 tracks to 9.2 Hz against a
-   100-130 Hz reference, where the original tracks to 25 Hz against 50-83 Hz.
-4. **A sloping passband inside the sub band** is unhandled. Leave it until a title needs it.
-5. **Rescoring corpus negatives against the goal:** the gate counts any intervention as
-   false, which is stricter than the goal dials.
-6. **Watch:** Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%.
-7. **Parked:** a narrow band of level-dependent content ending the level-independence run
-   (Obsession). It no longer reaches the response.
-8. **External, in beqdesigner:** thread the batch's bass management through `_design`, so
-   `gain_reduction_db` arrives on the listener's own crossover.
+What to do next, most valuable first. Each entry says why it sits where it does. Reorder here,
+not in "Suggested order" below, which is the historical order the plan was worked in.
+
+1. **Decide `--content-edge`'s default (steep filters).** The only open *policy* question, and
+   the synthetic evidence is exhausted: it recovers 17 of 18 noise-floored steep injections
+   against 2, touches no real title, but lifts noise where loud scenes stand clear of a floor
+   that dominates on average (up to 17 dB on injected Hulk). What decides it is evidence the
+   harness cannot give:
+   * listen to it: the option's output on a noise-floored variant with a large lift (Hulk
+     BW16 @ 30, −80 dB: +16.8 dB where noise dominates) against the default's decline;
+   * real steep titles: the catalogue's large, steep corrections that several authors agree
+     on (Master and Commander, Kingdom of Heaven DC, Hunger Games: Songbirds & Snakes,
+     Nobody, Wreck-It Ralph, Battleship; also Mad Max 2, Midnight Run). None is on hand yet;
+   * a floor other than white: codec-like or coloured noise in `inject_variants.py`.
+2. **F1: fitter and judge disagree on drift.** Now a concrete blocker, not a tidy-up: on Hulk
+   BW8 @ 30, −80 dB, every 2-4 section fit exceeds the 3 dB drift limit once published and the
+   fitter falls back to one section. Steep inverses need exactly the sections rounding moves.
+3. **Selection on steep variants picks the weaker candidate.** On two Black Bag variants a
+   `counterfactual` with a 5 dB median shortfall won where `flatten` got within 1 dB on the
+   neighbouring noise levels. Find out why `flatten` failed there. If the cause is a
+   `counterfactual` cap of the wrong size, T2 (derive the caps per channel) is done as part of
+   this.
+4. **T8 check: does tracking depend on the reference?** The tracking floor is the lowest band
+   whose envelope still moves with the plateau's, so it moves when the plateau does — and it
+   decides both where the target is held flat and where the judged band starts. Black Bag's
+   programme below 25 Hz is untracked against its own 50-83 Hz plateau but tracks to 9.2 Hz
+   against the 100-130 Hz plateau LR4 @ 30 leaves. A falsely low floor lets boost reach noise; a
+   falsely high one withholds real recovery. Cheap first step: compare every injected variant's
+   floor with its original's, which the variant records already hold.
+5. **A device-behaviour harness, then F1/F2's limits for extreme sections (M/L).** `verify`
+   models coefficient quantisation at the declared precision, not the device's arithmetic
+   (internal word length, rounding noise in the recursion, limit cycles), and that is where
+   high-Q, very-low-frequency sections go wrong. Relaxing `max_q = 6.0` (F2), or trusting a
+   steep inverse's sections, needs measurements of a real device playing them. F2 is decided
+   here, not before.
+6. **E1: held-out verification (M, insurance).** `flatten` derives its target from the mix and
+   `verify` judges on the same mix, so tilt, level, extent and unevenness mostly confirm the
+   cascade matches its own target. Deriving from one half of the programme (split by scene) and
+   judging on the other would catch a target that overfits. Nothing is known to be wrongly
+   accepted today (corpus gate 0/45), so this is insurance, not a fix.
+7. **Parked**, each with what would unpark it:
+   * E4 (ceiling holes): only if 2 or 3 find unevenness failures that trace to single-bin gaps
+     in a priced target. Nothing seen so far points to it.
+   * F3's second half (one more section): a time trade-off (fit cost grows as M(M+1)/2 runs),
+     and a fifth section moved no verdict when tried. Unpark if 2 or 3 show steep candidates
+     failing only because four sections cannot draw the shape (catalogue authors use 9-10).
+   * T2 (`restore_caps_db` swept): unless it joins 3.
+   * rescoring corpus negatives against the goal (the gate is stricter than the dials);
+   * a sloping passband inside the sub band (leave until a title needs it);
+   * watch: Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%;
+   * Obsession's narrow band of level-dependent content ending the level-independence run,
+     which no longer reaches the response;
+   * external, in beqdesigner: thread the batch's bass management through `_design`, so
+     `gain_reduction_db` arrives on the listener's own crossover.
 
 ## Findings and checks
 
@@ -128,8 +170,9 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 
 ## Suggested order
 
-The order the plan was worked in, kept for its reasoning. Steps 0-3 are complete. What remains
-is E4, T2 and E1 from step 4, and F1 and F2 from step 5 (see "Status" above).
+The order the plan was worked in, kept for its reasoning. Steps 0-3 are complete; what
+remains of steps 4 and 5 (E4, T2, E1, F1, F2) is ranked with everything else under "Priority
+order" in "Status" above, which supersedes this list.
 
 0. **Baseline.** Done for nine titles (below). Records are in `data/*.run.json.gz` at 4858a45;
    `tools/render_ledger.py` renders them together. R1 comes first so the next batch through the
@@ -595,6 +638,67 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   pattern as the other LR4 variants. **Watch (T8):** the variant's tracking floor, 9.2 Hz
   against a 100-130 Hz reference, is lower than the original's 25 Hz against 50-83 Hz. Tracking
   still inherits the reference.
+* **Steep filters — do they exist, what is right, and an opt-in (`--content-edge`).**
+  * **The catalogue says they exist.** Every entry in `~/.ezbeq/database.json` rendered from its
+    96 kHz biquads (15,345 with filters) and scored by the most gain it adds in one octave going
+    down: median 12 dB, 261 entries ≥ 30 dB (beyond an LR4 inverse), 57 ≥ 36, 6 ≥ 42 (near an
+    8th-order inverse), mostly held to 5 Hz with 40-60 dB peak boost. Several authors agree on
+    the same steep correction for Master and Commander, Kingdom of Heaven DC, Safe House,
+    Hunger Games: Songbirds & Snakes, Nobody, Wreck-It Ralph and Battleship. A pointer to test
+    material only; nothing here calibrates anything.
+  * **A real steep title is already handled.** Safe House (2012, 5.1, 110 min; extracted as
+    `data/Safe_House_2012.npz`, not in the baseline set) has a 39-51 dB/oct edge at 26-33 Hz on
+    every channel, then a flat floor ~32 dB down that is real, tracking programme (40-43 dB
+    loud-quiet contrast): a steep filter with a finite stopband. The default accepts `flatten`
+    (+32.3 dB, 4 sections, no clipping), flat within 1.3 dB from 5 to 63 Hz. mobe1969's
+    authored 2012 filter undoes the same edge to within ~2 dB and then goes ~10 dB past flat
+    below 20 Hz (a taste the goal-tilt dial can express). The two catalogue entries labelled
+    2025 are for a different 90-minute film and do not fit this track.
+  * **Noise-floored injection.** Without a floor after the filter, a steep stopband is clean
+    programme that tracks perfectly all the way down, which is easier than any real disc.
+    `inject_variants.py --noise-db` adds independent white noise per channel after the filter,
+    at a level below the mix plateau, so where the programme drowns (the recoverable edge) is
+    known exactly. −80 dB is about a 24-bit floor. `score_injected.py` scores each run: median
+    shortfall inside the recoverable band against the original's own corrected curve, and the
+    frozen protocol's measure, the most the cascade gains where noise dominates. BW8/12/16 @ 30
+    Hz at −40/−60/−80 dB on Black Bag and Hulk: **the default accepts 2 of 18**, and declines
+    almost all the rest on "introduces a cliff of 90-220 dB/oct" at the recoverable edge.
+  * **Why.** The priced target is already right: contrast falls to zero where the programme
+    drowns, so the target asks for the inverse down to there and nothing below, and the fits
+    follow it. The shape clauses, judged from the tracking floor, reject that fall into the
+    noise as a cliff.
+  * **Opt-in: judge from the content edge.** `judge_from_content_edge` (`--content-edge`;
+    default off) starts the judged band at `content_edge_hz`, where contrast stops licensing
+    the whole deficit, and below it `_within_ceiling` allows a cascade no more boost than
+    contrast licenses (+ `level_tolerance_db`). Prototype results: 17 of 18 noisy variants
+    accepted, median shortfall 0-1.6 dB on 15 (5.2-5.7 dB on two Black Bag variants won by a
+    `counterfactual`); the six no-noise controls accepted (0.4-1.5 dB on five). Hulk BW8 @ 30,
+    −80 dB still declines, on device drift (F1). Real titles: probe at `--tol 0` unchanged on
+    all ten, option on or off; Safe House unchanged. Frozen protocol: identical except
+    `steep_leakage`, accepted on both seeds (it abstains by default). Corpus: gated 0/45 as
+    before; positives 7/9 → 8/9 (filtered/5 recovered); natural_droop 5/9 unchanged.
+  * **Why it is off by default.** Contrast measures loud scenes. Below a steep edge it licenses
+    boost wherever loud scenes stand clear of the floor, and so lifts the floor under every
+    other scene: gain where noise dominates 0-4 dB on most Black Bag variants (7 dB on BW16 @
+    −80), 4-17 dB on Hulk's, 6.6-7.4 dB on `steep_leakage`. Three bounds on "how far the
+    programme stands above the noise on average" were tried and **all failed**: frame mean
+    power (a few transient frames at scene changes own it: 25 dB above both envelopes at 5 Hz
+    on `steep_leakage`), frame median (sparse programme hides under it: corpus positives 7/9 →
+    5/9, variants 2/18), and mean over loud-or-quiet frames (the same transients sit inside the
+    loud class: 8.3 dB into noise on `steep_leakage`). Whether a lift that loud-scene contrast
+    bounds is acceptable is a listening question, now priority 1.
+  * **Bugs found on the way, fixed before the numbers above:** the guard first judged below
+    the design range (rejecting sound candidates on "boosts 0.2 Hz"); the content edge moved
+    every fully licensed band up by one grid bin; and the probe's rejudge re-derived the judged
+    band itself, so it could not see a judging change at all. It now judges exactly as `run`
+    does, and `snapshot --content-edge` probes the opt-in.
+  * **Checks on the committed code.** Option off: probe at `--tol 0` unchanged on all ten real
+    titles; test suite 500 passed, 1 skipped. Option on: probe at `--tol 0` unchanged on all
+    ten; Safe House unchanged; all 24 variants reproduce the prototype's winner, shortfall and
+    gain where noise dominates exactly; `steep_leakage` accepted on both seeds as above (7.4
+    and 6.6 dB into noise). The synthetic protocol and corpus figures above are the
+    prototype's; the port reproducing the variants and `steep_leakage` exactly is why they
+    were not rerun.
 
 ## Baseline: 2026-09-26 track set
 

@@ -58,7 +58,7 @@ from beqforge.pipeline import (  # noqa: E402
     Timings,
     _judge,
     analyse,
-    judged_band_hz,
+    contrast_ceiling_db,
     propose,
 )
 
@@ -95,21 +95,21 @@ def _no_headroom(material, filters, params, **_) -> Headroom:
     )
 
 
-def snapshot_title(path: str, rejudge: bool = True) -> dict:
+def snapshot_title(path: str, rejudge: bool = True, content_edge: bool = False) -> dict:
     started = time.perf_counter()
     try:
-        out = _snapshot_title(path, rejudge)
+        out = _snapshot_title(path, rejudge, content_edge)
     finally:
         print(f"  {Path(path).stem}: {time.perf_counter() - started:.1f} s", flush=True)
     return out
 
 
-def _snapshot_title(path: str, rejudge: bool) -> dict:
+def _snapshot_title(path: str, rejudge: bool, content_edge: bool = False) -> dict:
     logging.disable(logging.WARNING)
     pipeline.measure_headroom = _no_headroom
     material_path = Path(path)
     material = load(material_path)
-    params = PipelineParams()
+    params = PipelineParams(judge_from_content_edge=content_edge)
     cache_path = material_path.with_suffix(".cache.json.gz")
     analysed = analyse(material, params, cache_path)
     params = analysed.params
@@ -128,7 +128,7 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
             "filter_floor_hz": _num(diagnosis.filter_floor_hz),
             "noise_floor_hz": _num(diagnosis.noise_floor_hz),
             "judged_band_hz": (
-                [_num(b) for b in judged_band_hz(material, diagnosis, params)]
+                [_num(b) for b in analysed.judged_band_hz]
                 if math.isfinite(level)
                 else None
             ),
@@ -176,6 +176,13 @@ def _snapshot_title(path: str, rejudge: bool) -> dict:
             material,
             diagnosis,
             params,
+            # what `run` hands `_judge`, so an opt-in that changes judging is seen here too
+            judged_band=analysed.judged_band_hz,
+            ceiling_db=(
+                contrast_ceiling_db(analysed.envelopes, params)
+                if params.judge_from_content_edge
+                else None
+            ),
         )
         rejudged.append(candidate)
         verdict = candidate.verdict
@@ -211,7 +218,12 @@ def snapshot(args: argparse.Namespace) -> int:
     paths = [str(p) for p in args.material]
     workers = args.workers or min(len(paths), max(1, (os.cpu_count() or 2) - 2))
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        probed = pool.map(snapshot_title, paths, [not args.no_rejudge] * len(paths))
+        probed = pool.map(
+            snapshot_title,
+            paths,
+            [not args.no_rejudge] * len(paths),
+            [args.content_edge] * len(paths),
+        )
         results = dict(zip((Path(p).stem for p in paths), probed))
     Path(args.out).write_text(json.dumps(results, indent=1, sort_keys=True))
     print(f"wrote {args.out} ({len(results)} titles)")
@@ -301,6 +313,11 @@ def main() -> int:
         "--no-rejudge",
         action="store_true",
         help="analysis and targets only — for a change that cannot reach acceptance",
+    )
+    snap.add_argument(
+        "--content-edge",
+        action="store_true",
+        help="probe with PipelineParams.judge_from_content_edge on",
     )
     comp = sub.add_parser("compare", help="list what moved between two snapshots")
     comp.add_argument("old")

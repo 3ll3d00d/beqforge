@@ -71,6 +71,7 @@ when abstaining was the correct output — neither is an error. Key flags:
 | `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual, see TODO.md |
 | `--goal-tilt DB_PER_OCT` | the low end you want below the knee: `0` flat (default), positive a rise toward the bottom, negative a gentle rolloff. Every target is built toward it, and results are judged and ranked against it |
 | `--goal-tolerance DB` | how far from that goal the low end may already sit and be left alone (default `1.5`); a title with nothing beyond it declines with `within_goal_tolerance` |
+| `--content-edge` | **opt-in, experimental.** Judge from where the title's contrast stops licensing the deficit, not from the tracking floor, so a steep filter is recovered partway, down to where the programme meets the noise, instead of declined. The price: below that point, noise can be lifted where loud scenes stand clear of it. See IMPROVEMENT_PLAN.md, "Steep filters" |
 | `--charts DIR` | write peak/average charts per candidate into `DIR/<name>/` |
 | `--record PATH` / `--no-record` | where to write the run record (default: `<material>.run.json.gz` alongside it), or skip writing one |
 | `--cache PATH` / `--fresh` / `--no-cache` | the stage cache: where to keep it (default: `<material>.cache.json.gz`), force a recompute and overwrite it, or use neither |
@@ -113,8 +114,8 @@ from pipeline.designer.http_binding import http_designer
 register_designer('beqforge.v1', http_designer('http://host:8420/design'))
 ```
 
-Device realisation, which strategies run, authored exclusions and the goal (`--goal-tilt`,
-`--goal-tolerance`, as for `design`) are server-wide flags (see `--help`); everything
+Device realisation, which strategies run, authored exclusions, the goal (`--goal-tilt`,
+`--goal-tolerance`, as for `design`) and the opt-in `--content-edge` are server-wide flags (see `--help`); everything
 per-title — the audio itself, its coverage, an optional per-channel decomposition and
 bass-management model — arrives in the request. `--record-dir DIR` also writes each request's
 full run record into `DIR` (`designer-<digest>.run.json.gz`, named by a digest of the request's

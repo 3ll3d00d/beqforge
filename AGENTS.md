@@ -50,7 +50,7 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
 | `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
 | `tools/negative_corpus.py` | The negative corpus (IMPROVEMENT_PLAN E2): `harness.corpus_case` titles across seven shapes, two channels each, truth known by construction. Reports false acceptances per shape with a 95% Clopper-Pearson interval, true positives and recovery on injected filters, and gates on the upper bound over the negatives a pipeline can tell from a filter (`natural_droop` is reported, not gated). The committed baseline is `negative_corpus.json`. |
-| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — IMPROVEMENT_PLAN A1), and `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"). |
+| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — IMPROVEMENT_PLAN A1), `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original; `--noise-db` adds a delivery noise floor after the filter, so where the programme drowns is known exactly) and `score_injected.py` (scores those variants' runs against that truth: shortfall inside the recoverable band, gain where noise dominates); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"). |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
 | `tests/` | `uv run pytest`. |
@@ -176,6 +176,9 @@ exact-preserving uses `--tol 0` and must show nothing. The snapshot records:
 * **rejudge** — every recorded candidate's *published* filters put back through the current
   `_judge` (headroom is skipped because it is never gated), and which candidate
   `Report.accepted` would select.
+
+The probe runs default `PipelineParams`. A change to an opt-in path (`--content-edge`) needs a
+second pair of snapshots with `snapshot --content-edge`.
 
 **3. Act on what moved:**
 
@@ -373,6 +376,21 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
   before any strategy runs. That ripple is the title's own yardstick, so there is no constant.
   Crest to trough rather than a one-sided dip, because the reference sits on the crests. This
   is what took the negative corpus from 4 false acceptances in 45 to 0.
+* **Steep filters: the default declines them; `judge_from_content_edge` is an opt-in that
+  recovers them and lifts some noise.** Below a steep filter's edge the priced target already
+  falls into the quiet floor with the programme — contrast bounds it — and the shape clauses
+  (cliff, unevenness, tilt) judged from the tracking floor reject exactly that fall. With
+  `PipelineParams.judge_from_content_edge` (CLI `--content-edge`, server-wide on
+  `serve-designer`) the judged band starts at the content edge (`pipeline.content_edge_hz`:
+  where contrast stops licensing the whole deficit), and below it `_within_ceiling` allows a
+  cascade no more boost than contrast licenses. It changes nothing on the ten real titles, and
+  takes noise-floored steep injections from 2 of 18 accepted to 17. It is **off by default**
+  because contrast measures loud scenes: where they stand clear of a floor that dominates on
+  average it lifts that floor too (up to 17 dB on injected real titles), and the frozen
+  protocol's `steep_leakage` is then accepted. Three "average programme" bounds were tried and
+  failed — frame mean power (owned by a few transient frames), frame median (sparse programme
+  hides under it), mean over loud-or-quiet frames (the same transients). IMPROVEMENT_PLAN.md,
+  "Steep filters", has the numbers. The probe sees it only with `snapshot --content-edge`.
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by
   writing another one-off script. The point of the driver is that two titles become comparable;
   twenty scratchpad scripts are how the design was first worked out and none of them survived.

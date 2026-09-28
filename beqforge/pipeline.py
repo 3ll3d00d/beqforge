@@ -285,6 +285,23 @@ class PipelineParams:
     `max(45 Hz, anchor)`, which judged a correction ending at 15 Hz out to 45 Hz and diluted
     every shape check with an octave and a half of untouched passband (IMPROVEMENT_PLAN T6)."""
 
+    judge_from_content_edge: bool = False
+    """Opt-in: start the judged band at the content edge, not the tracking floor.
+
+    The content edge (`content_edge_hz`) is the lowest frequency down to which the title's
+    loud-quiet contrast licenses the whole deficit. Below a steep filter's edge the priced
+    target already falls into the quiet floor with the programme, and the shape clauses
+    judged there reject that fall as a cliff — so the default declines almost every steep
+    filter even where most of it is recoverable. With this on, the shape clauses judge only
+    above the edge, and below the judged band a cascade may boost no more than contrast
+    licenses (plus `AcceptParams.level_tolerance_db`).
+
+    Off by default because it trades something that cannot yet be judged without listening:
+    it recovers 17 of 18 noise-floored steep injections against 2, but where loud scenes stand
+    clear of a floor that dominates on average it lifts that floor too — up to 17 dB on
+    injected real titles — and the frozen protocol's `steep_leakage` is then accepted where it
+    abstained. IMPROVEMENT_PLAN "Steep filters" has the measurements."""
+
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored intervals omitted from evidence, with zero requested correction.
 
@@ -759,11 +776,7 @@ def priced_by_evidence(
                 "below its reference"
             )
         target = np.minimum(target, deficit_db)
-    native_ceiling = envelopes.boost_ceiling(params.confidence_z)
-    ceiling = np.interp(
-        DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
-    )
-    ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
+    ceiling = contrast_ceiling_db(envelopes, params)
     # which bins failed or lacked evidence is a property of the run, not of this target, and
     # `analyse` already reports it once in the run's limitations
     clipped = target - ceiling
@@ -1309,7 +1322,7 @@ def analyse(
                     "so it is texture, not a missing low end; restoration withheld"
                 )
     if math.isfinite(mix_level):
-        judged = judged_band_hz(material, diagnosis, params)
+        judged = judged_band_hz(material, diagnosis, params, envelopes)
         if any(a <= judged[1] and b >= judged[0] for a, b in bands):
             blockers.append(
                 "exclusions fragment the judged band; contiguous verification unavailable"
@@ -1470,6 +1483,11 @@ def run(
     )
 
     candidates: list[Candidate] = []
+    ceiling = (
+        contrast_ceiling_db(analysed.envelopes, params)
+        if params.judge_from_content_edge
+        else None
+    )
     for proposal in proposals:
         if proposal.filters is not None:
             filters, error = proposal.filters, proposal.residual_db
@@ -1490,6 +1508,7 @@ def run(
                     method=proposal.method,
                     effective_params=proposal.effective_params,
                     judged_band=analysed.judged_band_hz,
+                    ceiling_db=ceiling,
                 )
             )
 
@@ -1567,13 +1586,17 @@ def required_gain_reduction_db(
 
 
 def judged_band_hz(
-    material: Material, diagnosis: Diagnosis, params: PipelineParams
+    material: Material,
+    diagnosis: Diagnosis,
+    params: PipelineParams,
+    envelopes=None,
 ) -> tuple[float, float]:
     """Set one verification band from mix evidence for all candidates.
 
     Start no lower than the mix tracking floor; extend the upper edge to the
     first settled end of its plateau-relative deficit. A shared band keeps
-    candidate shape measurements comparable.
+    candidate shape measurements comparable. With `judge_from_content_edge` and the
+    envelopes to measure it from, start no lower than the content edge either.
     """
     low = params.verify_floor_hz
     floor = diagnosis.noise_floor_hz
@@ -1582,7 +1605,98 @@ def judged_band_hz(
     measured = _flat_deficit(material, params)
     if measured is None:
         raise ValueError("no usable contiguous mix plateau")
-    return low, _judged_top_hz(measured[-1], params, floor)
+    top = _judged_top_hz(measured[-1], params, floor)
+    if params.judge_from_content_edge and envelopes is not None:
+        edge = content_edge_hz(material, diagnosis, envelopes, params, (low, top))
+        if edge > low:
+            low = edge
+            top = min(
+                max(top, low * 2.0**params.accept.min_judge_octaves),
+                float(DESIGN_GRID[-1]),
+            )
+    return low, top
+
+
+def contrast_ceiling_db(envelopes, params: PipelineParams) -> np.ndarray:
+    """The boost the title's own loud-quiet contrast licenses, on the design grid.
+
+    Missing or excluded bins license zero. What `priced_by_evidence` clips every target to.
+    """
+    ceiling = np.interp(
+        DESIGN_GRID,
+        envelopes.freqs,
+        envelopes.boost_ceiling(params.confidence_z),
+        left=0.0,
+        right=0.0,
+    )
+    ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
+    return ceiling
+
+
+def content_edge_hz(
+    material: Material,
+    diagnosis: Diagnosis,
+    envelopes,
+    params: PipelineParams,
+    band_hz: tuple[float, float],
+) -> float:
+    """Lowest frequency, down from the top of the band, where contrast licenses the deficit.
+
+    Below it the correction is bounded by contrast rather than by what is missing: the
+    programme is drowning in the quiet floor, and a correct correction falls into that floor
+    with it, however steeply. The band's own lower edge when contrast licenses the deficit
+    all the way down to it.
+    """
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    if deficit is None:
+        return band_hz[0]
+    held, _ = _held_below_floor(deficit, diagnosis.noise_floor_hz)
+    licensed = contrast_ceiling_db(envelopes, params) >= (
+        held - params.accept.decision_quantum_db
+    )
+    inside = (DESIGN_GRID >= band_hz[0]) & (DESIGN_GRID <= band_hz[1])
+    index = int(np.flatnonzero(inside)[-1])
+    while index >= 0 and inside[index] and licensed[index]:
+        index -= 1
+    if index < 0 or not inside[index]:
+        # licensed all the way down: the band's own edge stands, not the grid bin above it
+        return band_hz[0]
+    return float(DESIGN_GRID[index + 1])
+
+
+def _within_ceiling(
+    verdict: Verdict,
+    correction: Correction,
+    ceiling_db: np.ndarray,
+    params: PipelineParams,
+) -> Verdict:
+    """Below the judged band, a cascade may boost no more than contrast licenses.
+
+    With `judge_from_content_edge` the shape clauses are silent below the content edge, so
+    this is what stops a cascade lifting the quiet floor there. From the bottom of the design
+    range: under it the ceiling reads zero only because nothing was measured.
+    """
+    below = (correction.freqs >= params.lowest_frequency_hz) & (
+        correction.freqs < correction.band_hz[0]
+    )
+    if not below.any():
+        return verdict
+    gain = (correction.after_db - correction.before_db)[below]
+    allowed = np.interp(correction.freqs[below], DESIGN_GRID, ceiling_db)
+    excess = gain - allowed
+    worst = int(np.argmax(excess))
+    if excess[worst] <= params.accept.level_tolerance_db:
+        return verdict
+    return dataclasses.replace(
+        verdict,
+        passed=False,
+        failures=[
+            *verdict.failures,
+            f"boosts {correction.freqs[below][worst]:.1f} Hz by {gain[worst]:.1f} dB "
+            f"where contrast licenses {allowed[worst]:.1f} — lifting the quiet floor, "
+            "not content",
+        ],
+    )
 
 
 def _judge(
@@ -1598,6 +1712,7 @@ def _judge(
     method: DesignMethod | None = None,
     effective_params: str | None = None,
     judged_band: tuple[float, float] | None = None,
+    ceiling_db: np.ndarray | None = None,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
@@ -1642,6 +1757,8 @@ def _judge(
             else correction_band_hz(target, DESIGN_GRID, params.lowest_frequency_hz)
         ),
     )
+    if ceiling_db is not None:
+        verdict = _within_ceiling(verdict, correction, ceiling_db, params)
     verdict.notes.append(
         f"verification transfer: published quantised device at {params.realisation.fs:g} Hz; "
         f"sub output from {material.fs:g} Hz extraction, relative to unchanged playback baseline; "
