@@ -11,9 +11,18 @@ pipeline restored what was taken away — on real programme texture, not synthet
 
 The mix is rebuilt from the filtered channels with the extraction's own gains, so the mix and
 the channels stay the same signal. Filtering is causal (`sosfilt`), like a mastering filter.
+
+`--noise-db 40,60,80` adds a delivery noise floor *after* the filter, one variant per level:
+stationary white Gaussian noise, independent per channel, scaled so the rebuilt mix's noise
+density sits that many dB below the original mix's plateau. Without it a steep stopband is
+clean programme leaking through, which tracks perfectly all the way down and so looks
+recoverable to any pipeline; on a real disc something sits under it. Since the noise is ours,
+where the filtered programme drowns in it is known exactly (`noise_sigma`, `noise_db` and
+`noise_seed` are stored), so the recoverable band is ground truth by construction.
 """
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -22,6 +31,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from beqforge import Alignment, HighPass  # noqa: E402
+from beqforge.diagnose import DiagnoseParams, mean_spectrum, plateau_reference  # noqa: E402
 from beqforge.harness import apply_high_pass  # noqa: E402
 from beqforge.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
 
@@ -51,27 +61,70 @@ def main() -> int:
     parser.add_argument("material", type=Path)
     parser.add_argument("--out", type=Path, default=Path("data/variants"))
     parser.add_argument("--specs", default=",".join(DEFAULT_SPECS))
+    parser.add_argument(
+        "--noise-db",
+        default="",
+        help="comma-separated levels below the mix plateau; a variant per level",
+    )
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     source = np.load(args.material, allow_pickle=True)
     fs = int(source["fs"])
     names = [str(n) for n in source["layout"]]
+    gains = {n: LFE_GAIN if n == "LFE" else MAIN_GAIN for n in names}
+    levels = [float(v) for v in args.noise_db.split(",") if v] or [None]
+    plateau_density = (
+        None if levels == [None] else mix_plateau_density(source["mono_mix"], fs)
+    )
     args.out.mkdir(parents=True, exist_ok=True)
     for spec in args.specs.split(","):
         hp = parse(spec)
-        arrays = {k: source[k] for k in source.files}
-        mix = np.zeros(len(source["mono_mix"]), dtype=np.float64)
-        for name in names:
-            filtered = apply_high_pass(
-                source[f"channel_{name}"].astype(np.float64), hp, fs
-            )
-            arrays[f"channel_{name}"] = filtered.astype(np.float32)
-            mix += (LFE_GAIN if name == "LFE" else MAIN_GAIN) * filtered
-        arrays["mono_mix"] = mix.astype(np.float32)
-        arrays["injected"] = np.array(spec)
-        path = args.out / f"{args.material.stem}__{spec.replace('@', '_')}.npz"
-        np.savez(path, **arrays)
-        print(f"wrote {path}  ({hp})")
+        filtered = {
+            name: apply_high_pass(source[f"channel_{name}"].astype(np.float64), hp, fs)
+            for name in names
+        }
+        for level in levels:
+            arrays = {k: source[k] for k in source.files}
+            stem = f"{args.material.stem}__{spec.replace('@', '_')}"
+            channels = dict(filtered)
+            if level is not None:
+                # white noise of variance s² has one-sided density 2s²/fs; independent per
+                # channel, so the mix's noise density is that times the sum of squared gains
+                sigma = math.sqrt(
+                    plateau_density
+                    * 10 ** (-level / 10)
+                    * fs
+                    / (2 * sum(g * g for g in gains.values()))
+                )
+                rng = np.random.default_rng(args.seed)
+                channels = {
+                    n: x + sigma * rng.standard_normal(x.size)
+                    for n, x in channels.items()
+                }
+                arrays["noise_sigma"] = np.array(sigma)
+                arrays["noise_db"] = np.array(level)
+                arrays["noise_seed"] = np.array(args.seed)
+                stem += f"__n{level:g}"
+            mix = np.zeros(len(source["mono_mix"]), dtype=np.float64)
+            for name, x in channels.items():
+                arrays[f"channel_{name}"] = x.astype(np.float32)
+                mix += gains[name] * x
+            arrays["mono_mix"] = mix.astype(np.float32)
+            arrays["injected"] = np.array(spec)
+            path = args.out / f"{stem}.npz"
+            np.savez(path, **arrays)
+            print(f"wrote {path}  ({hp}, noise {level} dB below plateau)")
     return 0
+
+
+def mix_plateau_density(mix: np.ndarray, fs: int) -> float:
+    """The original mix's plateau as a one-sided power density, the noise levels' datum."""
+    freqs, mix_db = mean_spectrum(mix.astype(np.float64), fs)
+    params = DiagnoseParams()
+    level, _ = plateau_reference(mix_db, freqs, params)
+    if not math.isfinite(level):
+        raise SystemExit("the original mix has no plateau to set a noise level against")
+    return 10 ** (level / 10)
 
 
 if __name__ == "__main__":
