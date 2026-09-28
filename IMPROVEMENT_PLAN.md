@@ -23,6 +23,62 @@ likely to be tested):
 * An item is done when its check has run on the track set below, the outcome is written down
   here, and either the change is merged or the decision not to is recorded.
 
+## Status
+
+The one place to see what is done and what is open. **Update it in the same commit as the
+Progress entry** it summarises; the detail stays in "Progress" below. *Done*: changed and
+merged. *Checked*: the check ran and the decision was no change. *Open*: not started.
+
+| ID | Status | Outcome, in one line (detail under "Progress") |
+| --- | --- | --- |
+| E1 | **open** | Not started. |
+| E2 | done | Corpus built (`negative_corpus.json`). Gated false acceptances 7/45 → 4/45 (low-end cap) → 0/45 (texture blocker); the gate passes. |
+| E3 | done | Hold and deficit cap applied to every strategy; the ranking is unchanged. |
+| E4 | **open** | Not started (effect still a hypothesis). |
+| E5 | checked | Hold stays: it is the only thing carrying tracking into the target. |
+| E6 | done | Report half: judge's notes reach the response. Rate half: the corpus's `natural_droop`, reported not gated under the content principle. |
+| E7 | checked | Fixed extraction bands kept; the targets barely move. Revisit if the plateau rule changes. |
+| E8 | done | Digital silence excluded from both frame classes. |
+| T1 | done | `counterfactual` re-sums under the playback model. |
+| T2 | **open** | Not started. |
+| T3 | done | Channels restored on their own texture, not a 14 dB/oct slope. |
+| T4 | checked | No plateau change. Dossier 137 decided: abstain via the sub-band blocker, which since 2026-09-28 fires only when nothing in the sub band tracks. |
+| T5 | checked | Folded into T4. |
+| T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
+| T7 | checked | Low priority; no verdict depends on it. |
+| T8 | checked | Chained tracking rejected. **Watch:** the floor still depends on the reference (see open list). |
+| F1 | **open** | Not started. |
+| F2 | **open** | Not started. |
+| F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is open. |
+| A1 | done | No tolerance moves. |
+| C1 | checked | `parametric` stays on by default; shared computation done. |
+| C2 | done | Limitations reported once. |
+| R1 | done | Responses name their build; the server writes replayable records. |
+
+**Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
+the response explains content, not cause; clipping stated in the response; shaping fraction
+and level-invariance floor fixed; goal tilt and goal tolerance dials; texture blocker; the
+sub-band blocker and its content condition; overshoot past the goal (checked, no change).
+
+**Open questions and watches**, in rough order of weight:
+
+1. **Steep filters (8th order and up).** Lift partway to where content allows, or abstain?
+   To this evidence, content running out looks the same as a steep filter's stopband leakage.
+   Two fixes were tried and reverted (the two LR4 positives entry). Moderate filters are
+   handled on all three injected real titles.
+2. **F3's second half:** does one more section rescue candidates that fail only on wobble or
+   tilt, when run on targets known to be sound?
+3. **Tracking inherits its reference (T8).** Black Bag + LR4 @ 30 tracks to 9.2 Hz against a
+   100-130 Hz reference, where the original tracks to 25 Hz against 50-83 Hz.
+4. **A sloping passband inside the sub band** is unhandled. Leave it until a title needs it.
+5. **Rescoring corpus negatives against the goal:** the gate counts any intervention as
+   false, which is stricter than the goal dials.
+6. **Watch:** Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%.
+7. **Parked:** a narrow band of level-dependent content ending the level-independence run
+   (Obsession). It no longer reaches the response.
+8. **External, in beqdesigner:** thread the batch's bass management through `_design`, so
+   `gain_reduction_db` arrives on the listener's own crossover.
+
 ## Findings and checks
 
 Effort: S = a day or less, M = a few days. "TODO n" is the item's former number in `TODO.md`.
@@ -71,6 +127,9 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **C2** | Duplicate limitation notes (attached to every proposal; `evidence_notes` computed twice) and legacy aliases (`mv_adjust_db`, `is_filtered`, `confidence`). | Deduplicate notes; keep aliases only where the external contract needs them. Exact-preserving apart from note text. | S |
 
 ## Suggested order
+
+The order the plan was worked in, kept for its reasoning. Steps 0-3 are complete. What remains
+is E4, T2 and E1 from step 4, and F1 and F2 from step 5 (see "Status" above).
 
 0. **Baseline.** Done for nine titles (below). Records are in `data/*.run.json.gz` at 4858a45;
    `tools/render_ledger.py` renders them together. R1 comes first so the next batch through the
@@ -252,7 +311,8 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `analyse` already found. Honest size: a mean spectrum is 0.12 s, so this saves under a
   second on a 70-170 s run; it is done for one source of truth, not for speed. Exact: probe
   at `--tol 0` unchanged, Bugonia's full record byte-identical.
-* **E2 — done: the corpus exists, and it fails its own gate.** `harness.corpus_case` builds
+* **E2 — done: the corpus exists. It failed its own gate at first; it passes since "Texture is
+  not a deficit", below.** `harness.corpus_case` builds
   two-channel titles in seven shapes, every parameter drawn from the seed.
   `tools/negative_corpus.py` runs them one process each and reports per shape, with 95%
   Clopper-Pearson intervals. Baseline, 9 seeds (63 cases), committed as `negative_corpus.json`:

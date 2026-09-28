@@ -215,8 +215,9 @@ uv run python tools/negative_corpus.py --seeds 1-9 --output <scratch>/corpus.jso
 ```
 
 **5. Write the outcome down** in `IMPROVEMENT_PLAN.md`'s "Progress": what changed, what the
-probe showed, which titles needed real runs and what they gave. An item with no recorded
-outcome is not done.
+probe showed, which titles needed real runs and what they gave. In the same commit, update
+its row in the "Status" table at the top of that file (and the open-questions list under
+it, if the change opens or closes one). An item with no recorded outcome is not done.
 
 **Pitfalls, each met at least once:**
 
