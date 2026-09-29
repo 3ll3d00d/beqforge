@@ -121,10 +121,11 @@ outside the harness, moves behind them.
    caps per channel) is done as part of this. "Ranking retained" is an acceptable outcome.
 5. *(E9, done — see Progress.)* Records now say how far each cascade boosts past the ceiling.
    No gate: the only material exceeding it is steep injections, where 4 and 3 already look.
-6. *(F1, done — see Progress.)* Its follow-ups, neither blocking: the screen measures drift on
-   the optimiser's raw parameters and `accept` on the published ones (Hulk's 3-section
-   `flatten`: 3.84 dB against 3.08), and it measures over the whole 3-400 Hz grid while the fit
-   scores from 5 Hz. Each is a small, separate decision change. Alongside them, write down
+6. *(F1, done — see Progress.)* Its follow-ups. Done: the screen now jitters the published
+   parameters, as `accept` does (see Progress). Checked, no change: the screen measures over
+   the whole 3-400 Hz grid while the fit scores from 5 Hz — the screen exists to predict the
+   drift the verdict reports, which is also over 3-400 Hz, so they agree; the fit's own band is
+   where it searches, a different question. Still to do, docs only: write down
    what each robustness quantity means (nominal residual, published-device residual, exact
    stability, jitter sensitivity, the selection objective) and over which band. The
    residual-plus-p90-drift exposure F1 ranks by is a sampled heuristic, not a worst-case
@@ -922,6 +923,33 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     fitter picks from, on its own objective, finds cascades acceptance rejects. The residual
     is not a proxy for the verdict ("never trust a residual", from the other side). Using the
     discarded fits properly means judging them; parked under priority 11.
+* **F1 follow-up — the drift screen jitters the published parameters (2026-09-29).**
+  `_published_drift` ran the p90 jitter on the optimiser's raw floats, `accept` on the
+  canonical rounded ones; now both use `publication_filters`, so the screen predicts the drift
+  the verdict reports (a test asserts they are equal on a raw fit; it fails on the old code).
+  Validated like F4, against HEAD, with a scratch-only log naming every fit whose final answer
+  the change moved, and "before" records reused from F4's validation (same fitter).
+  * **Real titles:** the change fired on Bugonia and Caught Stealing; no winner or accepted
+    cascade moved. Bugonia's `parametric` newly passes (one shelf in place of a shelf and a
+    peak); Caught Stealing's `counterfactual/35dB` newly fails (a 0.514 dB fit in place of
+    0.905, with 15.8 dB of ripple against 2.8 in the material).
+  * **Steep variants, default:** fired on 21 of 43. Winners changed on 4, each scored against
+    truth: Hulk LR4 @ 20 (`flatten` → `counterfactual/50dB`, median shortfall −0.1 → 0.0 dB,
+    worst 6.8 → 7.8), Send Help LR4 @ 25 (`flatten` → `counterfactual/50dB`, −0.8 → −1.6,
+    worst 19.8 → 21.3), LR4 @ 30 (`counterfactual/50dB` → `flatten`, 0.6 → −1.3, worst 28.4 →
+    27.4), LR4 @ 35 (`flatten` → `counterfactual/50dB`, −0.1 → 0.8, worst 31.9 → 30.1).
+    Accepted cascades changed on 2 more: Black Bag BW8 @ 30 (8.8 → 8.6) and LR4 @ 35 (11.3 →
+    8.8). No gain where noise dominates on any.
+  * **`--content-edge`**, by rejudging both record sets (the fits do not depend on it; 33
+    titles checked): winners changed on 2 — Black Bag BW8 @ 30 (`counterfactual/35dB` →
+    `/25dB`, 5.4 → 4.8 dB median short) and LR4 @ 35 (`counterfactual/35dB` → `parametric`, a
+    +2.9 dB cascade 15.7 short against 11.3: weaker, the pattern priority 4 is about).
+  * **Synthetic protocol**, both seeds: identical. **Negative corpus** against HEAD's (E9's)
+    run: gated 0/45, positives 7/9, both unchanged; natural_droop 5 → 4; filtered/8
+    recovers 1.00 → 1.15 dB RMS.
+  * **Decision:** adopted. It corrects what the screen measures rather than tuning it, loses
+    no true positive and admits no false acceptance; the winner changes score as well
+    against truth, give or take a dB, except one weaker opt-in answer. Records not refreshed.
 * **R2 — added (2026-09-29).** Requested: let beqforge and beqdesigner work off a shared
   filesystem, with requests able to point at files and one cache both sides use, so a
   redesign skips the extraction. Reading the code for it: the server takes audio inline and

@@ -765,12 +765,19 @@ def _published_drift(
     realisation: "Realisation | None",
     max_drift_db: float | None,
 ) -> float:
-    """The p90 drift `accept` reports: infinite if unstable, zero when nothing is screened."""
+    """The p90 drift `accept` reports: infinite if unstable, zero when nothing is screened.
+
+    Jittered about the *published* parameters, as `accept` does, not the optimiser's raw
+    floats. The two differed by up to 0.8 dB on a steep cascade (Hulk's three-section
+    `flatten`: 3.84 against 3.08), so the screen could call a cascade fragile that the
+    verdict then reported inside the limit, or the reverse (IMPROVEMENT_PLAN F1 follow-up).
+    """
     if unstable_sections(specs, realisation or Realisation()):
         return math.inf
     if realisation is None or max_drift_db is None:
         return 0.0
-    return float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
+    published = publication_filters(specs)
+    return float(np.percentile(drift_distribution(published, freqs, realisation), 90))
 
 
 def _within_drift(

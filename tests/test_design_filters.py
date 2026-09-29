@@ -329,6 +329,22 @@ def test_the_fit_selects_on_the_drift_that_will_be_published() -> None:
     assert F._publishable(fragile, 0.43, freqs, None, limit)
 
 
+def test_the_screen_measures_the_drift_the_verdict_reports() -> None:
+    """F1 follow-up: both jitter the published parameters, so they agree on a raw fit."""
+    freqs = np.logspace(np.log10(3.0), np.log10(400.0), 400)
+    realisation = F.Realisation()
+    # raw optimiser floats, several digits past what publication keeps
+    raw = [
+        BiquadSpec("low_shelf", 10.587341, 14.3627719, 0.94513372),
+        BiquadSpec("peaking_eq", 8.3612944, 1.2873311, 4.11027734),
+    ]
+    published = F.publication_filters(raw)
+    reported = float(
+        np.percentile(F.drift_distribution(published, freqs, realisation), 90)
+    )
+    assert F._published_drift(raw, freqs, realisation, 3.0) == reported
+
+
 def test_an_impossible_drift_limit_still_returns_a_cascade() -> None:
     """Abstaining is the acceptance model's job, and it can say why; this cannot."""
     freqs = np.logspace(np.log10(3.0), np.log10(400.0), 300)
