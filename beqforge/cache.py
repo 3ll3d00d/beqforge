@@ -75,6 +75,7 @@ PARAMETRIC_MODULES = ANALYSIS_MODULES + (
     "design.py",
     "filters.py",
     "pipeline.py",
+    "verify.py",
 )
 """What a parametric proposal is computed by — the analysis, plus the inversion and the fit.
 
@@ -86,6 +87,9 @@ the RBJ arithmetic or fitting changes.
 `pipeline.py` is here because `parametric_targets` lives in it and builds the `DesignParams`.
 It over-invalidates — editing `counterfactual_target` drops a parametric proposal that did not
 depend on it — and that is the right direction to be wrong in.
+
+`verify.py` is here because the deficit a parametric target is capped at is measured against
+`verify.house_curve_db`, the goal below the knee (IMPROVEMENT_PLAN C3).
 """
 
 

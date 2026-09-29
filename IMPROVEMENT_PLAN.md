@@ -57,7 +57,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | A1 | done | No tolerance moves. |
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
-| C3 | **open** | Not started. Priority 1: the parametric stage cache ignores the goal dials. |
+| C3 | done | The parametric stage cache is keyed on everything its derivation reads; defaults unchanged. |
 | C4 | **open** | Not started. Priority 8: one device waveform per candidate, one sub feed per run. |
 | C5 | **open** | Not started. Priority 8, before C4: timings that account for elapsed time; fit stats per report. |
 | C6 | **open** | Not started. Priority 1: AGENTS.md statements the code no longer matches. |
@@ -838,6 +838,23 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     more analysis features, and further optimiser experiments. No measurement shows the same
     fit request recurring, and at 40-80 s a title the complexity is not yet paid for. Listed
     under `TODO.md`'s Performance, to revisit once C5's numbers exist.
+* **C3 — done.** The parametric stage cache's key now holds `ParametricDerivation`
+  (`pipeline.parametric_derivation`): the fitter's `DesignParams` plus every other setting
+  `parametric_targets` reads through the deficit, pricing and goal-tolerance steps — goal tilt,
+  goal tolerance, `min_judge_octaves`, `verify_floor_hz`, the deficit-anchor settings
+  (`flatten_settled_octaves`, `flatten_deficit_floor_db`), `flatten_taper_ratio` and the
+  exclusions. `Strategy` gained `cache_params`, separate from `effective_params`, so what a
+  proposal records it ran with (still the `DesignParams`) is unchanged. `verify.py` joins
+  `PARAMETRIC_MODULES` (`house_curve_db`). Existing entries miss once and are rebuilt.
+  * **Tests:** each setting above changes the key; acceptance-only settings
+    (`level_tolerance_db`, `restore_caps_db`) do not, so judging tweaks still reuse the fit;
+    a warm run after changing goal tilt or goal tolerance equals a fresh run at the new
+    setting. Both warm-vs-fresh tests fail on the previous code. Full suite passes.
+  * **Probe** at `--tol 0`: nothing moved on any of the eleven titles (all parametric
+    proposals were recomputed under the new key, so the cached defaults were not stale).
+  * **Real run**, 28 Years Later (`parametric` wins it), `--no-cache`, previous commit in a
+    worktree against this change: `compare_records.py` identical. No decision can move on
+    default settings, so the synthetic protocol and corpus were not rerun.
 
 ## Baseline: 2026-09-26 track set
 

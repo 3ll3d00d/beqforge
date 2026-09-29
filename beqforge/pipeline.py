@@ -881,6 +881,45 @@ def parametric_params(params: PipelineParams) -> DesignParams:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ParametricDerivation:
+    """Everything a parametric proposal is derived from beyond the analysis: its cache key.
+
+    `parametric_params` is only what `design` fits with. `parametric_targets` also measures the
+    mix's deficit against the goal, prices the target through `priced_by_evidence` and drops it
+    inside the goal tolerance, and those read the goal dials, the deficit-anchor and taper
+    rules and the verification floor off `PipelineParams`. Keyed on the fitter's settings
+    alone, a rerun with a different `--goal-tilt` reused the old goal's proposal
+    (IMPROVEMENT_PLAN C3). Exclusions and the plateau rule reach the key through
+    `DiagnoseParams`, which the key already holds.
+    """
+
+    design: DesignParams
+    target_tilt_db_per_octave: float
+    goal_tolerance_db: float
+    min_judge_octaves: float
+    verify_floor_hz: float
+    flatten_settled_octaves: float
+    flatten_deficit_floor_db: float
+    flatten_taper_ratio: float
+    exclude_bands_hz: tuple[tuple[float, float], ...]
+
+
+def parametric_derivation(params: PipelineParams) -> ParametricDerivation:
+    """The configuration component of the parametric stage's cache key."""
+    return ParametricDerivation(
+        design=parametric_params(params),
+        target_tilt_db_per_octave=params.accept.target_tilt_db_per_octave,
+        goal_tolerance_db=params.accept.goal_tolerance_db,
+        min_judge_octaves=params.accept.min_judge_octaves,
+        verify_floor_hz=params.verify_floor_hz,
+        flatten_settled_octaves=params.flatten_settled_octaves,
+        flatten_deficit_floor_db=params.flatten_deficit_floor_db,
+        flatten_taper_ratio=params.flatten_taper_ratio,
+        exclude_bands_hz=params.exclude_bands_hz,
+    )
+
+
 def parametric_targets(
     material: Material,
     diagnosis: Diagnosis,
@@ -933,14 +972,25 @@ class Strategy:
     derive: "Callable[..., list[Proposal]]"
     cache_modules: tuple[str, ...] | None = None
     effective_params: Callable[[PipelineParams], object] = lambda params: params
-    """Settings consumed by derivation; also the configuration component of its cache key."""
+    """Settings the derivation reports it ran with, recorded on each proposal."""
+    cache_params: Callable[[PipelineParams], object] | None = None
+    """Everything derivation reads, as the configuration component of its cache key.
+
+    `None` means `effective_params`. A strategy whose reported settings are narrower than what
+    it reads must declare this, or a changed setting is served a stale proposal."""
+
+    def cache_config(self, params: PipelineParams) -> object:
+        return (self.cache_params or self.effective_params)(params)
 
 
 STRATEGIES = {
     "flatten": Strategy(flatten_targets),
     "counterfactual": Strategy(counterfactual_targets),
     "parametric": Strategy(
-        parametric_targets, cache.PARAMETRIC_MODULES, parametric_params
+        parametric_targets,
+        cache.PARAMETRIC_MODULES,
+        parametric_params,
+        parametric_derivation,
     ),
 }
 """Every way of deriving a target, by name. All equal citizens of the same pipeline.
@@ -1388,7 +1438,7 @@ def propose(
                 params.diagnose,
                 params.extraction,
                 identify_params,
-                strategy.effective_params(params),
+                strategy.cache_config(params),
             )
         )
         held = None if key is None or fresh else cache.load(cache_path, name, key)
