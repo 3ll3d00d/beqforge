@@ -95,16 +95,23 @@ def _no_headroom(material, filters, params, **_) -> Headroom:
     )
 
 
-def snapshot_title(path: str, rejudge: bool = True, content_edge: bool = False) -> dict:
+def snapshot_title(
+    path: str,
+    rejudge: bool = True,
+    content_edge: bool = False,
+    records: str | None = None,
+) -> dict:
     started = time.perf_counter()
     try:
-        out = _snapshot_title(path, rejudge, content_edge)
+        out = _snapshot_title(path, rejudge, content_edge, records)
     finally:
         print(f"  {Path(path).stem}: {time.perf_counter() - started:.1f} s", flush=True)
     return out
 
 
-def _snapshot_title(path: str, rejudge: bool, content_edge: bool = False) -> dict:
+def _snapshot_title(
+    path: str, rejudge: bool, content_edge: bool = False, records: str | None = None
+) -> dict:
     logging.disable(logging.WARNING)
     pipeline.measure_headroom = _no_headroom
     material_path = Path(path)
@@ -159,7 +166,9 @@ def _snapshot_title(path: str, rejudge: bool, content_edge: bool = False) -> dic
             proposal.target_db, params.lowest_frequency_hz
         )
 
-    record_path = material_path.with_name(material_path.stem + ".run.json.gz")
+    record_path = (
+        Path(records) if records else material_path.parent
+    ) / f"{material_path.stem}.run.json.gz"
     if not rejudge or not record_path.exists():
         return out
     with gzip.open(record_path, "rt", encoding="utf-8") as handle:
@@ -223,6 +232,7 @@ def snapshot(args: argparse.Namespace) -> int:
             paths,
             [not args.no_rejudge] * len(paths),
             [args.content_edge] * len(paths),
+            [None if args.records is None else str(args.records)] * len(paths),
         )
         results = dict(zip((Path(p).stem for p in paths), probed))
     Path(args.out).write_text(json.dumps(results, indent=1, sort_keys=True))
@@ -318,6 +328,14 @@ def main() -> int:
         "--content-edge",
         action="store_true",
         help="probe with PipelineParams.judge_from_content_edge on",
+    )
+    snap.add_argument(
+        "--records",
+        type=Path,
+        default=None,
+        help="rejudge the records in this directory (<title>.run.json.gz) instead of the "
+        "ones beside each material — scratch check runs, or --content-edge on records "
+        "made without it (the fit does not depend on it, so only the judging differs)",
     )
     comp = sub.add_parser("compare", help="list what moved between two snapshots")
     comp.add_argument("old")

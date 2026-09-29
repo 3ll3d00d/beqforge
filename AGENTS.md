@@ -180,6 +180,13 @@ exact-preserving uses `--tol 0` and must show nothing. The snapshot records:
 The probe runs default `PipelineParams`. A change to an opt-in path (`--content-edge`) needs a
 second pair of snapshots with `snapshot --content-edge`.
 
+**A fitter change never needs a `--content-edge` refit.** The option changes only the judged
+band and a ceiling check at judging; the targets and every fitted cascade are identical with it
+on or off (checked on 33 titles, 2026-09-29). So refit in default mode only, then rejudge both
+record sets with the option on: `snapshot --content-edge --records DIR` points the rejudge at
+scratch records instead of the ones beside the material. Minutes, where a second pass of real
+runs over the steep variants is over an hour.
+
 **3. Act on what moved:**
 
 * **Nothing** → the change reaches no decision on this material. The test suite is still
