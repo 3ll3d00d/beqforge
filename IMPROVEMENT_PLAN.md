@@ -32,28 +32,35 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 
 | ID | Status | Outcome, in one line (detail under "Progress") |
 | --- | --- | --- |
-| E1 | **open** | Not started. Priority 6 (insurance). |
+| E1 | **open** | Not started. Priority 10 (insurance). |
 | E2 | done | Corpus built (`negative_corpus.json`). Gated false acceptances 7/45 → 4/45 (low-end cap) → 0/45 (texture blocker); the gate passes. |
 | E3 | done | Hold and deficit cap applied to every strategy; the ranking is unchanged. |
-| E4 | parked | Not started; hypothesis with nothing pointing to it. Unparks if priorities 2-3 find single-bin gaps. |
+| E4 | parked | Not started; hypothesis with nothing pointing to it. Unparks if priority 4 or 6, or E9's audit, finds single-bin gaps. |
 | E5 | checked | Hold stays: it is the only thing carrying tracking into the target. |
 | E6 | done | Report half: judge's notes reach the response. Rate half: the corpus's `natural_droop`, reported not gated under the content principle. |
 | E7 | checked | Fixed extraction bands kept; the targets barely move. Revisit if the plateau rule changes. |
 | E8 | done | Digital silence excluded from both frame classes. |
+| E9 | **open** | Not started. Priority 5: record-only measurement of boost delivered past the ceiling. |
+| E10 | parked | Not started. A fresh protocol for the content goal; unparks before a default change (priority 3) or A1-style tuning. |
 | T1 | done | `counterfactual` re-sums under the playback model. |
-| T2 | parked | Not started. Joins priority 3 if a cap size explains the weaker winners. |
+| T2 | parked | Not started. Joins priority 4 if a cap size explains the weaker winners. |
 | T3 | done | Channels restored on their own texture, not a 14 dB/oct slope. |
 | T4 | checked | No plateau change. Dossier 137 decided: abstain via the sub-band blocker, which since 2026-09-28 fires only when nothing in the sub band tracks. |
 | T5 | checked | Folded into T4. |
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
-| T8 | checked | Chained tracking rejected. The floor still depends on the reference: priority 4 checks how much. |
+| T8 | checked | Chained tracking rejected. The floor still depends on the reference: priority 7 checks how much. |
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
-| F2 | **open** | Not started. Priority 5: needs a device-behaviour harness first. |
+| F2 | **open** | Not started. Priority 9: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
+| F4 | **open** | Not started. Priority 2: screen every fit, not just the lowest-error one. |
 | A1 | done | No tolerance moves. |
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
+| C3 | **open** | Not started. Priority 1: the parametric stage cache ignores the goal dials. |
+| C4 | **open** | Not started. Priority 8: one device waveform per candidate, one sub feed per run. |
+| C5 | **open** | Not started. Priority 8, before C4: timings that account for elapsed time; fit stats per report. |
+| C6 | **open** | Not started. Priority 1: AGENTS.md statements the code no longer matches. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -70,53 +77,98 @@ beside the answer or the decline (probe unchanged; no decision touched).
 
 What to do next, most valuable first. Each entry says why it sits where it does. Reorder here,
 not in "Suggested order" below, which is the historical order the plan was worked in.
+Reordered 2026-09-29 when the core-pipeline review was folded in (see Progress): two cheap
+correctness fixes go first, and the `--content-edge` decision, which waits on evidence from
+outside the harness, moves behind them.
 
-1. **Decide `--content-edge`'s default (steep filters).** The only open *policy* question, and
+1. **C3: key the parametric stage cache on everything it reads (S), with C6's doc fixes.** A
+   correctness bug with no cost to fix: a CLI rerun that changes a goal dial can silently reuse
+   a stale `parametric` proposal. It comes first because every experiment with `--goal-tilt` or
+   `--goal-tolerance` until it is fixed is suspect. C6 is docs only, but AGENTS.md is what the
+   next change is planned from, so correct it in the same sitting (its own commit).
+2. **F4: screen every fit before choosing one (S).** The only known mechanism that throws away
+   a usable cascade. It comes before 4 and 6 because it changes what both would measure: a
+   weak winner in 4 may be a `flatten` whose publishable fit was discarded, and F1's follow-ups
+   in 6 compare fits F4 decides between. Needs real refits; the probe cannot see it.
+3. **Decide `--content-edge`'s default (steep filters).** The only open *policy* question, and
    the synthetic evidence is exhausted: it recovers 17 of 18 noise-floored steep injections
    against 2, touches no real title, but lifts noise where loud scenes stand clear of a floor
    that dominates on average (up to 17 dB on injected Hulk). What decides it is evidence the
-   harness cannot give:
+   harness cannot give, which is why it sits below two fixes that can be done now:
    * listen to it: the option's output on a noise-floored variant with a large lift (Hulk
      BW16 @ 30, −80 dB: +16.8 dB where noise dominates) against the default's decline;
    * real steep titles: the catalogue's large, steep corrections that several authors agree
      on (Master and Commander, Kingdom of Heaven DC, Hunger Games: Songbirds & Snakes,
      Nobody, Wreck-It Ralph, Battleship; also Mad Max 2, Midnight Run). None is on hand yet;
-   * a floor other than white: codec-like or coloured noise in `inject_variants.py`.
-2. *(F1, done — see Progress.)* Two follow-ups it left, neither blocking: the screen measures
-   drift on the optimiser's raw parameters and `accept` on the published ones (Hulk's 3-section
-   `flatten`: 3.84 dB against 3.08), and it measures over the whole 3-400 Hz grid while the fit
-   scores from 5 Hz. Each is a small, separate decision change.
-3. **Selection on steep variants picks the weaker candidate.** On two Black Bag variants a
+   * a floor other than white: codec-like or coloured noise in `inject_variants.py`;
+   * the engineering part, which can start now: `score_injected.py` reports gain where noise
+     dominates, not the noise level that results. +17 dB into a floor at −80 dB is a different
+     listening claim from +17 dB into an audible one. Score on a common reference, apply the
+     published device response separately to the known programme and noise components, and
+     report absolute corrected noise and how much of the programme it sits under; replace
+     the fixed 60 Hz scoring edge with a band declared per recipe. Keep the old scores beside
+     the new ones.
+
+   A change of default is a decision change: E10's protocol should exist before it.
+4. **Selection on steep variants picks the weaker candidate.** On two Black Bag variants a
    `counterfactual` with a 5 dB median shortfall won where `flatten` got within 1 dB on the
    neighbouring noise levels; since F1 the default also accepts Black Bag BW16 @ 30 (no
-   noise) as a `counterfactual/50dB` 6.5 dB short. Find out why `flatten` failed there. If the cause is a
-   `counterfactual` cap of the wrong size, T2 (derive the caps per channel) is done as part of
-   this.
-4. **T8 check: does tracking depend on the reference?** The tracking floor is the lowest band
+   noise) as a `counterfactual/50dB` 6.5 dB short. Rerun after F4, then attribute each case to
+   proposal, fit, acceptance or ranking before changing anything: a `flatten` that failed
+   cannot be rescued by reordering the ones that passed. One ranking hypothesis to test on the
+   same passing set: `Correction.departure_db` is an RMS over linearly spaced Welch bins, so
+   20-40 Hz carries about four times the weight of 5-10 Hz, while the fitter scores on a
+   logarithmic grid. If the cause is a `counterfactual` cap of the wrong size, T2 (derive the
+   caps per channel) is done as part of this. "Ranking retained" is an acceptable outcome.
+5. **E9: measure boost delivered past the evidence ceiling (S, record-only).** Pricing caps
+   the target, not the cascade; nothing records how far a published filter exceeds what the
+   evidence licensed. Cheap, changes no decision, and it is "never trust a residual" applied
+   to the filter that actually plays. It also feeds 3 (how much noise the option lifts) and
+   E4 (whether ceiling holes matter).
+6. *(F1, done — see Progress.)* Its follow-ups, neither blocking: the screen measures drift on
+   the optimiser's raw parameters and `accept` on the published ones (Hulk's 3-section
+   `flatten`: 3.84 dB against 3.08), and it measures over the whole 3-400 Hz grid while the fit
+   scores from 5 Hz. Each is a small, separate decision change. Alongside them, write down
+   what each robustness quantity means (nominal residual, published-device residual, exact
+   stability, jitter sensitivity, the selection objective) and over which band. The
+   residual-plus-p90-drift exposure F1 ranks by is a sampled heuristic, not a worst-case
+   bound on the published response, and should not be described as one.
+7. **T8 check: does tracking depend on the reference?** The tracking floor is the lowest band
    whose envelope still moves with the plateau's, so it moves when the plateau does — and it
    decides both where the target is held flat and where the judged band starts. Black Bag's
    programme below 25 Hz is untracked against its own 50-83 Hz plateau but tracks to 9.2 Hz
    against the 100-130 Hz plateau LR4 @ 30 leaves. A falsely low floor lets boost reach noise; a
-   falsely high one withholds real recovery. Cheap first step: compare every injected variant's
-   floor with its original's, which the variant records already hold.
-5. **A device-behaviour harness, then F1/F2's limits for extreme sections (M/L).** `verify`
+   falsely high one withholds real recovery. Cheap first step: tabulate every injected
+   variant's reference, floor, anchor, judged band and deficit-to-ripple ratio against its
+   original's, which the variant records already hold. Only if that shows instability:
+   resample contiguous scene blocks (not already-selected frames, which misses the selection
+   step) and rerun the analysis chain, diagnostic only. The texture-blocker margins in the
+   watch list below are the same question.
+8. **C5, then C4: account for a run's time, then stop computing things twice (S each).**
+   Speed is not a problem at 40-80 s a title, so this sits below everything that can change
+   an answer. C5 first because it is a record schema change, and exact-preserving changes are
+   compared on a schema that no longer moves; C4 is then exact-preserving and its saving can
+   be measured rather than claimed from stage shares.
+9. **A device-behaviour harness, then F1/F2's limits for extreme sections (M/L).** `verify`
    models coefficient quantisation at the declared precision, not the device's arithmetic
    (internal word length, rounding noise in the recursion, limit cycles), and that is where
    high-Q, very-low-frequency sections go wrong. Relaxing `max_q = 6.0` (F2), or trusting a
    steep inverse's sections, needs measurements of a real device playing them. F2 is decided
-   here, not before.
-6. **E1: held-out verification (M, insurance).** `flatten` derives its target from the mix and
+   here, not before. Blocked on device data; nothing else here waits on it.
+10. **E1: held-out verification (M, insurance).** `flatten` derives its target from the mix and
    `verify` judges on the same mix, so tilt, level, extent and unevenness mostly confirm the
    cascade matches its own target. Deriving from one half of the programme (split by scene) and
    judging on the other would catch a target that overfits. Nothing is known to be wrongly
    accepted today (corpus gate 0/45), so this is insurance, not a fix.
-7. **Parked**, each with what would unpark it:
-   * E4 (ceiling holes): only if 2 or 3 find unevenness failures that trace to single-bin gaps
-     in a priced target. Nothing seen so far points to it.
+11. **Parked**, each with what would unpark it:
+   * E10 (a fresh validation protocol): before 3 changes a default, or before any tolerance is
+     tuned again. The current corpus has informed every decision since E2.
+   * E4 (ceiling holes): only if 4, 6 or E9's audit find unevenness failures or excess that
+     trace to single-bin gaps in a priced target. Nothing seen so far points to it.
    * F3's second half (one more section): a time trade-off (fit cost grows as M(M+1)/2 runs),
-     and a fifth section moved no verdict when tried. Unpark if 2 or 3 show steep candidates
+     and a fifth section moved no verdict when tried. Unpark if 4 or 6 show steep candidates
      failing only because four sections cannot draw the shape (catalogue authors use 9-10).
-   * T2 (`restore_caps_db` swept): unless it joins 3.
+   * T2 (`restore_caps_db` swept): unless it joins 4.
    * rescoring corpus negatives against the goal (the gate is stricter than the dials);
    * a sloping passband inside the sub band (leave until a title needs it);
    * watch: Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%;
@@ -133,7 +185,7 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 
 | ID | Finding | Check and pass criterion | Effort |
 | --- | --- | --- | --- |
-| **E1** | **Acceptance mostly re-checks the fit against the target it was handed** *(verified)*. `flatten`'s target is the mix's deficit against its own plateau and `verify` measures that same mix, so the tilt, level, extent and wobble clauses (judged against intent) largely test fit quality. Only overshoot, cliff, turnover, section contribution and stability ask whether the filter is *wrong*. | Held-out verification: derive the target from one half of the programme (split by scene, not by time) and judge on the other. Pass: false accepts on the negative corpus (E2) fall without losing any true positive, and a target that overfits one half fails on the other. | M |
+| **E1** | **Acceptance mostly re-checks the fit against the target it was handed** *(verified)*. `flatten`'s target is the mix's deficit against its own plateau and `verify` measures that same mix, so the tilt, level, extent and wobble clauses (judged against intent) largely test fit quality. Only overshoot, cliff, turnover, section contribution and stability ask whether the filter is *wrong*. | Held-out verification: derive the target from one half of the programme (split by scene, not by time) and judge on the other. Partition by separated scene blocks, guarding filter and window edges so no event's frames cross folds; derive everything (evidence, reference, target, filter) on one side and evaluate the fixed correction on the other, then swap. Use internal helpers over explicit block selections rather than passing concatenated excerpts through `run` as complete programmes. Scene-specific bass is content: do not require every scene to be flat. Pass: false accepts on the negative corpus (E2) fall without losing any true positive, and a target that overfits one half fails on the other. Report it first; making it a gate is a separate decision. | M |
 | **E2** | **The false-accept rate is measured on four development negatives** *(verified)*. One of four is falsely accepted; four held-out show none; there is no interval on either. Absorbs TODO 10 and the parametric-path note on calibrating scene segmentation against a false-positive rate. | Build a negative corpus of 50 or more constructed cases across the track shapes below; report the false-accept rate with a Clopper-Pearson interval, per shape. Gate a scheduled test on the interval's *upper* bound. Real tracks supply content, the harness supplies ground truth (see "Variants"). | M |
 | **E3** | **Selection rewards ambition, and is unstable** *(verified; observed)*. `Report.accepted` ranks by departure from the requested (flat) shape, so the least-clipped, most-boosting candidate wins even when its support is weakest. Absorbs TODO 6, which asks for a written decision either way. **Observed:** on 28 Years Later, HEAD selects `parametric` (+19.5 dB shelf at 23.6 Hz with a −7 dB peak at 38 Hz, recovered fraction 0.99) over a passing `flatten` (+6.1 dB, recovered 0.86), on a spread difference of 0.6 dB (11.6 vs 12.2). The designer server's older build shipped the `flatten` answer for the same title. A 0.6 dB shape margin chose a filter three times as large. `parametric` also passes with a recovered fraction above 1 on Send Help (1.54): it boosts past the measured deficit. | Re-rank passing candidates by support (`correction_support_score` or `recovered_fraction`) before shape, and treat any recovered fraction above 1 as a failure, not a ranking input. Also a stability check: the accepted strategy and peak gain must not move when the ranking margin is under `ranking_tie_db` plus the fit residual. Pass: on the negative corpus, the selected candidate's recovered fraction does not exceed what the injected truth licenses; on real tracks compare with `compare_verdicts.py` and review every changed decision by eye (28 Years Later first). Either outcome is written down here. | S |
 | **E4** | **The evidence ceiling is unsmoothed and punches holes** *(verified that it is per bin; effect is hypothesis)*. It is peak-minus-quiet contrast minus `z` standard errors per bin, applied with `np.clip`, so isolated unsupported bins become zero inside a supported region and reach the fitter as structure. | Smooth the ceiling with a running minimum over about a third of an octave. Pass: fit residual, wobble and section count improve or hold on every track; no accepted filter gains boost the raw ceiling did not license. | S |
@@ -141,6 +193,8 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **E6** | **The ceiling measures dynamic range, not missing content** *(verified, acknowledged in AGENTS.md; observed)*. A naturally drooping mix with strong scene-to-scene contrast is licensed up to its plateau. **Observed:** Send Help (+13.1 dB) and Obsession (+28.2 dB) are accepted with `shaping_fraction` 1.00 and 1.02: all of the correction sits below the level-invariance floor (22.7 and 24.2 Hz), with confidence 0.94 and 0.92. Neither is known to be wrong, but this is exactly the shape E6 describes, and nothing in the response tells a reviewer so. | Not fixable from programme audio alone (see AGENTS.md's "preference shaping"). The check is to *quantify* it: false-accept rate on natural-droop variants (E2) reported separately, and surfaced in the report so a reader can see when a title looks like that shape. A `shaping_fraction` near 1 should reach the designer response as a first-class warning, not a commentary number. | M |
 | **E7** | **Extraction's scene and reference bands are fixed constants** *(verified; effect observed)*. `ExtractionParams.scene_band_hz = (10, 60)` picks loud frames, and `reference_band_hz = (60, 120)` picks quiet ones, for every title and every channel. That is the fixed-band mistake the principles forbid, sitting under the boost ceiling. **Observed:** on Dossier 137, whose mains are filtered at 28-42 Hz, the 10-60 Hz scene band is mostly stopband, and only 260 of 13,597 mix frames qualify as loud. | Derive both bands from the subject's own plateau (the scene band ends at, and the reference band is, the plateau). Pass: loud-frame counts rise on Dossier-shaped titles and no accepted boost grows beyond what the old ceiling licensed on the other eight. | S |
 | **E8** | **Digital silence yields near-infinite contrast** *(observed)*. Where a channel's quiet frames are exact zeros, the median margin reads about 2,900 dB (the `1e-300` log floor). Seen on 4 of 9 real titles: LFE on Black Bag, Send Help and Bugonia; LFE, Ls and Rs on Dossier 137. Frame counts also go wrong: Dossier's Ls/Rs report 7,866 of 13,597 frames "loud". `boost_allowance` for such a channel is then bounded only by `restore_caps_db` and the mix-level pricing. No verdict is yet known to depend on it. | Treat exact-zero frames as absent, not quiet (exclude them from the quiet percentile, and mark a channel with too few non-silent frames unavailable). Pass: no channel margin above the extraction's dynamic range; verdicts unchanged, or each change explained. | S |
+| **E9** | **Nothing measures boost the published cascade delivers beyond the evidence ceiling** *(verified that it is unmeasured; size unknown)*. `priced_by_evidence` caps the *target*; the fit only approximates it, and the ceiling is enforced on the cascade itself only below the judged band, and only with `--content-edge`. A cascade can exceed the licensed boost between grid points, across a hole in the ceiling (E4) or inside an exclusion, and no record says so. | Record-only first: on the exact published, quantised device response, record the largest excess over the ceiling, its frequency, its contiguous width in octaves, the integrated positive excess, and excess inside exclusions separately. Bins below the analysis range are unmeasured, not zero allowance. Audit the nine titles, the injected variants and the corpus. Any gate or fit constraint is a separate decision change with its own corpus numbers; a biquad cannot always realise zero at an isolated bin inside positive gain, so a gate needs an explicit realisation allowance, not the level tolerance borrowed. Pass: the record carries it and the audit is written down here. | S |
+| **E10** | **The frozen protocol and the corpus answer an older question, and have been tuned against** *(verified)*. `evidence_validation.json` labels negatives by provenance; the goal is now content (see AGENTS.md on `natural_bass_light`). The corpus (gated 0/45, upper bound 7.9%; 0/9 per shape, upper bound 33.6%) has informed every decision since E2, so its intervals no longer describe held-out performance, and 0/9 is weak evidence per shape. | Version a new protocol without editing the old one. Predeclare, before running the held-out half: case families (coloured, nonstationary and correlated noise; finite stopbands; limited programme; sparse and continuous bass; channel cancellation; filters on some channels only), seed and source-title partitions (variants of one title are not independent), goal settings, failure classes (unnecessary intervention, unsupported noise lift, missed recovery, device failure) and sample sizes from the interval wanted. Keep the legacy counts beside the new ones. Once held-out results inform tuning, they become development and a new holdout is reserved. | M |
 
 ### Target construction and judging: consistency
 
@@ -162,6 +216,7 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **F1** | Fitter and judge disagree on drift (TODO 3): the optimiser minimises drift at exact coefficients, `assess` measures the 90th percentile across rounding. Jittered evaluations inside the cost were tried and were worse; a smooth pole-radius penalty has not been tried. | Add the penalty; pass: fewer accepted cascades with poles near z = 1 at 96 kHz and no loss of accepted candidates. | M |
 | **F2** | `max_q = 6.0` contradicts the documented argument against constraining Q (TODO 4). It is near-binding on real material. | Either relax it or record why it is needed. Check the sections currently at Q 5.2 to 6.0 against their unconstrained fits. | S |
 | **F3** | **The fitter and the judge measure over different bands** *(verified; observed — causes a wrong decline)*. The fit scores and `_prune` measure section contribution over `residual_band_hz` (5-200 Hz, widened to cover placements). `assess` credits a section only for what it does inside the judged band (tracking floor to `max(45 Hz, anchor)`). A section shaping the region below the tracking floor, where `flatten` holds its boost flat, is doing work the fitter asked for, and the judge rejects it for that. `_prune` then refuses to drop it, because dropping it costs more than 1 dB of residual *outside* the judged band. **Observed:** this is the only failure on Black Bag's `flatten` candidate: a −2.2 dB peak at 13.9 Hz and +1.05 dB at 131.8 Hz, judged over 25.1-50.2 Hz. Otherwise it passes (spread 16.0 → 11.8 dB, tilt +0.7 dB/oct, recovered 0.98). The same rule also rejects counterfactual candidates on 28 Years Later (shelf at 5.6 Hz) and Alto Knights (8.4 Hz). The fitter also spends sections above the sub band (131.8 Hz on Black Bag; 284 and 303 Hz on Dossier). | Put fit, prune and contribution on one band. Either contribution is judged over the band the target asks for (`correction_band_hz` of the priced target, which includes the held-flat region), or the fit stops scoring outside the judged band and refits after pruning. Pass: Black Bag's `flatten` is accepted, or fails on a substantive clause; no accepted filter elsewhere gains a section the judged band cannot see. Then test the original question: does one more section rescue candidates that fail only on wobble or tilt, run on targets known to be sound? | S |
+| **F4** | **The fitter discards alternatives before it knows which can be published** *(verified; real-title impact unmeasured)*. Within each section count `_escalate` (`filters.py`) keeps only the structure/seed result with the lowest raw objective (`best = min(window, ...)`), and only then prunes it, measures its published drift and screens it. A slightly worse fit that prunes cleanly or drifts less is already gone, and F1's fallback cannot bring it back. A mocked escalation reproduces it (robust one-section fit at 2.0, rejected two-section at 0.1, usable two-section at 0.2: the one-section fit is returned); how often it happens on real material is unknown. | Prune, publish and screen every structure/seed result in a tier, then choose the tier's representative by F1's rule; break ties deterministically, never by worker completion order. Change nothing else in the same commit (optimiser, drift policy, section budget). Pass: unit tests for an unstable best with a stable alternative, a fragile best with a robust alternative, and all-invalid; serial and parallel agree; **real refits** on the nine titles and the steep variants (the probe rejudges recorded filters, so it cannot see this), every changed winner's corrected curve reviewed, extra screening cost reported. Decision-changing: synthetic protocol and corpus too. | S |
 
 ### Calibration and clean-up
 
@@ -171,6 +226,10 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **C1** | **`parametric` costs about a quarter of a run and rests on the weakest component** *(verified from AGENTS.md and the cache)*. The claim that it never produces the selected filter no longer holds: at HEAD it wins 28 Years Later, the largest boost on offer (see E3). Its passing candidates reach recovered fractions of 1.54 (Send Help), and it is rejected for 1.90 and 2.01 on Bugonia and Caught Stealing. Settle E3 before making it opt-in, since the verdicts are no longer identical without it. `plateau_reference` and `mean_spectrum` are also recomputed in `run`, `diagnose`, `flatten_targets`, `counterfactual_targets` and per candidate in `judged_band_hz`. | Make `parametric` opt-in and compute the shared plateau once on `Diagnosis`. Pass: identical verdicts across records, wall time down. **Exact-preserving; own commit.** | S |
 | **R1** | **The baseline must be reproducible from a record, and the review queue's output is not** *(observed)*. The designer server that produced the review queue is a PyInstaller build (`dist/beqforge serve-designer`) three days older than HEAD. On 28 Years Later it shipped a different filter from HEAD on input identical to 24-bit rounding (beqdesigner's `mono.wav` against the extracted mix: RMS difference 7e-6). HEAD itself is deterministic (a rerun reproduced every section). The designer response carries only the accepted candidate and no code revision, so a queue entry cannot say which build made it or why the losers lost. | Stamp the response (commentary or metadata) with the record fingerprint's revision and source hash. Have the server write the same `.run.json.gz` record `design_beq.py` does, beside the extraction. Pass: every queue entry can be replayed with `tools/replay.py`, and a stale build is visible without guessing. | S |
 | **C2** | Duplicate limitation notes (attached to every proposal; `evidence_notes` computed twice) and legacy aliases (`mv_adjust_db`, `is_filtered`, `confidence`). | Deduplicate notes; keep aliases only where the external contract needs them. Exact-preserving apart from note text. | S |
+| **C3** | **The parametric stage cache is keyed on too little** *(verified)*. The configuration in its key is `parametric_params`, the fitter's `DesignParams`, but `parametric_targets` also calls `low_end_deficit_db`, `priced_by_evidence` and `_worth_correcting`, which read the goal dials and target rules on `PipelineParams`. The review found goal tilt, goal tolerance, `flatten`'s taper ratio and the verification floor each left the key unchanged. `PARAMETRIC_MODULES` also omits `verify.py`, where `house_curve_db` lives. A CLI rerun that changes one of these reuses a stale proposal. The designer server does not use the stage cache, so its responses are unaffected. | Key on a derivation configuration holding every field the call graph reads, and add `verify.py` to the modules; over-invalidating is the right direction to be wrong in. Pass: for each consumed setting, a warm run after changing it equals a fresh run at that setting (targets, filters, method, verdict), including a tilted goal, a tolerance that suppresses the proposal, exclusions and `--content-edge`; an edit to the fitter still reuses the analysis; probe at `--tol 0` shows nothing on defaults. | S |
+| **C4** | **The same device waveform is computed twice per candidate, and the sub feed once per candidate** *(verified)*. `_judge` rebuilds the bass-managed sub feed for every candidate; `verify` and `measure_headroom` each call `device_waveform` on that feed with the same cascade (the second only to keep the ring-out); the unfiltered spectrum and plateau reference are recomputed each time too. Headroom's 16x peak interpolation is real work either way. | Build the sub feed, its spectrum and its reference once per run; apply the device once per stable cascade with its ring-out, Welch the programme slice, peak the whole. Keep the unstable and no-filter paths explicit, and release each waveform after measuring. Identical published cascades may share measurements but are still assessed against their own intent. **Exact-preserving; own commit:** `compare_records.py` identical, headroom included (the probe skips headroom); programme slice equal to `include_tail=False` in a test. | S |
+| **C5** | **A run's time and fitting cost are not fully accounted for** *(verified)*. `Timings.total_s` sums the timed stages, so cache I/O, hashing, blockers and reference work are invisible. `FIT_STATS` sums worker wall time, not CPU, and is a process-wide object `Report.fit_stats` aliases: the next run's reset changes an earlier report. The record carries no fit statistics. | Record whole-run elapsed time beside the stage sum with the remainder explicit; split judging into sub feed, device application, spectra, peak and assessment; copy fit statistics into each report and the record (evaluations, worker time, screening time, cache hits, candidate counts). Old records stay readable. Instrumentation only: probe unchanged. Then time cold, warm and repeat runs under `systemd-inhibit` before C4, so C4's saving is measured. | S |
+| **C6** | **AGENTS.md no longer matches the code in places** *(verified)*. It calls identification "diagnostic and confidence only, not on the path to a target", but `parametric` builds its target from it; says the fit is "one shared fit", but `parametric` fits inside `design` before `_fit_all`; and gives the fitter "~75% of a run", where the nine baseline records (mixed revisions, analysis cached) put fitting at ~49%, judging ~41% and targets ~10%. | Correct each statement and date the measurements that stay. Docs only; no decision moves. | S |
 
 ## Suggested order
 
@@ -760,6 +819,25 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     noise, but a weak partial answer — the same pattern as priority 3. Hulk BW8 @ 30, −80 dB
     declines either way; only the reason changes.
   * **Records** not refreshed: no real title's winner moved.
+* **Core-pipeline review folded in (2026-09-29).** A second review of the pipeline, its
+  caches and its validation, checked against the code at f8ca290. Planning only: no code,
+  threshold or record changed, and no run was made.
+  * **New items:** C3 (parametric cache key), F4 (fits discarded before screening), C4
+    (duplicate waveforms), C5 (timing and fit-stat accounting), C6 (AGENTS.md corrections),
+    E9 (boost past the ceiling, record-only), E10 (a fresh protocol, parked). C3, F4 and C4
+    were confirmed by reading the code; the review also reproduced F4's mechanism in a mocked
+    escalation; its frequency on real titles is not known.
+  * **Folded into existing items:** noise scoring into priority 3; the `departure_db`
+    weighting hypothesis into 4; the meaning of each robustness measure into 6 (F1's
+    follow-ups); scene-block resampling into 7 (T8); the scene-partition design into E1.
+  * **Reordered.** Priorities are renumbered: old 1 (`--content-edge` default) is now 3, old
+    2 (F1's follow-ups) 6, old 3 (steep-variant selection) 4, old 4 (T8) 7, old 5 (device
+    harness) 9, old 6 (E1) 10. Earlier Progress entries keep the numbers they were written
+    with.
+  * **Not taken up:** sharing and caching fit requests across strategies and titles, reusing
+    more analysis features, and further optimiser experiments. No measurement shows the same
+    fit request recurring, and at 40-80 s a title the complexity is not yet paid for. Listed
+    under `TODO.md`'s Performance, to revisit once C5's numbers exist.
 
 ## Baseline: 2026-09-26 track set
 
@@ -894,4 +972,6 @@ records are identical apart from the fingerprint and timings.
 Kept in `TODO.md` because nothing here would move them: reconciling `fit_error_db` with the
 external contract (TODO 5), a fraction dial and house-curve targets (TODO 7), the catalogue
 disagreement detector (TODO 8), exposing `H_protect`'s corner (TODO 9), dynamic-processing
-detection (TODO 11, beyond the tripwire above), and the parametric/identification open questions.
+detection (TODO 11, beyond the tripwire above), the parametric/identification open questions,
+and the performance ideas the 2026-09-29 review raised but that no measurement yet justifies
+(TODO's Performance).

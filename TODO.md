@@ -190,6 +190,25 @@ Deprioritised: `flatten` and `counterfactual` have produced every accepted filte
 * Remaining budget/precision trades: ~1.4x more with a real quality cost, not adopted.
 * Further algorithmic ideas beyond what's already been measured and rejected (see AGENTS.md's
   Performance notes for the list of what not to retry) — not started, no specific plan yet.
+* From the 2026-09-29 pipeline review, not scheduled until IMPROVEMENT_PLAN C5 says where the
+  time goes:
+  * **Share numerically identical fit requests.** `parametric` fits inside `design` before
+    `_fit_all`, and identical priced targets from different strategies are fitted separately.
+    Extract `parametric`'s target construction, gather every request at `_fit_all`, and
+    deduplicate on the complete numerical identity (target, grid, score and placement bands,
+    bounds, seeds, realisation), never on resemblance. Keep each strategy's own score-band
+    handling; unifying it is a decision change. Worth it only if identical requests recur.
+  * **Cache fit results across runs**, keyed on that identity plus implementation digest and
+    library versions, independent of the material. Atomic writes, bounded size, honours
+    `--fresh`/`--no-cache`; never caches verdicts or headroom. Only after the item above.
+  * **Reuse more analysis features**: remaining repeats of `mean_spectrum`,
+    `plateau_reference`, `_flat_deficit` and `supported_mix_change`, and unchanged blocks
+    across `counterfactual` caps. Match each estimator's window exactly; never merge the
+    1024- and 4096-sample estimators in the name of reuse.
+  * **Optimiser experiments** (more seeds on large, steep targets; refining retained
+    candidates): only if F4 or IMPROVEMENT_PLAN priority 4 shows a candidate lost because the
+    search missed a usable fit. Batching, warm starts and reparameterisation are numerical
+    trades, not exact changes.
 
 ## External follow-up (not this repo's to fix, but worth tracking)
 
