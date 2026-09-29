@@ -115,9 +115,12 @@ def material_fingerprint(material: Material) -> str:
     stage describes, and a `Material` need not have come from a file at all — the harness
     builds them and so do the tests. Hashing 488 MB costs 0.25 s against the 21-100 s a hit
     saves, so the exact answer is affordable and the cheap one is not worth its risk.
+
+    The samples, not what they are called. No stage stores anything that depends on the
+    material's name, so hashing it only stopped a renamed or moved file hitting — and every
+    designer request is named "designer-request", whatever it carries (IMPROVEMENT_PLAN R2a).
     """
     digest = hashlib.sha256()
-    digest.update(material.name.encode("utf-8"))
     digest.update(str(material.fs).encode("utf-8"))
     digest.update(str(material.coverage).encode("utf-8"))
     digest.update(memoryview(np.ascontiguousarray(material.mono_mix, dtype="<f8")))
@@ -197,7 +200,6 @@ def _channel(channel: ChannelDiagnosis) -> dict[str, Any]:
         "level_spread_db": _pack(channel.level_spread_db),
         "contrast_db": _pack(channel.contrast_db),
         "contrast_se_db": _pack(channel.contrast_se_db),
-
         "max_slope_db_per_octave": _num(channel.max_slope_db_per_octave),
         "max_slope_hz": _num(channel.max_slope_hz),
         "passband_share": _num(channel.passband_share),
@@ -216,7 +218,6 @@ def _channel_back(raw: dict[str, Any]) -> ChannelDiagnosis:
         level_spread_db=_unpack(raw.get("level_spread_db")),
         contrast_db=_unpack(raw.get("contrast_db")),
         contrast_se_db=_unpack(raw.get("contrast_se_db")),
-
         max_slope_db_per_octave=_back(raw["max_slope_db_per_octave"]),
         max_slope_hz=_back(raw["max_slope_hz"]),
         passband_share=_back(raw["passband_share"]),

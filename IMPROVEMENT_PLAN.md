@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **open** | Not started; plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9: the designer server uses the stage cache, so a redesign skips the analysis. beqforge only. |
+| R2a | **active** | Step 1 of 5 done: the cache key is the samples, not the material's name. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
 | R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -949,6 +949,15 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a step 1 — the cache key is the samples, not the name (2026-09-29).**
+  `cache.material_fingerprint` no longer hashes `material.name`, so a renamed or moved file
+  hits, and so will a designer request (always named "designer-request") for the same
+  samples. Tests: same samples under two names share a key; `fs`, coverage, a channel label or
+  one sample still move it; a real `analyse` + `propose` of a uniquely named title leaves no
+  trace of the name in the cache file. Key change only: every stored entry missed once. Probe
+  (analysis recomputed) at `--tol 0` against C5's snapshot: nothing moved. 28 Years Later with
+  the new warm cache (analysis and parametric reused): `compare_records.py` identical to C4's
+  record. Full suite passes.
 * **C4 — done, rescoped (2026-09-29).** C5 put headroom at 82% of judging; the duplicated
   waveform and sub feed C4 was written for cost about 2 s a run, so that version was not
   built. `verify.waveform_peak` now skips blocks that cannot hold the peak: every interpolated
