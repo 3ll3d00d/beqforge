@@ -679,3 +679,151 @@ def test_the_clipping_line_says_whether_to_turn_the_sub_down() -> None:
     assert explain.clipping(unmeasured, from_request=False) == (
         "clipping: not measured (no channel decomposition)"
     )
+
+
+# ---- 1.1: rejected designs, for review only ---------------------------------
+
+
+def _failing(label: str, *failures: str, confidence: float = 0.8) -> Candidate:
+    return dataclasses.replace(
+        _candidate(label, passed=False, confidence=confidence),
+        verdict=_verdict(False, list(failures)),
+    )
+
+
+def _design_with(monkeypatch, report: Report) -> DesignResponse:
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    return design(
+        DesignRequest(
+            contract_version=CONTRACT_VERSION,
+            fs=1000,
+            mono_mix=np.zeros(10),
+            coverage="complete_programme",
+        )
+    )
+
+
+def test_an_accepted_answer_carries_the_designs_that_failed(monkeypatch) -> None:
+    """Beside the answer, not in `candidates`: only `candidates[0]` is ever acted on."""
+    response = _design_with(
+        monkeypatch,
+        _report([_candidate(), _failing("counterfactual/25dB", "introduces a cliff")]),
+    )
+    validate_response(response)
+    assert [c.commentary["strategy"] for c in response.candidates] == ["flatten"]
+    assert response.candidates[0].rejection_reasons is None
+    (rejected,) = response.rejected
+    assert rejected.commentary["strategy"] == "counterfactual/25dB"
+    assert rejected.rejection_reasons == ["introduces a cliff"]
+    # the reviewer reads what it would have done beside why it was refused
+    assert "section(s)" in rejected.commentary["correction"]
+    assert "clipping" in rejected.commentary
+
+
+def test_a_decline_carries_its_rejected_designs_nearest_to_acceptable_first(
+    monkeypatch,
+) -> None:
+    response = _design_with(
+        monkeypatch,
+        _report(
+            [
+                _failing("flatten", "tilt", "cliff", "extent"),
+                _failing("parametric", "cliff"),
+            ]
+        ),
+    )
+    validate_response(response)
+    assert response.decline_reason == "no_publishable_candidate"
+    assert response.candidates is None
+    assert [c.commentary["strategy"] for c in response.rejected] == [
+        "parametric",
+        "flatten",
+    ]
+
+
+def test_only_loadable_rejections_are_returned(monkeypatch) -> None:
+    """A passing loser was not rejected; a design with no sections cannot be loaded."""
+    empty = dataclasses.replace(_failing("counterfactual/35dB", "unstable"), filters=[])
+    response = _design_with(
+        monkeypatch, _report([_candidate(), _candidate("parametric"), empty])
+    )
+    assert response.rejected is None
+    assert "rejected" not in response_to_json(response)
+
+
+def test_a_decline_before_any_design_has_nothing_rejected(monkeypatch) -> None:
+    response = _design_with(
+        monkeypatch, _report([], evidence_notes=("no usable contiguous mix plateau",))
+    )
+    assert response.rejected is None
+
+
+def test_rejected_designs_reach_the_wire_and_a_1_0_body_is_unchanged() -> None:
+    plain = DesignResponse(contract_version="1.0", candidates=[_valid_candidate()])
+    body = response_to_json(plain)
+    assert "rejected" not in body
+    assert "rejection_reasons" not in body["candidates"][0]
+
+    declined = DesignResponse(
+        contract_version="1.1",
+        decline_reason="no_publishable_candidate",
+        rejected=[_valid_candidate(rejection_reasons=["cliff", "tilt"])],
+    )
+    body = response_to_json(declined)
+    assert body["decline_reason"] == "no_publishable_candidate"
+    assert body["rejected"][0]["rejection_reasons"] == ["cliff", "tilt"]
+    assert body["rejected"][0]["filters"][0]["type"] == "low_shelf"
+
+
+@pytest.mark.parametrize(
+    "rejected, message",
+    [
+        ([], "empty list"),
+        ([_valid_candidate()], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=[])], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=[""])], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=["x"], filters=[])], r"rejected\[0\]"),
+        (
+            [
+                _valid_candidate(
+                    rejection_reasons=["x"],
+                    filters=[BiquadSpec("high_pass", 20.0, 0.0, 0.7)],
+                )
+            ],
+            r"rejected\[0\]\.filters\[0\]",
+        ),
+    ],
+)
+def test_validate_response_rejects_a_malformed_rejected_list(rejected, message) -> None:
+    for shape in (
+        dict(candidates=[_valid_candidate()]),
+        dict(decline_reason="no_publishable_candidate"),
+    ):
+        with pytest.raises(ContractViolation, match=message):
+            validate_response(
+                DesignResponse(contract_version="1.1", rejected=rejected, **shape)
+            )
+
+
+def test_validate_response_refuses_reasons_on_a_candidate() -> None:
+    with pytest.raises(ContractViolation, match="belongs in rejected"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.1",
+                candidates=[_valid_candidate(rejection_reasons=["cliff"])],
+            )
+        )
+
+
+def test_rejected_designs_are_exempt_from_the_confidence_order() -> None:
+    """Confidence measures evidence, not a pass: a refused design may score higher."""
+    validate_response(
+        DesignResponse(
+            contract_version="1.1",
+            candidates=[_valid_candidate(confidence=0.3)],
+            rejected=[
+                _valid_candidate(confidence=0.5, rejection_reasons=["cliff"]),
+                _valid_candidate(confidence=0.9, rejection_reasons=["tilt"]),
+            ],
+        )
+    )

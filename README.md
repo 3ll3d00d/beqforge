@@ -84,7 +84,7 @@ the schema, code or available source material has changed, and says why; `--forc
 anyway.
 
 **`serve-designer`** — runs this pipeline as a live beqdesigner filter designer over HTTP,
-implementing `designer-interface.md` v1.0 §7.1 rather than working from a `.npz`/`--beq` export.
+implementing `designer-interface.md` v1.1 §7.1 rather than working from a `.npz`/`--beq` export.
 See "beqdesigner integration" below.
 
 **`ledger [RECORDS...]`** — every `data/*.run.json.gz` by default, or specific ones named on the
@@ -99,7 +99,7 @@ straight off disk. A stale record is skipped with a warning rather than failing 
 
 `beqforge serve-designer` runs this pipeline as a live, HTTP-bound filter designer for
 [`beqdesigner`](https://github.com/3ll3d00d/beqdesigner), implementing its
-`design/designer-interface.md` v1.0 contract (§7.1's HTTP binding) rather than the file-based
+`design/designer-interface.md` v1.1 contract (§7.1's HTTP binding) rather than the file-based
 `.npz` → `design` → `--beq` export flow above:
 
 ```bash

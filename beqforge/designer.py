@@ -1,4 +1,4 @@
-"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.0.
+"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.1.
 
 Read that document (in the sibling `beqdesigner` repo, `design/designer-interface.md`) before
 touching this file — it is the contract, not this module. In short: beqdesigner POSTs a
@@ -6,6 +6,11 @@ touching this file — it is the contract, not this module. In short: beqdesigne
 ranked, non-empty list of candidates or a decline, never both, never neither. `tools/
 designer_server.py` is the HTTP transport (§7.1); this module is the pure adapter between that
 wire format and `beqforge.pipeline.run`, kept separately testable without a socket.
+
+1.1 adds `rejected`: every candidate the judge failed goes back beside the answer (or the
+decline) with its failures as `rejection_reasons`, for a reviewer to see what was tried and why
+it lost. It is a separate list rather than a flag on `candidates` so a 1.0 caller, which ignores
+fields it does not know, can never publish one.
 
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
@@ -33,7 +38,8 @@ from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
+"""The version this module implements. Responses echo the request's own version instead."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
@@ -93,16 +99,22 @@ class DesignCandidate:
     fc_uncertainty_hz: float | None = None
     slope_uncertainty: float | None = None
     channel_scope: ChannelScope | None = None
+    rejection_reasons: list[str] | None = None
+    """1.1: non-empty on every entry of `DesignResponse.rejected`, None on every candidate."""
 
 
 @dataclass(frozen=True, slots=True)
 class DesignResponse:
-    """designer-interface.md §3. Exactly one of `candidates`/`decline_reason` is populated."""
+    """designer-interface.md §3. Exactly one of `candidates`/`decline_reason` is populated.
+
+    `rejected` (1.1) may accompany either: review only, never applied or published.
+    """
 
     contract_version: str
     candidates: list[DesignCandidate] | None = None
     decline_reason: str | None = None
     decline_message: str | None = None
+    rejected: list[DesignCandidate] | None = None
 
 
 # Substrings `pipeline.run` puts in `Report.evidence_notes` when it returns `candidates=[]`
@@ -280,6 +292,7 @@ def design(
     report = run(material, params)
     provenance = _provenance(report, params, material, record_dir)
 
+    rejected = _rejected(report, params, report_gain_reduction)
     accepted = report.accepted
     if accepted is None:
         if not report.candidates:
@@ -294,6 +307,7 @@ def design(
             contract_version=request.contract_version,
             decline_reason=reason,
             decline_message=f"{message} | found: {explain.found(report)} [{stamp}]",
+            rejected=rejected,
         )
 
     candidate = _to_design_candidate(
@@ -314,8 +328,45 @@ def design(
         candidate, commentary={**account, **(candidate.commentary or {}), **provenance}
     )
     return DesignResponse(
-        contract_version=request.contract_version, candidates=[candidate]
+        contract_version=request.contract_version,
+        candidates=[candidate],
+        rejected=rejected,
     )
+
+
+def _rejected(
+    report: Report, params: PipelineParams, report_gain_reduction: bool
+) -> list[DesignCandidate] | None:
+    """Every candidate the judge failed, nearest to acceptable first (fewest failures).
+
+    A candidate that passed but lost selection is not here: it was not rejected, and
+    `alternatives` already says why it lost. Nor is one with no sections, which a reviewer
+    could not load (§5). Each carries the same plain-language account as an accepted one, so
+    what the filter would have done can be read beside why it was refused. None when empty —
+    the contract rejects an empty list.
+    """
+    failed = [
+        c
+        for c in report.candidates
+        if not c.verdict.passed and c.filters and any(c.verdict.failures)
+    ]
+    entries = [
+        dataclasses.replace(
+            (
+                mapped := _to_design_candidate(
+                    c, params, report_gain_reduction=report_gain_reduction
+                )
+            ),
+            commentary={
+                "correction": explain.correction(c, report),
+                "clipping": explain.clipping(c, from_request=report_gain_reduction),
+                **(mapped.commentary or {}),
+            },
+            rejection_reasons=[f for f in c.verdict.failures if f],
+        )
+        for c in sorted(failed, key=lambda c: len(c.verdict.failures))
+    ]
+    return entries or None
 
 
 def _ndarray_from_json(d: dict) -> np.ndarray:
@@ -372,21 +423,31 @@ def _candidate_to_json(c: DesignCandidate) -> dict:
         "fc_uncertainty_hz": c.fc_uncertainty_hz,
         "slope_uncertainty": c.slope_uncertainty,
         "channel_scope": c.channel_scope,
+        # 1.1, and only where it means something, so a 1.0 response is unchanged on the wire
+        **(
+            {"rejection_reasons": list(c.rejection_reasons)}
+            if c.rejection_reasons is not None
+            else {}
+        ),
     }
 
 
 def response_to_json(response: DesignResponse) -> dict:
-    """designer-interface.md §7.1's response body."""
+    """designer-interface.md §7.1's response body; `rejected` only when there are any."""
     if response.candidates is not None:
-        return {
+        body = {
             "contract_version": response.contract_version,
             "candidates": [_candidate_to_json(c) for c in response.candidates],
         }
-    return {
-        "contract_version": response.contract_version,
-        "decline_reason": response.decline_reason,
-        "decline_message": response.decline_message,
-    }
+    else:
+        body = {
+            "contract_version": response.contract_version,
+            "decline_reason": response.decline_reason,
+            "decline_message": response.decline_message,
+        }
+    if response.rejected is not None:
+        body["rejected"] = [_candidate_to_json(c) for c in response.rejected]
+    return body
 
 
 _ALLOWED_BIQUAD_TYPES = {"peaking_eq", "low_shelf", "high_shelf"}
@@ -418,6 +479,8 @@ def validate_response(response: DesignResponse) -> None:
             "DesignResponse populates neither candidates nor decline_reason"
         )
 
+    _validate_rejected(response.rejected)
+
     if is_decline:
         if not isinstance(response.decline_reason, str) or not response.decline_reason:
             raise ContractViolation("decline_reason must be a non-empty string")
@@ -429,6 +492,11 @@ def validate_response(response: DesignResponse) -> None:
     previous_confidence = None
     for i, candidate in enumerate(response.candidates):
         _validate_candidate(candidate, i)
+        if candidate.rejection_reasons is not None:
+            raise ContractViolation(
+                f"candidates[{i}] carries rejection_reasons — a rejected design belongs in "
+                "rejected, never in candidates"
+            )
         if (
             previous_confidence is not None
             and candidate.confidence > previous_confidence
@@ -440,44 +508,68 @@ def validate_response(response: DesignResponse) -> None:
         previous_confidence = candidate.confidence
 
 
-def _validate_candidate(candidate: DesignCandidate, index: int) -> None:
+def _validate_rejected(rejected: list[DesignCandidate] | None) -> None:
+    """1.1: None or non-empty; every entry a valid candidate with reasons. No ordering rule."""
+    if rejected is None:
+        return
+    if len(rejected) == 0:
+        raise ContractViolation("rejected is an empty list — omit it instead")
+    for i, entry in enumerate(rejected):
+        _validate_candidate(entry, i, "rejected")
+        reasons = entry.rejection_reasons
+        if (
+            not isinstance(reasons, list)
+            or not reasons
+            or not all(isinstance(r, str) and r for r in reasons)
+        ):
+            raise ContractViolation(
+                f"rejected[{i}].rejection_reasons must be a non-empty list of non-empty "
+                f"strings, got {reasons!r}"
+            )
+
+
+def _validate_candidate(
+    candidate: DesignCandidate, index: int, where: str = "candidates"
+) -> None:
     if candidate.confidence is None or not (0.0 <= candidate.confidence <= 1.0):
         raise ContractViolation(
-            f"candidates[{index}].confidence must be in [0.0, 1.0], got {candidate.confidence}"
+            f"{where}[{index}].confidence must be in [0.0, 1.0], got {candidate.confidence}"
         )
     if candidate.mv_adjust_db is None or not math.isfinite(candidate.mv_adjust_db):
         raise ContractViolation(
-            f"candidates[{index}].mv_adjust_db must be a finite number, got {candidate.mv_adjust_db}"
+            f"{where}[{index}].mv_adjust_db must be a finite number, got {candidate.mv_adjust_db}"
         )
     if candidate.gain_reduction_db is not None and (
         not math.isfinite(candidate.gain_reduction_db)
         or candidate.gain_reduction_db > 0
     ):
         raise ContractViolation(
-            f"candidates[{index}].gain_reduction_db must be finite and <= 0, "
+            f"{where}[{index}].gain_reduction_db must be finite and <= 0, "
             f"got {candidate.gain_reduction_db}"
         )
     if not candidate.filters:
-        raise ContractViolation(f"candidates[{index}] has an empty filters list")
+        raise ContractViolation(f"{where}[{index}] has an empty filters list")
     if len(candidate.filters) > _MAX_BIQUAD_SECTIONS:
         raise ContractViolation(
-            f"candidates[{index}]: {len(candidate.filters)} sections exceeds the budget of "
+            f"{where}[{index}]: {len(candidate.filters)} sections exceeds the budget of "
             f"{_MAX_BIQUAD_SECTIONS}"
         )
     for i, spec in enumerate(candidate.filters):
-        _validate_biquad_spec(spec, i, index)
+        _validate_biquad_spec(spec, i, index, where)
     if candidate.commentary is not None:
         if not isinstance(candidate.commentary, dict) or not all(
             isinstance(k, str) and isinstance(v, str)
             for k, v in candidate.commentary.items()
         ):
             raise ContractViolation(
-                f"candidates[{index}].commentary must be a dict[str, str]"
+                f"{where}[{index}].commentary must be a dict[str, str]"
             )
 
 
-def _validate_biquad_spec(spec: BiquadSpec, index: int, candidate_index: int) -> None:
-    prefix = f"candidates[{candidate_index}].filters[{index}]"
+def _validate_biquad_spec(
+    spec: BiquadSpec, index: int, candidate_index: int, where: str = "candidates"
+) -> None:
+    prefix = f"{where}[{candidate_index}].filters[{index}]"
     if spec.type not in _ALLOWED_BIQUAD_TYPES:
         raise ContractViolation(f"{prefix}.type {spec.type!r} is not publishable")
     if not math.isfinite(spec.freq_hz) or spec.freq_hz <= 0:

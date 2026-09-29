@@ -62,7 +62,9 @@ and level-invariance floor fixed; goal tilt and goal tolerance dials; texture bl
 sub-band blocker and its content condition; overshoot past the goal (checked, no change);
 noise-floored injection (`inject_variants.py --noise-db`) and its ground-truth scoring
 (`score_injected.py`); the steep-filter opt-in `--content-edge` (default off); the probe
-now judges exactly as `run` does (`snapshot --content-edge` for the opt-in).
+now judges exactly as `run` does (`snapshot --content-edge` for the opt-in); designer contract
+1.1 — every design the judge failed goes back in `rejected` with its reasons, review only,
+beside the answer or the decline (probe unchanged; no decision touched).
 
 ### Priority order
 
