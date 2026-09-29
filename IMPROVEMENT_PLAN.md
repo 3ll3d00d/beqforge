@@ -32,7 +32,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 
 | ID | Status | Outcome, in one line (detail under "Progress") |
 | --- | --- | --- |
-| E1 | **open** | Not started. Priority 10 (insurance). |
+| E1 | **open** | Not started. Priority 11 (insurance). |
 | E2 | done | Corpus built (`negative_corpus.json`). Gated false acceptances 7/45 → 4/45 (low-end cap) → 0/45 (texture blocker); the gate passes. |
 | E3 | done | Hold and deficit cap applied to every strategy; the ranking is unchanged. |
 | E4 | parked | Not started; hypothesis with nothing pointing to it. Unparks if priority 4 or 6, or E9's audit, finds single-bin gaps. |
@@ -51,7 +51,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | T7 | checked | Low priority; no verdict depends on it. |
 | T8 | **open** | Chained tracking rejected. Step 1 (2026-09-29): the reference is stable under injection, the tracking floor is not — a steep filter lowers it by up to 1.5 octaves. Mechanism open: priority 7. |
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
-| F2 | **open** | Not started. Priority 9: needs a device-behaviour harness first. |
+| F2 | **open** | Not started. Priority 10: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
 | F4 | checked | Not adopted: both versions tried lose selections (a wrong decline on Bugonia; a corpus true positive). The fit's exposure is not what acceptance judges. Judging alternatives is parked. |
 | A1 | done | No tolerance moves. |
@@ -62,6 +62,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C5 | **open** | Not started. Priority 8, before C4: timings that account for elapsed time; fit stats per report. |
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
+| R2 | **open** | Not started. Priority 9: a shared-filesystem mode with beqdesigner — requests point at files, both sides share one cache, and a redesign skips the extraction. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
@@ -146,18 +147,25 @@ outside the harness, moves behind them.
    an answer. C5 first because it is a record schema change, and exact-preserving changes are
    compared on a schema that no longer moves; C4 is then exact-preserving and its saving can
    be measured rather than claimed from stage shares.
-9. **A device-behaviour harness, then F1/F2's limits for extreme sections (M/L).** `verify`
+9. **R2: a shared-filesystem mode with beqdesigner (M; requested 2026-09-29).** Requests
+   still arrive over the HTTP API, but may name a file or directory on a filesystem both
+   sides see instead of carrying the audio, and both sides keep their caches there. A
+   redesign of a title already analysed then skips the extraction and analysis. After the
+   items above because none of them waits on it; ahead of C4/C5's ordering only if repeat
+   requests become the cost that matters. Part of it is beqdesigner's contract, so it needs
+   agreeing there before the server side is final. See R2 under "Findings and checks".
+10. **A device-behaviour harness, then F1/F2's limits for extreme sections (M/L).** `verify`
    models coefficient quantisation at the declared precision, not the device's arithmetic
    (internal word length, rounding noise in the recursion, limit cycles), and that is where
    high-Q, very-low-frequency sections go wrong. Relaxing `max_q = 6.0` (F2), or trusting a
    steep inverse's sections, needs measurements of a real device playing them. F2 is decided
    here, not before. Blocked on device data; nothing else here waits on it.
-10. **E1: held-out verification (M, insurance).** `flatten` derives its target from the mix and
+11. **E1: held-out verification (M, insurance).** `flatten` derives its target from the mix and
    `verify` judges on the same mix, so tilt, level, extent and unevenness mostly confirm the
    cascade matches its own target. Deriving from one half of the programme (split by scene) and
    judging on the other would catch a target that overfits. Nothing is known to be wrongly
    accepted today (corpus gate 0/45), so this is insurance, not a fix.
-11. **Parked**, each with what would unpark it:
+12. **Parked**, each with what would unpark it:
    * E10 (a fresh validation protocol): before 3 changes a default, or before any tolerance is
      tuned again. The current corpus has informed every decision since E2.
    * E4 (ceiling holes): only if 4, 6 or E9's audit find unevenness failures or excess that
@@ -227,6 +235,7 @@ Effort: S = a day or less, M = a few days. "TODO n" is the item's former number 
 | **A1** | **Acceptance tolerances were tuned on titles with no negatives** *(verified)*: level 3 dB, tilt 2 dB/octave, spread margin 2 dB, cliff 2 dB/octave, overshoot 3 dB plus slack, extent 1.2x. That is the catalogue-calibration failure in miniature. | After E2 exists, sweep each tolerance and plot false-accept rate against true-positive rate. Move a tolerance only where the curve shows a clear knee; otherwise record it as a stated preference. | M |
 | **C1** | **`parametric` costs about a quarter of a run and rests on the weakest component** *(verified from AGENTS.md and the cache)*. The claim that it never produces the selected filter no longer holds: at HEAD it wins 28 Years Later, the largest boost on offer (see E3). Its passing candidates reach recovered fractions of 1.54 (Send Help), and it is rejected for 1.90 and 2.01 on Bugonia and Caught Stealing. Settle E3 before making it opt-in, since the verdicts are no longer identical without it. `plateau_reference` and `mean_spectrum` are also recomputed in `run`, `diagnose`, `flatten_targets`, `counterfactual_targets` and per candidate in `judged_band_hz`. | Make `parametric` opt-in and compute the shared plateau once on `Diagnosis`. Pass: identical verdicts across records, wall time down. **Exact-preserving; own commit.** | S |
 | **R1** | **The baseline must be reproducible from a record, and the review queue's output is not** *(observed)*. The designer server that produced the review queue is a PyInstaller build (`dist/beqforge serve-designer`) three days older than HEAD. On 28 Years Later it shipped a different filter from HEAD on input identical to 24-bit rounding (beqdesigner's `mono.wav` against the extracted mix: RMS difference 7e-6). HEAD itself is deterministic (a rerun reproduced every section). The designer response carries only the accepted candidate and no code revision, so a queue entry cannot say which build made it or why the losers lost. | Stamp the response (commentary or metadata) with the record fingerprint's revision and source hash. Have the server write the same `.run.json.gz` record `design_beq.py` does, beside the extraction. Pass: every queue entry can be replayed with `tools/replay.py`, and a stale build is visible without guessing. | S |
+| **R2** | **The designer path cannot share or reuse work** *(verified)*. A request carries every channel inline as base64 float64 (`designer.py`), so the server holds a copy of material beqdesigner already has on disk, and `designer.design` runs `pipeline.run` with no stage cache at all: every redesign of a title repeats `diagnose`/`extract`/`identify` (21-100 s) and the parametric fit even when only a goal dial changed. The pieces for reuse already exist for the CLI — the stage cache is keyed on a SHA-256 of the samples, the effective parameters and a digest of exactly the source files that compute each stage (`cache.ANALYSIS_MODULES`, `PARAMETRIC_MODULES`), so a code change that can move a stage invalidates it and one that cannot does not. Three gaps. (a) No way to name material by path, and the ffmpeg extraction beqdesigner does (and `tools/extract.py` duplicates) has no shared, keyed output either. (b) The cache lives beside the material, one file per title, written non-atomically and without locking — unsafe with two processes on a shared filesystem. (c) `cache.digest_of` reads `.py` sources, which a frozen build does not ship: the executable could not compute a stage key at all (records solve the same problem with a baked `BUILD_REVISION`; the cache would need a baked per-stage digest). | Design first, in agreement with beqdesigner's `designer-interface.md` (theirs to amend): a request form that names a shared location — the extracted `.npz` or the source, plus the layout/provenance fields the inline form carries — alongside the inline form, not replacing it; a cache directory both sides read and write, keyed by content (sample digest), not by path, so a moved or renamed file still hits; atomic writes (write then rename) and entries that are never mutated in place, so concurrent readers are safe without locks; stage keys stamped with per-stage code digests baked at build time for frozen builds, and the extraction step keyed on its own code and ffmpeg parameters so it can be shared too. "Materially changes": a whole-file digest over-invalidates on a comment edit — the safe direction — and a hand-bumped per-stage version would under-invalidate on a forgotten bump, so keep digests. Pass: a second request for the same title with a different goal dial reuses the analysis (timed, `compare_records.py` identical to a cold run); a request by path and one inline produce identical records; two servers or a server and the CLI on one cache never read a partial entry; the frozen executable hits the cache (`smoke_test_exe.py`); a changed analysis module misses. | M |
 | **C2** | Duplicate limitation notes (attached to every proposal; `evidence_notes` computed twice) and legacy aliases (`mv_adjust_db`, `is_filtered`, `confidence`). | Deduplicate notes; keep aliases only where the external contract needs them. Exact-preserving apart from note text. | S |
 | **C3** | **The parametric stage cache is keyed on too little** *(verified)*. The configuration in its key is `parametric_params`, the fitter's `DesignParams`, but `parametric_targets` also calls `low_end_deficit_db`, `priced_by_evidence` and `_worth_correcting`, which read the goal dials and target rules on `PipelineParams`. The review found goal tilt, goal tolerance, `flatten`'s taper ratio and the verification floor each left the key unchanged. `PARAMETRIC_MODULES` also omits `verify.py`, where `house_curve_db` lives. A CLI rerun that changes one of these reuses a stale proposal. The designer server does not use the stage cache, so its responses are unaffected. | Key on a derivation configuration holding every field the call graph reads, and add `verify.py` to the modules; over-invalidating is the right direction to be wrong in. Pass: for each consumed setting, a warm run after changing it equals a fresh run at that setting (targets, filters, method, verdict), including a tilted goal, a tolerance that suppresses the proposal, exclusions and `--content-edge`; an edit to the fitter still reuses the analysis; probe at `--tol 0` shows nothing on defaults. | S |
 | **C4** | **The same device waveform is computed twice per candidate, and the sub feed once per candidate** *(verified)*. `_judge` rebuilds the bass-managed sub feed for every candidate; `verify` and `measure_headroom` each call `device_waveform` on that feed with the same cascade (the second only to keep the ring-out); the unfiltered spectrum and plateau reference are recomputed each time too. Headroom's 16x peak interpolation is real work either way. | Build the sub feed, its spectrum and its reference once per run; apply the device once per stable cascade with its ring-out, Welch the programme slice, peak the whole. Keep the unstable and no-filter paths explicit, and release each waveform after measuring. Identical published cascades may share measurements but are still assessed against their own intent. **Exact-preserving; own commit:** `compare_records.py` identical, headroom included (the probe skips headroom); programme slice equal to `include_tail=False` in a test. | S |
@@ -913,6 +922,12 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     fitter picks from, on its own objective, finds cascades acceptance rejects. The residual
     is not a proxy for the verdict ("never trust a residual", from the other side). Using the
     discarded fits properly means judging them; parked under priority 11.
+* **R2 — added (2026-09-29).** Requested: let beqforge and beqdesigner work off a shared
+  filesystem, with requests able to point at files and one cache both sides use, so a
+  redesign skips the extraction. Reading the code for it: the server takes audio inline and
+  uses no stage cache; the stage keys already carry the per-stage code digest the request
+  asks for; `cache.digest_of` would fail in the frozen build. Placed at priority 9; the
+  device harness and E1 move to 10 and 11. No code yet.
 * **E9 — done (2026-09-29).** Every candidate now carries `evidence_excess`
   (`pipeline.evidence_excess`, into the record and, for the selected one, the corpus's per-case
   output): the exact published, quantised device response against `contrast_ceiling_db`, over
