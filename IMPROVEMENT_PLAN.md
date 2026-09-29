@@ -102,13 +102,14 @@ outside the harness, moves behind them.
      on (Master and Commander, Kingdom of Heaven DC, Hunger Games: Songbirds & Snakes,
      Nobody, Wreck-It Ralph, Battleship; also Mad Max 2, Midnight Run). None is on hand yet;
    * a floor other than white: codec-like or coloured noise in `inject_variants.py`;
-   * the engineering part, which can start now: `score_injected.py` reports gain where noise
-     dominates, not the noise level that results. +17 dB into a floor at −80 dB is a different
-     listening claim from +17 dB into an audible one. Score on a common reference, apply the
-     published device response separately to the known programme and noise components, and
-     report absolute corrected noise and how much of the programme it sits under; replace
-     the fixed 60 Hz scoring edge with a band declared per recipe. Keep the old scores beside
-     the new ones.
+   * the corrected noise level, now measured (see Progress): with the option on, the noise
+     floor on the steep injections ends up 28-80 dB below the plateau; the worst lift is Hulk
+     at a −40 dB floor, +12 dB to −28 dB re plateau. The +16.8 dB case above leaves it at
+     −63 dB. Whether −28 dB of lifted noise in the sub band is acceptable is the listening
+     question. Still open on the scoring side: coloured floors, and a truth band declared per
+     recipe instead of the fixed 60 Hz top.
+  Priority 4 adds to this: on steep injections the shape clauses reject the candidate
+  closest to truth, in both modes.
 
    A change of default is a decision change: E10's protocol should exist before it.
 4. *(Checked — ranking retained; see Progress.)* Weak winners on steep variants are an
@@ -950,6 +951,13 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **Priority 3, scoring — corrected noise level (2026-09-29).** `score_injected.py` now
+  reports where the noise ends up, not only how much it was lifted: the injected floor is white
+  at `noise_db` below the plateau, so the corrected noise is `gain − noise_db` re plateau.
+  On the 18 noise-floored steep variants with `--content-edge` (winners from the refit-probe
+  baseline): Black Bag's lifts are 0-7 dB, leaving the floor 36-80 dB down; Hulk's are 4-17 dB,
+  leaving it 28-76 dB down, the worst at −40 dB floors (BW8 @ 30: +12.1 → −27.9 dB; BW12 @ 30:
+  +11.7 → −28.3). Tools only; no decision touched.
 * **T8 steps 2-3 — why the floor moves (2026-09-29).** Analysis only, on Black Bag and its
   variants (the reference plateau is 50.2-82.8 Hz on all used here, per step 1).
   * **Not leakage in the measurement.** Each band's envelope comes from a 4th-order

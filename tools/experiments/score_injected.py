@@ -14,6 +14,10 @@ has a run record (beside it, or in `--records`):
   minus the variant's, each relative to its own reference (median and worst, dB).
 * **Gain where noise dominates.** The frozen protocol's measure: the most the accepted
   cascade boosts any bin where our noise's density exceeds the filtered programme's.
+* **Noise after correction.** Where that gain lands: the injected floor sits `noise_db` below
+  the plateau at every bin, so the corrected noise is `gain - noise_db` relative to it. The
+  gain alone is not a listening claim — +17 dB into a floor 80 dB down leaves it 63 dB down,
+  into one 40 dB down leaves it 23 dB down (IMPROVEMENT_PLAN priority 3).
 
 Truth never reaches the pipeline; this only reads what it produced.
 """
@@ -123,17 +127,20 @@ def main() -> int:
             inside = (vf >= edge) & (vf <= TOP_HZ)
             short = np.interp(vf, of, target_after)[inside] - after[inside]
             noisy_gain = math.nan
+            noise_after = math.nan
             if dominated is not None:
                 fc, sc, floor = dominated
                 noisy = (
                     (np.interp(vf, fc, sc) < floor) & (vf >= BOTTOM_HZ) & (vf <= TOP_HZ)
                 )
                 noisy_gain = float(np.max(gain[noisy])) if noisy.any() else 0.0
+                # the injected floor is white at `noise_db` below the plateau
+                noise_after = noisy_gain - noise_db
             print(
                 f"{name:<34} edge {edge:5.1f} Hz  {winner['label']:<20} "
                 f"peak {np.max(gain):5.1f} dB  shortfall median {np.median(short):5.1f} "
                 f"worst {np.max(short):5.1f} dB  gain where noise dominates "
-                f"{noisy_gain:5.1f} dB"
+                f"{noisy_gain:5.1f} dB, leaving it {noise_after:6.1f} dB re plateau"
             )
     return 0
 
