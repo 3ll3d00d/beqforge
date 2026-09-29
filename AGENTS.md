@@ -487,6 +487,21 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
 
 ### Publication, playback and verification
 
+* **Robustness is measured five ways, and they answer different questions.** Do not add one
+  to another, or compare one against a limit meant for another:
+
+  | Quantity | What it measures | Where, over what |
+  | --- | --- | --- |
+  | Fit objective (`_fit_structure`'s cost) | the larger of the worst error against the target and the worst change exact-coefficient device quantisation makes to the response | the optimiser's raw parameters, over the fit's scoring band (`residual_band_hz`, widened to cover placements) |
+  | `fit_error_db` / designer `residual_db` | that objective — **except** that when `_prune` drops a section it becomes the pure worst error against the target, without the quantisation term. Two meanings in one field (TODO 5); the escalation's `residual_target_db` compares against it | as above |
+  | Drift, p90 (`_published_drift`, `Verdict.drift_db`) | the 90th percentile, over `drift_samples` jitters of the *published* parameters by their rounding step, of the worst change quantisation makes — how fragile the neighbourhood is, not what the published filter does | published parameters (since the F1 follow-up both use them), 3-400 Hz design grid |
+  | Exposure (`_exposure_db`) | the fallback's ranking when no fit reaches the residual target: the residual, plus the drift if over `max_drift_db`. A sampled heuristic, not a bound on the published response | as its two terms |
+  | `device_error_db` and the corrected curve | what the device will actually do: the exact published, quantised response against the unquantised one (`device_error_db`), and that response applied to the programme (`verify`) — the only one that is not a model | published parameters, quantised coefficients, design grid / the programme |
+
+  Strict Jury stability (`unstable_sections`) is separate from all five and is a veto: a
+  cascade that is unstable at its published, quantised coefficients is never accepted, and its
+  drift and exposure are infinite.
+
 * **Headroom is a clipping question on the sub feed, not a master-volume figure.** A BEQ runs
   post bass management on the sub channel only, so a large boost usually costs the listener
   nothing. `PlaybackParams` declares the assumed model (default: historical LR4 mains crossover

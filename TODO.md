@@ -108,6 +108,12 @@ Items 1 (derive `restore_caps_db` from `filter_floor_hz`) and 2 (replace
    never reconciled with the external `designer-interface.md` contract's older wording that
    `non_parametric` candidates should leave it `None`. Check whether that wording has since
    been revised before treating this as settled either way.
+   Also (found 2026-09-29): for a fitted candidate the value is the fitter's objective — the
+   larger of the target error and the exact-coefficient quantisation change — unless `_prune`
+   dropped a section, when it is the pure target error. The contract defines `residual_db` as
+   the target error (`filters.residual_db`). Making it one quantity changes what the
+   escalation's `residual_target_db` compares against, so it is a decision change and needs
+   the regression workflow, not just a relabel.
 6. `Candidate.confidence` not reordering `Report.accepted` moved to
    [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) as **E3**, which also asks for the decision to be
    written down.

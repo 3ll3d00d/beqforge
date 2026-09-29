@@ -118,11 +118,9 @@ outside the harness, moves behind them.
    parameters, as `accept` does (see Progress). Checked, no change: the screen measures over
    the whole 3-400 Hz grid while the fit scores from 5 Hz — the screen exists to predict the
    drift the verdict reports, which is also over 3-400 Hz, so they agree; the fit's own band is
-   where it searches, a different question. Still to do, docs only: write down
-   what each robustness quantity means (nominal residual, published-device residual, exact
-   stability, jitter sensitivity, the selection objective) and over which band. The
-   residual-plus-p90-drift exposure F1 ranks by is a sampled heuristic, not a worst-case
-   bound on the published response, and should not be described as one.
+   where it searches, a different question. Done: what each robustness quantity means is in
+   AGENTS.md ("Publication, playback and verification"); writing it down found that
+   `fit_error_db` means two things (TODO 5).
 7. **T8: the tracking floor follows a steep filter's leakage (step 1 done, see Progress).**
    The floor decides where the target is held flat and where the judged band starts; a falsely
    low one lets boost reach bins whose tracked energy is not the programme's own. Step 1 found
@@ -944,6 +942,12 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   * **Decision:** adopted. It corrects what the screen measures rather than tuning it, loses
     no true positive and admits no false acceptance; the winner changes score as well
     against truth, give or take a dB, except one weaker opt-in answer. Records not refreshed.
+* **F1 follow-up, docs (2026-09-29).** AGENTS.md now says what each robustness quantity
+  measures and over what — fit objective, `fit_error_db`, p90 drift, exposure, device error
+  and the corrected curve — and that stability is a separate veto. Writing it down found
+  `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
+  whichever is larger) unless pruning dropped a section, then the target error alone. Added to
+  TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
 * **Priority 4 — weak winners on steep variants: checked, ranking retained (2026-09-29).**
   Every candidate on all 43 steep variants, from the refit-probe snapshot at a91e24c (both
   modes), scored against the injected truth as `score_injected.py` does (median shortfall
