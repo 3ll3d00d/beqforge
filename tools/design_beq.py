@@ -235,6 +235,12 @@ def show_cost(report: Report) -> None:
         share = 100.0 * seconds / total if total else 0.0
         bar = "#" * int(round(share / 2.0))
         print(f"  {label:<18s}{seconds:8.1f} s {share:5.1f}%  {bar}")
+    print(
+        f"\n  {report.timings.elapsed_s:.1f} s elapsed, "
+        f"{report.timings.unattributed_s:.1f} s outside any stage"
+    )
+    for label, seconds in sorted(report.timings.details.items()):
+        print(f"    {label:<18s}{seconds:8.1f} s")
     print(f"\n  fitting: {report.fit_stats}")
     print(
         "\n  Optimiser runs are seeds * M * (M + 1) / 2 per candidate, for M sections —\n"

@@ -98,6 +98,9 @@ class Timings:
 
     def __init__(self) -> None:
         self.stages: list[tuple[str, float]] = []
+        self.details: dict[str, float] = {}
+        self._started = time.perf_counter()
+        self.elapsed_s: float = math.nan
 
     @contextmanager
     def stage(self, label: str):
@@ -107,9 +110,35 @@ class Timings:
         finally:
             self.stages.append((label, time.perf_counter() - started))
 
+    @contextmanager
+    def detail(self, label: str):
+        """Time part of a stage, summed per label; never counted in `total_s`.
+
+        What judging is spent on (verify, headroom, assess) sits inside each `judge/…` stage,
+        so it is kept apart rather than nested, where it would be counted twice.
+        """
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.details[label] = (
+                self.details.get(label, 0.0) + time.perf_counter() - started
+            )
+
+    def finish(self) -> "Timings":
+        """Stamp the run's wall time; what the stages do not cover becomes visible."""
+        self.elapsed_s = time.perf_counter() - self._started
+        return self
+
     @property
     def total_s(self) -> float:
+        """The sum of the timed stages — not the run's wall time, see `elapsed_s`."""
         return sum(seconds for _, seconds in self.stages)
+
+    @property
+    def unattributed_s(self) -> float:
+        """Wall time no stage accounts for: cache I/O and hashing, blockers, references."""
+        return self.elapsed_s - self.total_s
 
 
 PUBLISH_FS = 96000.0
@@ -1578,8 +1607,8 @@ def run(
             diagnosis,
             identification,
             [],
-            timings,
-            FIT_STATS,
+            timings.finish(),
+            dataclasses.replace(FIT_STATS),
             accept=params.accept,
             evidence_notes=analysed.limitations,
             mix_reference_db=analysed.mix_reference_db,
@@ -1599,8 +1628,8 @@ def run(
             diagnosis,
             identification,
             [],
-            timings,
-            FIT_STATS,
+            timings.finish(),
+            dataclasses.replace(FIT_STATS),
             accept=params.accept,
             evidence_notes=(*analysed.limitations, within),
             mix_reference_db=analysed.mix_reference_db,
@@ -1644,6 +1673,7 @@ def run(
                     effective_params=proposal.effective_params,
                     judged_band=analysed.judged_band_hz,
                     ceiling_db=ceiling,
+                    timings=timings,
                 )
             )
         candidates[-1] = dataclasses.replace(
@@ -1675,8 +1705,9 @@ def run(
         diagnosis=diagnosis,
         identification=identification,
         candidates=candidates,
-        timings=timings,
-        fit_stats=FIT_STATS,
+        timings=timings.finish(),
+        # a copy: the next run resets the process-wide counter, and a report is kept
+        fit_stats=dataclasses.replace(FIT_STATS),
         accept=params.accept,
         evidence_notes=analysed.limitations,
         mix_reference_db=analysed.mix_reference_db,
@@ -1861,6 +1892,7 @@ def _judge(
     effective_params: str | None = None,
     judged_band: tuple[float, float] | None = None,
     ceiling_db: np.ndarray | None = None,
+    timings: Timings | None = None,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
@@ -1870,41 +1902,46 @@ def _judge(
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
-    sub = bass_managed_sum(material, playback=params.playback)
+    timings = timings or Timings()
+    with timings.detail("judge.sub_feed"):
+        sub = bass_managed_sum(material, playback=params.playback)
     if sub is None:
         raise ValueError("playback verification unavailable: no channel decomposition")
-    correction = verify(
-        filters,
-        sub,
-        float(material.fs),
-        # the same for every candidate, so `run` passes the one `analyse` found
-        band_hz=judged_band or judged_band_hz(material, diagnosis, params),
-        diagnose_params=params.diagnose,
-        exclude_bands_hz=params.exclude_bands_hz,
-        accept_params=params.accept,
-        realisation=params.realisation,
-        priced_target_db=target,
-        reference_samples=material.mono_mix,
-        playback_model=params.playback.description(),
-    )
-    headroom = measure_headroom(material, filters, params, sub_samples=sub)
-    verdict = assess(
-        filters,
-        correction,
-        diagnosis.noise_floor_hz,
-        params.accept,
-        params.realisation,
-        filter_floor_hz=diagnosis.filter_floor_hz,
-        required_offset_db=headroom.offset_db,
-        target_db=target,
-        # the band `_fit_all` let this target's sections be placed in: a section is credited
-        # for work the fitter asked of it, not only for work inside the judged band
-        contribution_band_hz=(
-            None
-            if target is None
-            else correction_band_hz(target, DESIGN_GRID, params.lowest_frequency_hz)
-        ),
-    )
+    with timings.detail("judge.verify"):
+        correction = verify(
+            filters,
+            sub,
+            float(material.fs),
+            # the same for every candidate, so `run` passes the one `analyse` found
+            band_hz=judged_band or judged_band_hz(material, diagnosis, params),
+            diagnose_params=params.diagnose,
+            exclude_bands_hz=params.exclude_bands_hz,
+            accept_params=params.accept,
+            realisation=params.realisation,
+            priced_target_db=target,
+            reference_samples=material.mono_mix,
+            playback_model=params.playback.description(),
+        )
+    with timings.detail("judge.headroom"):
+        headroom = measure_headroom(material, filters, params, sub_samples=sub)
+    with timings.detail("judge.assess"):
+        verdict = assess(
+            filters,
+            correction,
+            diagnosis.noise_floor_hz,
+            params.accept,
+            params.realisation,
+            filter_floor_hz=diagnosis.filter_floor_hz,
+            required_offset_db=headroom.offset_db,
+            target_db=target,
+            # the band `_fit_all` let this target's sections be placed in: a section is credited
+            # for work the fitter asked of it, not only for work inside the judged band
+            contribution_band_hz=(
+                None
+                if target is None
+                else correction_band_hz(target, DESIGN_GRID, params.lowest_frequency_hz)
+            ),
+        )
     if ceiling_db is not None:
         verdict = _within_ceiling(verdict, correction, ceiling_db, params)
     verdict.notes.append(

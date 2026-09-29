@@ -58,8 +58,8 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
 | C3 | done | The parametric stage cache is keyed on everything its derivation reads; defaults unchanged. |
-| C4 | **open** | Not started. Priority 8: one device waveform per candidate, one sub feed per run. |
-| C5 | **open** | Not started. Priority 8, before C4: timings that account for elapsed time; fit stats per report. |
+| C4 | **open** | Rescoped by C5's measurement: headroom's interpolated peak is 82% of judging, the duplicated waveform about 2 s a run. Now: skip blocks that provably cannot hold the peak (exact). Priority 8. |
+| C5 | done | Records carry elapsed time, what no stage covers, judging's breakdown and the fit statistics; reports keep their own copy of the fit cost. |
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
@@ -134,11 +134,12 @@ outside the harness, moves behind them.
    the floor as the lowest band of the contiguous run the plateau reaches with confidence —
    judged with the probe and `refit_probe.py` (the floor moves targets and judged bands), and
    the synthetic protocol and corpus, since a lower floor can license more boost.
-8. **C5, then C4: account for a run's time, then stop computing things twice (S each).**
-   Speed is not a problem at 40-80 s a title, so this sits below everything that can change
-   an answer. C5 first because it is a record schema change, and exact-preserving changes are
-   compared on a schema that no longer moves; C4 is then exact-preserving and its saving can
-   be measured rather than claimed from stage shares.
+8. **C4: an exact, faster headroom peak (S).** C5 measured where judging goes: on 28 Years
+   Later, 18.3 s of its 22.3 s is headroom's 16x-interpolated peak over the whole programme;
+   the waveform and sub feed C4 was going to stop recomputing cost about 2 s a run. So C4 now
+   targets the peak: interpolate blocks loudest first and skip any whose largest possible
+   interpolated value (its largest sample times the kernel's gain bound) is below the best
+   found — the same answer, bit for bit. Exact-preserving; own commit.
 9. **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
    redesign of a title already analysed then skips `diagnose`/`extract`/`identify` and a
    parametric fit whose key did not move. Implementation plan, five commits:
@@ -952,6 +953,20 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **C5 — done (2026-09-29).** `Timings` now stamps the run's wall time (`elapsed_s`) and
+  reports what no stage covers (`unattributed_s`), and times judging's parts (`details`:
+  sub feed, verify, headroom, assess) beside the stages rather than inside them, so nothing
+  is counted twice. Each report gets its own copy of `FIT_STATS` — it aliased the
+  process-wide counter, which the next run reset. The record's `timings` carries all of it
+  plus the fit statistics (optimiser runs, worker seconds, cost evaluations); older records
+  simply lack them, and nothing reads them. `design_beq.py` prints them.
+  * **Checks:** tests (elapsed covers the stages; details are not in the total; a report's
+    fit cost survives a reset; the record carries it); full suite passes. Probe at `--tol 0`
+    against E9's snapshot: nothing moved. 28 Years Later, `--no-cache`, against the F1
+    follow-up's record of the same code: `compare_records.py` identical.
+  * **What it measured** (28 Years Later, cold, one run): 129.7 s elapsed, 0.9 s outside any
+    stage. Judging 22.3 s: headroom 18.3, verify 2.7, sub feed 1.2, assess 0.02. Fitting: 30
+    optimiser runs, 200 s of worker time, 1.65M cost evaluations. This rescoped C4.
 * **Priority 3, scoring — corrected noise level (2026-09-29).** `score_injected.py` now
   reports where the noise ends up, not only how much it was lifted: the injected floor is white
   at `noise_db` below the plateau, so the corrected noise is `gain − noise_db` re plateau.

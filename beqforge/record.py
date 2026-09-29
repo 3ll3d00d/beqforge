@@ -437,6 +437,16 @@ def write(
         "timings": {
             "total_s": round(report.timings.total_s, 3),
             "stages": [[n, round(s, 3)] for n, s in report.timings.stages],
+            # wall time of the whole run and what no stage covers (IMPROVEMENT_PLAN C5);
+            # absent in older records
+            "elapsed_s": _num(round(report.timings.elapsed_s, 3)),
+            "unattributed_s": _num(round(report.timings.unattributed_s, 3)),
+            "details": {k: round(v, 3) for k, v in report.timings.details.items()},
+            "fit": {
+                "optimiser_runs": report.fit_stats.calls,
+                "worker_seconds": round(report.fit_stats.seconds, 3),
+                "cost_evaluations": report.fit_stats.cost_evaluations,
+            },
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
