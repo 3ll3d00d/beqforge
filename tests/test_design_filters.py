@@ -348,6 +348,51 @@ def test_an_impossible_drift_limit_still_returns_a_cascade() -> None:
     assert specs
 
 
+def test_the_fallback_charges_a_fragile_cascade_its_drift_rather_than_vetoing_it() -> (
+    None
+):
+    """Nothing reached the residual target: keep the least exposed, drift added to error.
+
+    As a veto the drift screen decided on luck (IMPROVEMENT_PLAN F1): on a steep inverse the
+    lone section happened to publish and a 13.9 dB fit was kept over a 0.5 dB one drifting
+    3.8 dB. Residual plus drift bounds how far what plays can sit from the target.
+    """
+    one = [BiquadSpec("low_shelf", 26.87, 16.14, 5.797)]
+    three = [
+        BiquadSpec("low_shelf", 13.32, -12.51, 2.005),
+        BiquadSpec("low_shelf", 21.15, 14.49, 2.711),
+        BiquadSpec("peaking_eq", 16.67, 26.0, 1.857),
+    ]
+
+    def finished(*entries):
+        screened = [
+            (
+                specs,
+                residual,
+                drift <= 3.0,
+                F._exposure_db(residual, drift, drift <= 3.0),
+            )
+            for specs, residual, drift in entries
+        ]
+        state = F._Escalation(F.FitRequest(np.zeros(3)), screened=screened)
+        state.finish()
+        return state.answer
+
+    # Hulk BW8 @ 30 Hz, -80 dB: far more accurate than it drifts, so the cascade is kept
+    assert finished((one, 13.86, 2.08), (three, 0.509, 3.84)) == (three, 0.509)
+    # corpus filtered/1: better by less than it drifts, so the robust shelf stays. Charged
+    # only the larger of the two (3.5 < 3.852) it displaced the shelf and lost a true positive
+    assert finished((one, 3.852, 1.25), (three, 2.283, 3.5)) == (one, 3.852)
+    # Obsession counterfactual/25dB: an 11 dB drift is never worth 2.7 dB of accuracy
+    assert finished((one, 4.653, 2.39), (three, 1.979, 11.13)) == (one, 4.653)
+    # inside the limit drift is only a preference: the most accurate robust cascade, as before
+    assert finished((one, 0.9, 2.9), (three, 0.6, 0.1)) == (three, 0.6)
+    # nothing inside the limit: the least exposed, not simply the most accurate
+    assert finished((one, 1.0, 3.2), (three, 0.5, 9.0)) == (one, 1.0)
+    # equal exposure: fewer sections
+    assert finished((one, 4.5, 1.0), (three, 0.5, 4.0)) == (one, 4.5)
+
+
 def test_memoised_twiddles_do_not_change_the_response() -> None:
     """The twiddle cache is an optimisation and must be invisible in the answer.
 
@@ -490,15 +535,13 @@ def test_escalating_reaches_what_enumerating_reached() -> None:
         specs, residual = F._prune(
             (best[0], best[1]), target, freqs, 96000.0, (5.0, 200.0), 1.0
         )
-        screened.append(
-            (specs, residual, F._publishable(specs, residual, freqs, realisation, 3.0))
-        )
+        drift = F._published_drift(specs, freqs, realisation, 3.0)
+        ok = F._within_drift(specs, residual, drift, 3.0)
+        screened.append((specs, residual, ok, F._exposure_db(residual, drift, ok)))
+    # the first that clears both bars, else the least exposed (IMPROVEMENT_PLAN F1)
     enumerated = next(
-        ((s, r) for s, r, ok in screened if ok and r <= 0.5),
-        min(
-            [(s, r) for s, r, ok in screened if ok] or [(s, r) for s, r, _ in screened],
-            key=lambda x: x[1],
-        ),
+        ((s, r) for s, r, ok, _ in screened if ok and r <= 0.5),
+        min(((s, r, e) for s, r, _, e in screened), key=lambda x: x[2])[:2],
     )
 
     assert escalated[1] == enumerated[1]

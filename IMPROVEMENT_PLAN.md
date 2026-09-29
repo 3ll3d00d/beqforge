@@ -48,7 +48,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
 | T8 | checked | Chained tracking rejected. The floor still depends on the reference: priority 4 checks how much. |
-| F1 | **open** | Not started. Priority 2: now blocks steep recovery (every 2-4 section fit over the drift limit on Hulk BW8 @ 30, −80 dB). |
+| F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
 | F2 | **open** | Not started. Priority 5: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
 | A1 | done | No tolerance moves. |
@@ -80,12 +80,14 @@ not in "Suggested order" below, which is the historical order the plan was worke
      on (Master and Commander, Kingdom of Heaven DC, Hunger Games: Songbirds & Snakes,
      Nobody, Wreck-It Ralph, Battleship; also Mad Max 2, Midnight Run). None is on hand yet;
    * a floor other than white: codec-like or coloured noise in `inject_variants.py`.
-2. **F1: fitter and judge disagree on drift.** Now a concrete blocker, not a tidy-up: on Hulk
-   BW8 @ 30, −80 dB, every 2-4 section fit exceeds the 3 dB drift limit once published and the
-   fitter falls back to one section. Steep inverses need exactly the sections rounding moves.
+2. *(F1, done — see Progress.)* Two follow-ups it left, neither blocking: the screen measures
+   drift on the optimiser's raw parameters and `accept` on the published ones (Hulk's 3-section
+   `flatten`: 3.84 dB against 3.08), and it measures over the whole 3-400 Hz grid while the fit
+   scores from 5 Hz. Each is a small, separate decision change.
 3. **Selection on steep variants picks the weaker candidate.** On two Black Bag variants a
    `counterfactual` with a 5 dB median shortfall won where `flatten` got within 1 dB on the
-   neighbouring noise levels. Find out why `flatten` failed there. If the cause is a
+   neighbouring noise levels; since F1 the default also accepts Black Bag BW16 @ 30 (no
+   noise) as a `counterfactual/50dB` 6.5 dB short. Find out why `flatten` failed there. If the cause is a
    `counterfactual` cap of the wrong size, T2 (derive the caps per channel) is done as part of
    this.
 4. **T8 check: does tracking depend on the reference?** The tracking floor is the lowest band
@@ -699,6 +701,63 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     and 6.6 dB into noise). The synthetic protocol and corpus figures above are the
     prototype's; the port reproducing the variants and `steep_leakage` exactly is why they
     were not rerun.
+* **F1 — done: the drift screen charges a fragile cascade its drift instead of vetoing it.**
+  * **The inconsistency.** `AcceptParams.max_drift_db` says the fitter uses drift only to
+    *prefer* a robust cascade among equals; `accept` judges the published, quantised response
+    and does not gate on drift. But when no section count reached the residual target,
+    `_Escalation.finish` kept the most accurate cascade *inside* the limit however much worse
+    it was, and the most accurate of all when none was inside. So drift decided on luck. On
+    Hulk BW8 @ 30, −80 dB every 2-4 section fit reached 0.5-1.9 dB and drifted 3.5-9 dB (p90);
+    the lone section happened to drift 2.1, and a 13.9 dB fit was kept over a 0.5 dB one.
+    Where nothing was inside the limit, drift was ignored entirely: Send Help's accepted
+    `flatten` drifts 3.9 dB, Obsession's losing `counterfactual/35dB` 21 dB.
+  * **The planned check (a smooth pole-radius penalty) cannot fix it.** It was tried as P20
+    (e573354): a far better predictor of p90 drift, rejected at 2.25x the fit cost. A cheap
+    closed form, Σ 20·log10(1 + step·(1/|A(e^jω)| + 1/|B(e^jω)|)) per bin (log correlation 0.94
+    with p90 over 150 random low-frequency cascades), was tried here in the cost on Hulk's
+    `flatten` target. The fits get more robust but not robust enough: 3-4 sections at residual
+    3.4-3.7 dB and p90 3.4-4.5 dB, against 0.5 dB and 3.8 unpenalised. No cascade reaches
+    both, because an 8th-order inverse at 30 Hz needs poles near z = 1 at 96 kHz (the worst
+    drift sits at 6-7 Hz, below the tracking floor). The limit is a property of the target.
+  * **The change.** `finish` keeps the cascade with the least *exposure*: the residual inside
+    the drift limit (so the order there is exactly as before), residual **plus** drift outside
+    it — the triangle-inequality bound on how far what plays can sit from the target. Ties go
+    to fewer sections. `settle` (first count that both publishes and reaches the target) is
+    untouched. Taking the *larger* of residual and drift was tried first and **rejected**: on
+    the corpus's `filtered/1` it swapped a publishable 3.85 dB shelf for a 2.28 dB cascade
+    drifting 3.5, realised 3.6 dB off on the device and rejected for a cliff (a lost true
+    positive). Dropping the screen altogether was worse again: on Obsession a 2.0 dB cascade
+    drifting 11.1 dB with 1.8 steps of DC headroom displaced a 4.65 dB shelf and still passed.
+  * **Hulk BW8 @ 30, −80 dB, `--content-edge`:** now accepted — `flatten`, 3 sections (low
+    shelf 13.32 Hz −12.5 dB, low shelf 21.15 Hz +14.5 dB, peak 16.67 Hz +26.0 dB), spread
+    3.0 dB, tilt +0.2 dB/oct, 0.60 dB of device rounding error. Against injected truth:
+    median shortfall 0.5 dB inside the recoverable band, 11.4 dB gained where noise dominates
+    (its neighbours: 10.7 on −60, 16.8 on BW16 −80 — the opt-in's known cost, not new). By
+    default it still declines, on the cliff, as before.
+  * **Real titles.** Probe at `--tol 0`: unchanged on all eleven (it does not refit). Real runs
+    on all eleven, with a scratch-only log line naming every fallback that differs from
+    HEAD's rule: two fits on two titles, **no winner changes**. Obsession's
+    `counterfactual/35dB` goes 3 sections → 1 and fails either way. Send Help's
+    `counterfactual/25dB` (neither fit inside the limit) goes from a 1.35 dB fit drifting
+    6.7 dB, which passed, to a 2.17 dB fit drifting 4.8, which fails on tilt: a passing loser
+    lost, recorded rather than tuned around. Every other difference `compare_verdicts.py`
+    shows against the baseline records (28 Years Later, Bugonia, Caught Stealing) predates
+    this change; the log line did not fire there.
+  * **Synthetic protocol**, both seeds, HEAD against the change: no decision moves; failure
+    text changes only on candidates rejected both times (natural_bass_light, varying_filtered,
+    steep_leakage).
+  * **Negative corpus:** identical to `negative_corpus.json` on all 63 cases (selection,
+    sections, recovery): gated 0/45, gate passes; natural_droop 5/9; positives 7/9.
+  * **Steep variants** (31: Black Bag, Hulk, Send Help), option on and off. The log line fired
+    on 11 in each mode; those 22 were rerun at HEAD to compare (the rest are unchanged by
+    construction). **On:** Hulk BW8 @ 30, −80 dB declined → accepted (above); two no-noise Hulk
+    controls change winner and get no worse (BW12 @ 32: `parametric` 1.2 dB median shortfall →
+    `counterfactual/50dB` 0.7; BW16 @ 30: 0.5 → 0.4). Noise-floored variants accepted: 18/18
+    (was 17). **Off (default):** Black Bag BW16 @ 30, a no-noise control, declined → accepted
+    as `counterfactual/50dB` with a 6.5 dB median shortfall: nothing lifted where there is no
+    noise, but a weak partial answer — the same pattern as priority 3. Hulk BW8 @ 30, −80 dB
+    declines either way; only the reason changes.
+  * **Records** not refreshed: no real title's winner moved.
 
 ## Baseline: 2026-09-26 track set
 

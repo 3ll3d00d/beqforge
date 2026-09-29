@@ -490,9 +490,11 @@ class _Escalation:
     """One target's state while the section budget is escalated across all of them."""
 
     request: FitRequest
-    screened: list[tuple[list[BiquadSpec], float, bool]] = field(default_factory=list)
-    """Per section count, ascending: the pruned cascade, its residual, and whether it
-    survives publication rounding."""
+    screened: list[tuple[list[BiquadSpec], float, bool, float]] = field(
+        default_factory=list
+    )
+    """Per section count, ascending: the pruned cascade, its residual, whether it survives
+    publication rounding, and its exposure (`_exposure_db`)."""
 
     seconds: float = 0.0
     answer: tuple[list[BiquadSpec], float] | None = None
@@ -506,7 +508,7 @@ class _Escalation:
         later can change whether an earlier one passed. If one has already cleared both, it is
         the answer the whole budget would have produced.
         """
-        for specs, residual, publishable in self.screened:
+        for specs, residual, publishable, _ in self.screened:
             if publishable and residual <= residual_target_db:
                 logger.info(
                     f"{self.request.label or 'target'}: {len(specs)} section(s) reach "
@@ -517,20 +519,38 @@ class _Escalation:
                 return
 
     def finish(self) -> None:
-        """Nothing cleared both bars, so fall back the way the full enumeration does.
+        """Nothing cleared both bars, so take the cascade with the least exposure.
 
-        Preferring the cascades that survive rounding, and taking the whole set when none
-        does — returning nothing here would abstain without a reason attached, and §2.5 asks
-        for the opposite of that.
+        Exposure is the residual for a cascade that survives publication rounding, and its
+        residual plus its drift for one that does not — by the triangle inequality, the bound
+        on how far what plays can sit from the target. So a fragile cascade is charged for
+        its fragility rather than vetoed, and wins only when it is better by more than it
+        drifts. As a veto the screen decided on luck. On a steep inverse (Hulk BW8 @ 30 Hz,
+        -80 dB floor) every 2-4 section fit reached 0.5-1.9 dB and drifted 3.5-9 dB, the lone
+        section happened to drift 2.1 and so was the only one "publishable", and a 13.9 dB
+        fit was kept over a 0.5 dB one drifting 3.8 (exposure 4.4).
+
+        The sum, not the larger of the two: scored by the larger, a 2.3 dB cascade drifting
+        3.5 displaced a publishable 3.9 dB single shelf on the negative corpus's filtered/1,
+        realised 3.6 dB off on the device and was rejected for a cliff, losing a true
+        positive. Dropping the screen altogether was worse again: a 2.0 dB cascade drifting
+        11 dB displaced a 4.7 dB single shelf (Obsession, counterfactual/25dB). Among
+        cascades inside the limit exposure is the residual, so their order is unchanged.
+
+        Ties go to fewer sections. When every cascade is unstable, the most accurate is kept:
+        returning nothing here would abstain without a reason attached, and §2.5 asks for the
+        opposite of that.
         """
-        kept = [(s, r) for s, r, publishable in self.screened if publishable]
-        if not kept:
+        if not any(publishable for _, _, publishable, _ in self.screened):
             logger.warning(
-                "no cascade in the budget survives publication rounding; keeping the most "
-                "accurate so the acceptance model can say so"
+                "no cascade in the budget survives publication rounding; keeping the one "
+                "least exposed to it so the acceptance model can say so"
             )
-            kept = [(s, r) for s, r, _ in self.screened]
-        self.answer = min(kept, key=lambda r: r[1])
+        finite = [entry for entry in self.screened if math.isfinite(entry[3])]
+        specs, residual, _, _ = min(
+            finite or self.screened, key=lambda e: e[3] if finite else e[1]
+        )
+        self.answer = (specs, residual)
 
 
 def fit_minimal_biquads(
@@ -675,11 +695,14 @@ def _escalate(
                 band_hz,
                 min_contribution_db,
             )
+            drift = _published_drift(specs, freqs, realisation, max_drift_db)
+            publishable = _within_drift(specs, residual, drift, max_drift_db)
             state.screened.append(
                 (
                     specs,
                     residual,
-                    _publishable(specs, residual, freqs, realisation, max_drift_db),
+                    publishable,
+                    _exposure_db(residual, drift, publishable),
                 )
             )
         for state in pending:
@@ -732,18 +755,46 @@ def _publishable(
     whole budget has been spent. That is what lets the escalation stop early and still reach
     the answer the full enumeration would.
     """
+    drift = _published_drift(specs, freqs, realisation, max_drift_db)
+    return _within_drift(specs, residual, drift, max_drift_db)
+
+
+def _published_drift(
+    specs: list[BiquadSpec],
+    freqs: np.ndarray,
+    realisation: "Realisation | None",
+    max_drift_db: float | None,
+) -> float:
+    """The p90 drift `accept` reports: infinite if unstable, zero when nothing is screened."""
     if unstable_sections(specs, realisation or Realisation()):
-        return False
+        return math.inf
     if realisation is None or max_drift_db is None:
-        return True
-    drift = float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
-    if drift <= max_drift_db:
+        return 0.0
+    return float(np.percentile(drift_distribution(specs, freqs, realisation), 90))
+
+
+def _within_drift(
+    specs: list[BiquadSpec], residual: float, drift: float, max_drift_db: float | None
+) -> bool:
+    if math.isinf(drift):
+        return False
+    if max_drift_db is None or drift <= max_drift_db:
         return True
     logger.info(
         f"{len(specs)} section(s) at {residual:.3f} dB drift {drift:.2f} dB "
-        f"once published, over the {max_drift_db:.1f} dB limit; not selected"
+        f"once published, over the {max_drift_db:.1f} dB limit; not preferred"
     )
     return False
+
+
+def _exposure_db(residual: float, drift: float, publishable: bool) -> float:
+    """How far what plays may sit from the target: the residual, plus the drift if fragile.
+
+    Only a cascade over the drift limit is charged for its drift. Inside it, drift is the
+    preference `AcceptParams.max_drift_db` states it is, not a cost, so the fallback keeps
+    choosing the most accurate robust cascade exactly as before. Infinite when unstable.
+    """
+    return residual if publishable else residual + drift
 
 
 def _prune(
