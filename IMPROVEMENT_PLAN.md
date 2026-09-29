@@ -49,7 +49,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | T5 | checked | Folded into T4. |
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
-| T8 | **open** | Chained tracking rejected. Step 1 (2026-09-29): the reference is stable under injection, the tracking floor is not — a steep filter lowers it by up to 1.5 octaves. Mechanism open: priority 7. |
+| T8 | **open** | Chained tracking rejected. The floor is a noisy threshold decision: on Black Bag's own scenes it lands at 25.1 Hz only 55% of the time, and injection moves it within that spread. No leakage bias. Next: a floor rule that accounts for the uncertainty (priority 7). |
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
 | F2 | **open** | Not started. Priority 10: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
@@ -123,19 +123,16 @@ outside the harness, moves behind them.
    where it searches, a different question. Done: what each robustness quantity means is in
    AGENTS.md ("Publication, playback and verification"); writing it down found that
    `fit_error_db` means two things (TODO 5).
-7. **T8: the tracking floor follows a steep filter's leakage (step 1 done, see Progress).**
-   The floor decides where the target is held flat and where the judged band starts; a falsely
-   low one lets boost reach bins whose tracked energy is not the programme's own. Step 1 found
-   the plateau reference stable under injection (42 of 43 variants; only Black Bag LR4 @ 30
-   moves it), but the floor not: steep filters *lower* Black Bag's floor from 25.1 Hz to as
-   little as 8.9 Hz with its reference unchanged, and delivery noise raises it back. So
-   resampling scenes, the planned step 2, would measure the wrong thing and was not run.
-   Next, on the harness where the truth is known: inject a steep filter onto programme whose
-   content below a known frequency is untracked, and find what the lowered band's energy is —
-   the filter's own stopband output, or the estimator's window leaking the passband into
-   stopband bins (octave-wide bands, T7). Only then decide whether tracking needs a guard
-   against it. A falsely low floor is also where E9's audit should look for boost past the
-   ceiling.
+7. **T8: the tracking floor is a noisy threshold decision (steps 1-2 done, see Progress).**
+   The floor decides where the target is held flat and where the judged band starts. It is the
+   first half-octave band, walking down, whose envelope correlates below 0.5 with the
+   plateau's — and on Black Bag that correlation's 90% interval is 0.27-0.59 in the band that
+   sets it, so resampling the title's own scenes moves the floor between 35.5, 25.1 and 8.9 Hz.
+   Next, a decision change: a floor rule that respects that uncertainty — e.g. stop only where
+   the band fails with confidence (the bootstrap's upper bound below the threshold), or take
+   the floor as the lowest band of the contiguous run the plateau reaches with confidence —
+   judged with the probe and `refit_probe.py` (the floor moves targets and judged bands), and
+   the synthetic protocol and corpus, since a lower floor can license more boost.
 8. **C5, then C4: account for a run's time, then stop computing things twice (S each).**
    Speed is not a problem at 40-80 s a title, so this sits below everything that can change
    an answer. C5 first because it is a record schema change, and exact-preserving changes are
@@ -953,6 +950,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **T8 steps 2-3 — why the floor moves (2026-09-29).** Analysis only, on Black Bag and its
+  variants (the reference plateau is 50.2-82.8 Hz on all used here, per step 1).
+  * **Not leakage in the measurement.** Each band's envelope comes from a 4th-order
+    Butterworth bandpass through `sosfiltfilt` (about 48 dB/oct skirts). Replacing it with a
+    brick-wall FFT band changes every band's correlation by at most 0.10 and its level by
+    under 2 dB, on the original, BW8 @ 30, LR4 @ 35 and BW8 @ 30 −80 dB alike.
+  * **A marginal band decides it.** The original's floor is 25.1 Hz because 17.7-25.1 Hz
+    correlates at 0.43 — while 12.5-17.7 and 8.9-12.5 track at 0.62 and 0.56. The walk stops
+    at the first failure. BW8 @ 30 tilts that band's energy toward its top edge, next to
+    tracked programme, and it reads 0.57; the walk continues to 8.9 Hz. Delivery noise takes
+    the lower bands to about zero, which is why noise raises the floor again.
+  * **The correlation is noisy.** A moving-block bootstrap (120 s blocks, 400 resamples, all
+    bands resampled together) gives 17.7-25.1 Hz a 90% interval of 0.27-0.59 and a 36% chance
+    of clearing 0.5. The floor itself, recomputed per resample: 25.1 Hz 55%, 35.5 Hz 14%,
+    8.9 Hz 18%, 12.5 Hz or lower 12%, 50.2 Hz 2%. On BW8 @ 30: 8.9 Hz 34%, 35.5 Hz 24%, 17.7 Hz
+    18%. The drop step 1 attributed to the filter is inside the original's own spread.
+  * **Decision:** no code change. Step 1's "leakage" reading is withdrawn; the finding is that
+    a per-title decision (hold and judged-band start) rests on a statistic whose sampling
+    spread spans 1.5 octaves on a real title. Priority 7 now proposes a floor rule that
+    accounts for it, as a decision change.
 * **Priority 4 — weak winners on steep variants: checked, ranking retained (2026-09-29).**
   Every candidate on all 43 steep variants, from the refit-probe snapshot at a91e24c (both
   modes), scored against the injected truth as `score_injected.py` does (median shortfall
