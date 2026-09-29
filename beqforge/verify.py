@@ -114,15 +114,33 @@ def waveform_peak(samples: np.ndarray) -> float:
     Sixteen-fold sampling bounds sinusoidal peak-grid loss at Nyquist to 0.042 dB; dedicated
     device-rate simulations separately exercise multitone/transient peak error. Headroom is
     an output, never an acceptance gate.
+
+    Blocks that provably cannot hold the peak are not interpolated (IMPROVEMENT_PLAN C4).
+    Every interpolated value is a weighted sum of the input samples within the kernel's
+    reach, so no block can exceed its largest input sample times the kernel's largest
+    polyphase gain. Taking blocks loudest first, a block whose bound is already below the peak
+    found is skipped. The answer is bit-identical to interpolating everything: the same
+    per-block computation, and a maximum does not depend on order. It was 82% of judging.
     """
     factor, half_width, block = 16, 48, 65536
     kernel = signal.firwin(
         2 * half_width * factor + 1, 1 / factor, window=("kaiser", 10)
     )
-    peak = 0.0
+    # `resample_poly` scales the kernel by `factor`; each output phase uses every
+    # `factor`-th tap. A hair of margin for the rounding in the sums it bounds.
+    gain = float(
+        max(np.sum(np.abs(factor * kernel[p::factor])) for p in range(factor))
+    ) * (1.0 + 1e-9)
+    spans = []
     for start in range(0, len(samples), block):
         end = min(start + block, len(samples))
         left, right = max(0, start - half_width), min(len(samples), end + half_width)
+        reach = float(np.max(np.abs(samples[left:right]))) if right > left else 0.0
+        spans.append((reach, start, end, left, right))
+    peak = 0.0
+    for reach, start, end, left, right in sorted(spans, key=lambda s: -s[0]):
+        if reach * gain < peak:
+            break
         interpolated = signal.resample_poly(
             samples[left:right], factor, 1, window=kernel
         )

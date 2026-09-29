@@ -58,7 +58,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
 | C3 | done | The parametric stage cache is keyed on everything its derivation reads; defaults unchanged. |
-| C4 | **open** | Rescoped by C5's measurement: headroom's interpolated peak is 82% of judging, the duplicated waveform about 2 s a run. Now: skip blocks that provably cannot hold the peak (exact). Priority 8. |
+| C4 | done | Rescoped by C5 to headroom's peak, 82% of judging: blocks that provably cannot hold the peak are skipped. Bit-identical; 3.5x faster on real programme. |
 | C5 | done | Records carry elapsed time, what no stage covers, judging's breakdown and the fit statistics; reports keep their own copy of the fit cost. |
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
@@ -134,12 +134,8 @@ outside the harness, moves behind them.
    the floor as the lowest band of the contiguous run the plateau reaches with confidence —
    judged with the probe and `refit_probe.py` (the floor moves targets and judged bands), and
    the synthetic protocol and corpus, since a lower floor can license more boost.
-8. **C4: an exact, faster headroom peak (S).** C5 measured where judging goes: on 28 Years
-   Later, 18.3 s of its 22.3 s is headroom's 16x-interpolated peak over the whole programme;
-   the waveform and sub feed C4 was going to stop recomputing cost about 2 s a run. So C4 now
-   targets the peak: interpolate blocks loudest first and skip any whose largest possible
-   interpolated value (its largest sample times the kernel's gain bound) is below the best
-   found — the same answer, bit for bit. Exact-preserving; own commit.
+8. *(C5 and C4, done — see Progress.)* Runs account for their time; headroom's peak is exact
+   and 3.5x faster. What is left of judging is small; the fitter is the cost now.
 9. **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
    redesign of a title already analysed then skips `diagnose`/`extract`/`identify` and a
    parametric fit whose key did not move. Implementation plan, five commits:
@@ -953,6 +949,23 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **C4 — done, rescoped (2026-09-29).** C5 put headroom at 82% of judging; the duplicated
+  waveform and sub feed C4 was written for cost about 2 s a run, so that version was not
+  built. `verify.waveform_peak` now skips blocks that cannot hold the peak: every interpolated
+  value is a weighted sum of the samples in the kernel's reach, so a block's peak is at most
+  its largest sample times the kernel's largest polyphase gain (`resample_poly` scales the
+  kernel by the factor; a 1e-9 margin covers rounding). Blocks are taken loudest first and the
+  loop stops at the first whose bound is below the peak found. Same per-block computation, and
+  a maximum does not depend on order, so the answer is bit-identical.
+  * **Checks:** a test against the whole-signal interpolation on six stress signals
+    (programme-like transients, a near-Nyquist tone with large intersample overshoot, the
+    loudest sample on a block edge, equally loud blocks, a quiet block that must not be skipped,
+    silence): exactly equal. Real programme (28 Years Later's sub feed through a shelf):
+    identical, 4.93 s → 1.42 s. Full suite passes. Real runs, `--no-cache`, 28 Years Later and
+    Send Help against records of the same code: `compare_records.py` identical (headroom is in
+    the record; the probe skips it).
+  * **Time:** 28 Years Later's headroom 18.3 → 6.6 s a run (one run, beside the test suite, so
+    not a benchmark).
 * **C5 — done (2026-09-29).** `Timings` now stamps the run's wall time (`elapsed_s`) and
   reports what no stage covers (`unattributed_s`), and times judging's parts (`details`:
   sub feed, verify, headroom, assess) beside the stages rather than inside them, so nothing
