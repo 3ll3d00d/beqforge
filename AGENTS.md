@@ -27,9 +27,9 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `beqforge/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
 | `beqforge/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
 | `beqforge/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
-| `beqforge/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — diagnostic and confidence only, not on the path to a target; see "Working on `design/`" below.** |
+| `beqforge/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — on the path to a target only through the `parametric` strategy, which inverts what it identifies; diagnostic for everything else. See "Working on `design/`" below.** |
 | `beqforge/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
-| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is ~75% of a run; `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
+| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is about half of a run with the analysis cached (see "Performance"); `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
 | `beqforge/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
 | `beqforge/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
 | `beqforge/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
@@ -276,11 +276,12 @@ getting them wrong first.
 
 ### Order of a run
 
-`pipeline.run`: `diagnose` → `extract` → `identify` (diagnostic only) → **blockers** (no plateau,
+`pipeline.run`: `diagnose` → `extract` → `identify` (feeds `parametric` only) → **blockers** (no plateau,
 excerpt, no channels, no loud events, no positively-supported bins, exclusions fragmenting the
 judged band, silent sub feed — any one returns an empty `Report` with the reasons) → each
 strategy's proposals → one shared fit (`_fit_all`, section count escalated 1 → `max_sections`
-across every target at once) → `_judge` per candidate (publish, verify on the device response,
+across every target at once; `parametric` is the exception — `design` fits its target inside the
+strategy, before `_fit_all`, and that proposal arrives already fitted) → `_judge` per candidate (publish, verify on the device response,
 headroom, `assess`). `Report.accepted` then takes the passing candidate whose corrected curve
 departs least from the *requested* shape, and within `ranking_tie_db` the one with fewest
 sections. Details worth knowing that are easy to miss elsewhere: `flatten` scans upward from the
@@ -310,9 +311,10 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
   to 10 dB more below the floor and won selection on it.
 * **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but
   the outcome is a flat-to-rising response, and inverting the measured response reaches it
-  directly. Do not reach for `identify_rolloff` to build a target — it returned "no
-  representable alignment" on every real title tried. Identification's remaining role is
-  diagnostic and confidence, not target derivation.
+  directly. Do not reach for `identify_rolloff` to build a *new* target — when first tried it
+  returned "no representable alignment" on every real title. Its one route to a target is
+  `parametric`, which is one strategy among three, priced like the others; it does win titles
+  (28 Years Later on the baseline). Everywhere else identification is diagnostic.
 * **Missing evidence licenses zero boost, never unrestricted correction.**
   `Envelopes.boost_ceiling` is zero wherever a bin lacks a measurable peak/quiet separation or
   finite bootstrap uncertainty, including deliberately omitted profiling bins. The pipeline
@@ -516,8 +518,10 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
 
 * A run is ~40-80 s a title (down from ~100-490 s, 7.18x, every accepted filter's verdict
   preserved); the test suite is ~2 minutes. Run both in the background regardless — see
-  "Waiting on a long run" above. The biquad fitter is ~75% of a run; `FIT_STATS` reports its
-  own cost breakdown per run.
+  "Waiting on a long run" above. On the baseline records (mixed revisions, analysis and
+  `parametric` cached; measured 2026-09-29) fitting is ~49% of a run, judging ~41% and target
+  construction ~10%; a cold run adds the analysis on top. The ~75% once quoted for the fitter
+  predates that. `FIT_STATS` reports the fitter's own cost breakdown per run.
 * **Exact-preserving changes and accuracy-for-time trades must never be mixed in one commit.**
   A run that got faster and also moved is a run that says nothing about either. Validate an
   exact change by reproducing the *whole record* byte-for-byte except the fingerprint and

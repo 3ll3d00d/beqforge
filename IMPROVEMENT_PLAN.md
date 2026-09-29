@@ -60,7 +60,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C3 | done | The parametric stage cache is keyed on everything its derivation reads; defaults unchanged. |
 | C4 | **open** | Not started. Priority 8: one device waveform per candidate, one sub feed per run. |
 | C5 | **open** | Not started. Priority 8, before C4: timings that account for elapsed time; fit stats per report. |
-| C6 | **open** | Not started. Priority 1: AGENTS.md statements the code no longer matches. |
+| C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -855,6 +855,11 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   * **Real run**, 28 Years Later (`parametric` wins it), `--no-cache`, previous commit in a
     worktree against this change: `compare_records.py` identical. No decision can move on
     default settings, so the synthetic protocol and corpus were not rerun.
+* **C6 — done.** AGENTS.md: identification is on the path to a target through `parametric`
+  (layout table, order of a run, "the target is the outcome"); `parametric` fits inside
+  `design` before `_fit_all`; the fitter's "~75% of a run" replaced by the shares re-measured
+  from the ten baseline records' stage timings (analysis and `parametric` cached): fit 234 s
+  (49%), judging 196 s (41%), targets 50 s (10%). Docs only.
 
 ## Baseline: 2026-09-26 track set
 
