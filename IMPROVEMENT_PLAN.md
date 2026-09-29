@@ -49,7 +49,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | T5 | checked | Folded into T4. |
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
-| T8 | checked | Chained tracking rejected. The floor still depends on the reference: priority 7 checks how much. |
+| T8 | **open** | Chained tracking rejected. Step 1 (2026-09-29): the reference is stable under injection, the tracking floor is not — a steep filter lowers it by up to 1.5 octaves. Mechanism open: priority 7. |
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
 | F2 | **open** | Not started. Priority 9: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
@@ -133,17 +133,19 @@ outside the harness, moves behind them.
    stability, jitter sensitivity, the selection objective) and over which band. The
    residual-plus-p90-drift exposure F1 ranks by is a sampled heuristic, not a worst-case
    bound on the published response, and should not be described as one.
-7. **T8 check: does tracking depend on the reference?** The tracking floor is the lowest band
-   whose envelope still moves with the plateau's, so it moves when the plateau does — and it
-   decides both where the target is held flat and where the judged band starts. Black Bag's
-   programme below 25 Hz is untracked against its own 50-83 Hz plateau but tracks to 9.2 Hz
-   against the 100-130 Hz plateau LR4 @ 30 leaves. A falsely low floor lets boost reach noise; a
-   falsely high one withholds real recovery. Cheap first step: tabulate every injected
-   variant's reference, floor, anchor, judged band and deficit-to-ripple ratio against its
-   original's, which the variant records already hold. Only if that shows instability:
-   resample contiguous scene blocks (not already-selected frames, which misses the selection
-   step) and rerun the analysis chain, diagnostic only. The texture-blocker margins in the
-   watch list below are the same question.
+7. **T8: the tracking floor follows a steep filter's leakage (step 1 done, see Progress).**
+   The floor decides where the target is held flat and where the judged band starts; a falsely
+   low one lets boost reach bins whose tracked energy is not the programme's own. Step 1 found
+   the plateau reference stable under injection (42 of 43 variants; only Black Bag LR4 @ 30
+   moves it), but the floor not: steep filters *lower* Black Bag's floor from 25.1 Hz to as
+   little as 8.9 Hz with its reference unchanged, and delivery noise raises it back. So
+   resampling scenes, the planned step 2, would measure the wrong thing and was not run.
+   Next, on the harness where the truth is known: inject a steep filter onto programme whose
+   content below a known frequency is untracked, and find what the lowered band's energy is —
+   the filter's own stopband output, or the estimator's window leaking the passband into
+   stopband bins (octave-wide bands, T7). Only then decide whether tracking needs a guard
+   against it. A falsely low floor is also where E9's audit should look for boost past the
+   ceiling.
 8. **C5, then C4: account for a run's time, then stop computing things twice (S each).**
    Speed is not a problem at 40-80 s a title, so this sits below everything that can change
    an answer. C5 first because it is a record schema change, and exact-preserving changes are
@@ -172,6 +174,7 @@ outside the harness, moves behind them.
    * rescoring corpus negatives against the goal (the gate is stricter than the dials);
    * a sloping passband inside the sub band (leave until a title needs it);
    * watch: Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%;
+     T8's table puts Incredible Hulk at 1.01× (deficit 8.6 dB, ripple 8.6 dB);
    * Obsession's narrow band of level-dependent content ending the level-independence run,
      which no longer reaches the response;
    * external, in beqdesigner: thread the batch's bass management through `_design`, so
@@ -860,6 +863,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `design` before `_fit_all`; the fitter's "~75% of a run" replaced by the shares re-measured
   from the ten baseline records' stage timings (analysis and `parametric` cached): fit 234 s
   (49%), judging 196 s (41%), targets 50 s (10%). Docs only.
+* **T8 step 1 — reference versus tracking floor under injection (2026-09-29).** Analysis
+  only, from the stage caches: for Black Bag, Incredible Hulk and Send Help and their 43
+  injected variants, the mix plateau, tracking and level-invariance floors, deficit anchor,
+  judged band and deficit-to-ripple ratio (default parameters, analysis modules unchanged
+  since the baseline).
+  * **The reference is stable.** Black Bag keeps −61.1 dB over 50.2-82.8 Hz on 16 of 18
+    variants (LR4 @ 25 and @ 35 move it by under a dB and 0.1 octave); only LR4 @ 30 moves it
+    (−63.8 dB, 100.7-129.9 Hz). Hulk and Send Help move by at most 1.8 and 3.9 dB, the
+    region's lower edge following the injected corner.
+  * **The tracking floor is not, and not because of the reference.** Black Bag original: 25.1
+    Hz. Same reference, filter injected, no noise: BW8 @ 30 8.9 Hz, BW12/BW16 @ 30 17.7 Hz,
+    BW12 @ 32 35.5 Hz. LR4 @ 35 keeps its reference and still drops to 9.2 Hz. Adding a
+    delivery floor raises it again (BW8 @ 30: −80 dB 12.5, −60 dB 17.7, −40 dB 25.1 Hz).
+    Hulk and Send Help originals track to the bottom of the band; their noiseless variants do
+    too, and noise floors put Hulk's at 11-21.7 Hz. A steep filter makes the bands below its
+    corner look tracked: most likely leakage from the tracked passband — the filter's own
+    stopband output, or the estimator's window at over 100 dB of attenuation. Not yet told
+    apart.
+  * **Decision:** step 2 (scene resampling) not run; it measures estimator variance, and this
+    is a bias. Priority 7 now asks which leakage it is, on the harness. No code changed.
 
 ## Baseline: 2026-09-26 track set
 
