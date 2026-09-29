@@ -53,7 +53,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
 | F2 | **open** | Not started. Priority 9: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
-| F4 | **open** | Not started. Priority 2: screen every fit, not just the lowest-error one. |
+| F4 | checked | Not adopted: both versions tried lose selections (a wrong decline on Bugonia; a corpus true positive). The fit's exposure is not what acceptance judges. Judging alternatives is parked. |
 | A1 | done | No tolerance moves. |
 | C1 | checked | `parametric` stays on by default; shared computation done. |
 | C2 | done | Limitations reported once. |
@@ -86,10 +86,8 @@ outside the harness, moves behind them.
    a stale `parametric` proposal. It comes first because every experiment with `--goal-tilt` or
    `--goal-tolerance` until it is fixed is suspect. C6 is docs only, but AGENTS.md is what the
    next change is planned from, so correct it in the same sitting (its own commit).
-2. **F4: screen every fit before choosing one (S).** The only known mechanism that throws away
-   a usable cascade. It comes before 4 and 6 because it changes what both would measure: a
-   weak winner in 4 may be a `flatten` whose publishable fit was discarded, and F1's follow-ups
-   in 6 compare fits F4 decides between. Needs real refits; the probe cannot see it.
+2. *(F4, checked — not adopted; see Progress.)* Neither way of letting the fitter choose among
+   more of its own fits helped: its accuracy-plus-drift measure is not what acceptance judges.
 3. **Decide `--content-edge`'s default (steep filters).** The only open *policy* question, and
    the synthetic evidence is exhausted: it recovers 17 of 18 noise-floored steep injections
    against 2, touches no real title, but lifts noise where loud scenes stand clear of a floor
@@ -171,6 +169,10 @@ outside the harness, moves behind them.
      and a fifth section moved no verdict when tried. Unpark if 4 or 6 show steep candidates
      failing only because four sections cannot draw the shape (catalogue authors use 9-10).
    * T2 (`restore_caps_db` swept): unless it joins 4.
+   * judging fit alternatives (F4's follow-up): carry the best few publishable fits per target
+     through `_judge` and select on the verdict, not the residual. Several `_judge` calls per
+     target (about 7 s each), so a time cost. Unpark if 4 finds a winner lost because its
+     target's only fitted cascade failed a clause another fit would have passed.
    * rescoring corpus negatives against the goal (the gate is stricter than the dials);
    * a sloping passband inside the sub band (leave until a title needs it);
    * watch: Black Bag (1.08×) and Bugonia (1.09×) clear the texture blocker by under 10%;
@@ -883,6 +885,37 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     apart.
   * **Decision:** step 2 (scene resampling) not run; it measures estimator variance, and this
     is a bias. Priority 7 now asks which leakage it is, on the harness. No code changed.
+* **F4 — checked, not adopted (2026-09-29).** The mechanism is real: `_escalate` screens only
+  the lowest-objective fit per section count. Two ways of using the fits it discards were
+  built and run against HEAD (41b9a6d), each with a scratch-only log naming every fit where
+  it chose differently, so "before" runs were needed only there. Neither is merged.
+  * **Every fit in a tier competes** (the review's proposal): on the 11 real titles a wrong
+    decline and two lost passes. Bugonia's accepted one-section `flatten` became a failing
+    three-section one (fit 0.559 → 0.518 dB; two sections under 1 dB of contribution, extent
+    short); Caught Stealing's `counterfactual/35dB` (2 → 4 sections) and Hulk's
+    `counterfactual/25dB` (a new cliff) lost their passes. When nothing reaches the residual
+    target, the fallback takes the least exposure over every fit, and some three- or
+    four-section fit always wins by hundredths of a dB. Stopped after the real titles.
+  * **Substitute only when the tier's best cannot publish**, and only by a publishable fit
+    with less exposure (F1's rule inside the tier). Real titles: verdicts identical on all 11;
+    Send Help's accepted `flatten` changed from a 0.328 dB fit drifting 3.89 dB (nothing in
+    its budget published) to a 1.062 dB one drifting 2.59, corrected curve within 1.3 dB and
+    flatter (spread 5.65 → 4.64 dB, tilt 2.38 → 1.0 dB/oct). Steep variants, default: the
+    substitution fired on 29 of 43; 3 winners changed — Hulk LR4 @ 25 (`counterfactual/50dB`
+    → `flatten`) and LR4 @ 35 (→ `counterfactual/45dB`) score the same against truth (median
+    shortfall 0.5 → 0.4, 0.9 → 0.2 dB), and Black Bag BW12 @ 30, a no-noise control, went
+    from declined to a `counterfactual/35dB` 12.2 dB short; 3 candidates gained a pass, 2
+    lost one. `--content-edge`: fired on 32; of the 22 compared, no winner changed (1 gained,
+    1 lost); the remaining 10 were not run once the corpus had decided. Synthetic protocol,
+    both seeds: identical. **Negative corpus:** gated false acceptances 0/45 unchanged,
+    natural_droop 5 → 4, but **positives 7/9 → 6/9** — filtered/1's robust one-section
+    `parametric` (the case in F1's own docstring) lost to a more accurate multi-section
+    cascade that fails on a cliff at 6.6 Hz. filtered/7 improved (1.18 → 0.77 dB RMS).
+  * **Decision:** not adopted — a lost true positive is a worse selection, which the
+    regression rules do not allow. Both failures are the same finding: widening the set the
+    fitter picks from, on its own objective, finds cascades acceptance rejects. The residual
+    is not a proxy for the verdict ("never trust a residual", from the other side). Using the
+    discarded fits properly means judging them; parked under priority 11.
 
 ## Baseline: 2026-09-26 track set
 
