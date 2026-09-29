@@ -37,9 +37,11 @@ import hashlib
 import json
 import logging
 import math
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -382,7 +384,37 @@ def proposals_from_json(raw: list[dict[str, Any]], factory) -> list:
     ]
 
 
-# --- the file -----------------------------------------------------------------------------
+# --- the stores ---------------------------------------------------------------------------
+
+
+class Store(Protocol):
+    """Where stages are kept. `load` returns the payload or None, and never raises."""
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None: ...
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None: ...
+
+
+def _write_atomic(path: Path, document: Any) -> None:
+    """Write to a temporary name beside `path`, fsync, then rename over it.
+
+    A reader sees the old file or the new one, never a partial one (IMPROVEMENT_PLAN R2a): a
+    rename within one directory is atomic, and the fsync makes sure what is renamed is on disk.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb") as zipped:
+                zipped.write(json.dumps(document).encode("utf-8"))
+            raw.flush()
+            os.fsync(raw.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _read_document(path: Path) -> dict[str, Any]:
@@ -394,39 +426,100 @@ def _read_document(path: Path) -> dict[str, Any]:
         return {}
 
 
+@dataclass(frozen=True, slots=True)
+class FileStore:
+    """One file per title, every stage in it — the CLI's layout, beside the material.
+
+    Writing a stage reads the file, adds the stage and replaces the file atomically. Two
+    writers on one title can still lose a stage (last one wins): that costs a recompute, never
+    a wrong answer, so it is documented rather than locked.
+    """
+
+    path: Path
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None:
+        if not self.path.is_file():
+            return None
+        entry = _read_document(self.path).get(stage)
+        if not entry:
+            return None
+        stored = entry.get("key", {})
+        moved = [name for name, value in key.items() if stored.get(name) != value]
+        if moved:
+            logger.info(
+                f"  {stage}: cache stale ({', '.join(moved)} differ); recomputing"
+            )
+            return None
+        logger.info(f"  {stage}: reused from {self.path}")
+        return entry["payload"]
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
+        document = _read_document(self.path) if self.path.is_file() else {}
+        document[stage] = {"key": key, "payload": payload}
+        _write_atomic(self.path, document)
+        logger.info(
+            f"  {stage}: cached to {self.path} ({self.path.stat().st_size / 1e6:.1f} MB)"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DirStore:
+    """One file per entry under a directory: `<root>/<stage>/<sha256 of the key>.json.gz`.
+
+    For the designer server, whose requests have no path to sit beside, and for several
+    processes sharing one directory. The name is the key, so different configurations sit
+    side by side — a server restarted with another goal dial does not evict the first one's
+    entries. An entry is never rewritten with different content: two writers of one key write
+    the same payload, so replacing an existing entry is harmless. `load` still compares the
+    stored key, as a guard against a corrupt file or a hash collision. Never evicts.
+    """
+
+    root: Path
+
+    def entry(self, stage: str, key: dict[str, Any]) -> Path:
+        canonical = json.dumps(key, sort_keys=True, separators=(",", ":"))
+        name = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return self.root / stage / f"{name}.json.gz"
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None:
+        path = self.entry(stage, key)
+        if not path.is_file():
+            logger.info(f"  {stage}: no entry in {self.root}")
+            return None
+        document = _read_document(path)
+        if document.get("key") != key:
+            logger.info(f"  {stage}: entry in {self.root} unreadable or not this key")
+            return None
+        logger.info(f"  {stage}: reused from {path}")
+        return document["payload"]
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
+        path = self.entry(stage, key)
+        _write_atomic(path, {"key": key, "payload": payload})
+        logger.info(f"  {stage}: cached to {path} ({path.stat().st_size / 1e6:.1f} MB)")
+
+
+def as_store(cache: "Path | str | Store | None") -> Store | None:
+    """A path is today's per-title file; a store is used as it is; None is no cache."""
+    if cache is None:
+        return None
+    if isinstance(cache, (str, Path)):
+        return FileStore(Path(cache))
+    return cache
+
+
 def load(path: Path | str | None, stage: str, key: dict[str, Any]) -> Any | None:
-    """The stored payload for `stage`, or None with the reason logged.
+    """The stored payload for `stage` in a per-title file, or None with the reason logged.
 
     A miss is never an error. The reason is logged at INFO, because "why did that take a
     hundred seconds again" is a question a run should answer without being asked twice.
     """
-    if path is None:
-        return None
-    path = Path(path)
-    if not path.is_file():
-        return None
-    entry = _read_document(path).get(stage)
-    if not entry:
-        return None
-    stored = entry.get("key", {})
-    moved = [name for name, value in key.items() if stored.get(name) != value]
-    if moved:
-        logger.info(f"  {stage}: cache stale ({', '.join(moved)} differ); recomputing")
-        return None
-    logger.info(f"  {stage}: reused from {path}")
-    return entry["payload"]
+    return None if path is None else FileStore(Path(path)).load(stage, key)
 
 
 def store(
     path: Path | str | None, stage: str, key: dict[str, Any], payload: Any
 ) -> None:
-    """Write one stage, leaving the others in the file alone."""
-    if path is None:
-        return
-    path = Path(path)
-    document = _read_document(path) if path.is_file() else {}
-    document[stage] = {"key": key, "payload": payload}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt", encoding="utf-8") as handle:
-        json.dump(document, handle)
-    logger.info(f"  {stage}: cached to {path} ({path.stat().st_size / 1e6:.1f} MB)")
+    """Write one stage to a per-title file, leaving the others in it alone."""
+    if path is not None:
+        FileStore(Path(path)).store(stage, key, payload)

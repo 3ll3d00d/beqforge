@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **active** | Step 1 of 5 done: the cache key is the samples, not the material's name. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
+| R2a | **active** | Steps 1-2 of 5 done: the key is the samples; writes are atomic, and a directory store keeps one file per entry. Step 3 found the packaged `beqforge design` crashes on its default cache. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
 | R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -949,6 +949,26 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a step 2 — atomic entries and a directory store (2026-09-29).** `cache.Store` is now
+  a protocol with two stores. `FileStore` is the CLI's per-title file, unchanged in layout,
+  now written to a temporary name beside it, fsynced and renamed, so a reader sees the old
+  file or the new one. `DirStore(root)` keeps one file per entry at
+  `<root>/<stage>/<sha256 of the canonical key>.json.gz`, written the same way and never
+  rewritten with different content, so configurations sit side by side; `load` still checks
+  the stored key. `analyse`/`propose`/`run` take a path (wrapped in `FileStore`) or a store,
+  so no caller changed; the module-level `load`/`store` remain as `FileStore` wrappers.
+  * **Checks:** both stores round-trip bit for bit; another key is a miss; `DirStore` keeps
+    two configurations; an entry holding another key is a miss; a truncated entry is a miss;
+    `analyse` works with a `DirStore`; and, for both stores, a reader looping while another
+    process rewrites a ~2 MB entry 25 times only ever sees a miss or the whole payload. Full
+    suite passes. Probe at `--tol 0` against step 1's: nothing moved. 28 Years Later, warm
+    (both stages reused): record identical to step 1's.
+  * **Size:** 0.32 MB a title for analysis and `parametric` (largest 0.37), so about 32 MB
+    for 100 titles, plus one `parametric` entry per extra configuration. No eviction needed.
+  * **Found for step 3:** a frozen build of this tree (PyInstaller 6.22.3) runs
+    `beqforge design <title>.npz` straight into `FileNotFoundError: …/beqforge/__init__.py`
+    from `cache.digest_of`: the packaged CLI cannot run with its default cache at all. It
+    predates R2a (`digest_of` is unchanged); step 3 fixes it.
 * **R2a step 1 — the cache key is the samples, not the name (2026-09-29).**
   `cache.material_fingerprint` no longer hashes `material.name`, so a renamed or moved file
   hits, and so will a designer request (always named "designer-request") for the same

@@ -1320,7 +1320,7 @@ class Analysed:
 def analyse(
     material: Material,
     params: PipelineParams | None = None,
-    cache_path: Path | None = None,
+    cache_path: "Path | cache.Store | None" = None,
     fresh: bool = False,
     timings: Timings | None = None,
 ) -> Analysed:
@@ -1330,6 +1330,7 @@ def analyse(
     precede fitting — plateau, floors, judged band, evidence ceiling — without paying for a fit.
     """
     timings = timings or Timings()
+    store = cache.as_store(cache_path)
     params = params or PipelineParams()
     # One effective exclusion contract at every stage, including directly configured omissions.
     bands = tuple(
@@ -1370,7 +1371,7 @@ def analyse(
 
     analysis_key = (
         None
-        if cache_path is None
+        if store is None
         else cache.key_for(
             "analysis",
             cache.ANALYSIS_MODULES,
@@ -1380,11 +1381,7 @@ def analyse(
             identify_params,
         )
     )
-    stored = (
-        None
-        if cache_path is None or fresh
-        else cache.load(cache_path, "analysis", analysis_key)
-    )
+    stored = None if store is None or fresh else store.load("analysis", analysis_key)
 
     logger.info("=" * 80)
     logger.info("Per-channel decomposition")
@@ -1412,9 +1409,8 @@ def analyse(
                 identification = identify_rolloff(envelopes, identify_params)
             except ValueError as unusable:
                 logger.warning(f"Sum-based identification unavailable: {unusable}")
-        if cache_path is not None:
-            cache.store(
-                cache_path,
+        if store is not None:
+            store.store(
                 "analysis",
                 analysis_key,
                 cache.analysis_to_json(
@@ -1525,12 +1521,13 @@ def analyse(
 def propose(
     material: Material,
     analysed: Analysed,
-    cache_path: Path | None = None,
+    cache_path: "Path | cache.Store | None" = None,
     fresh: bool = False,
     timings: Timings | None = None,
 ) -> list[Proposal]:
     """Every selected strategy's proposals, each carrying the notes on what bound its target."""
     timings = timings or Timings()
+    store = cache.as_store(cache_path)
     params = analysed.params
     diagnosis = analysed.diagnosis
     envelopes = analysed.envelopes
@@ -1547,7 +1544,7 @@ def propose(
             )
         key = (
             None
-            if cache_path is None or strategy.cache_modules is None
+            if store is None or strategy.cache_modules is None
             else cache.key_for(
                 name,
                 strategy.cache_modules,
@@ -1558,7 +1555,7 @@ def propose(
                 strategy.cache_config(params),
             )
         )
-        held = None if key is None or fresh else cache.load(cache_path, name, key)
+        held = None if key is None or fresh else store.load(name, key)
         if held is not None:
             with timings.stage(f"target/{name} (cached)"):
                 produced = cache.proposals_from_json(held, Proposal)
@@ -1574,7 +1571,7 @@ def propose(
                     for p in produced
                 ]
             if key is not None:
-                cache.store(cache_path, name, key, cache.proposals_to_json(produced))
+                store.store(name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
         # a proposal's notes are what bound *its* target; the run's limitations live once, on
         # `Report.evidence_notes`, and the designer response joins the two itself
@@ -1585,7 +1582,7 @@ def propose(
 def run(
     material: Material,
     params: PipelineParams | None = None,
-    cache_path: Path | None = None,
+    cache_path: "Path | cache.Store | None" = None,
     fresh: bool = False,
 ) -> Report:
     """Run diagnosis, evidence-priced target strategies, fitting and acceptance.
