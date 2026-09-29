@@ -109,16 +109,9 @@ outside the harness, moves behind them.
      the new ones.
 
    A change of default is a decision change: E10's protocol should exist before it.
-4. **Selection on steep variants picks the weaker candidate.** On two Black Bag variants a
-   `counterfactual` with a 5 dB median shortfall won where `flatten` got within 1 dB on the
-   neighbouring noise levels; since F1 the default also accepts Black Bag BW16 @ 30 (no
-   noise) as a `counterfactual/50dB` 6.5 dB short. Rerun after F4, then attribute each case to
-   proposal, fit, acceptance or ranking before changing anything: a `flatten` that failed
-   cannot be rescued by reordering the ones that passed. One ranking hypothesis to test on the
-   same passing set: `Correction.departure_db` is an RMS over linearly spaced Welch bins, so
-   20-40 Hz carries about four times the weight of 5-10 Hz, while the fitter scores on a
-   logarithmic grid. If the cause is a `counterfactual` cap of the wrong size, T2 (derive the
-   caps per channel) is done as part of this. "Ranking retained" is an acceptable outcome.
+4. *(Checked — ranking retained; see Progress.)* Weak winners on steep variants are an
+   acceptance question, not a ranking one: the better candidate, almost always `flatten`, fails
+   a shape clause on the steep edge. That joins 3, the steep-filter policy.
 5. *(E9, done — see Progress.)* Records now say how far each cascade boosts past the ceiling.
    No gate: the only material exceeding it is steep injections, where 4 and 3 already look.
 6. *(F1, done — see Progress.)* Its follow-ups. Done: the screen now jitters the published
@@ -174,7 +167,8 @@ outside the harness, moves behind them.
    * F3's second half (one more section): a time trade-off (fit cost grows as M(M+1)/2 runs),
      and a fifth section moved no verdict when tried. Unpark if 4 or 6 show steep candidates
      failing only because four sections cannot draw the shape (catalogue authors use 9-10).
-   * T2 (`restore_caps_db` swept): unless it joins 4.
+   * T2 (`restore_caps_db` swept): priority 4 found no cap binding a weak winner; unpark only
+     if a cap is shown to.
    * judging fit alternatives (F4's follow-up): carry the best few publishable fits per target
      through `_judge` and select on the verdict, not the residual. Several `_judge` calls per
      target (about 7 s each), so a time cost. Unpark if 4 finds a winner lost because its
@@ -950,6 +944,32 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   * **Decision:** adopted. It corrects what the screen measures rather than tuning it, loses
     no true positive and admits no false acceptance; the winner changes score as well
     against truth, give or take a dB, except one weaker opt-in answer. Records not refreshed.
+* **Priority 4 — weak winners on steep variants: checked, ranking retained (2026-09-29).**
+  Every candidate on all 43 steep variants, from the refit-probe snapshot at a91e24c (both
+  modes), scored against the injected truth as `score_injected.py` does (median shortfall
+  against the original's own corrected curve inside the recoverable band). A winner is weak
+  when another candidate was more than 1 dB closer. 63 winners across both modes; 13 weak:
+  * **11 are acceptance.** In 10 the better candidate is `flatten`, within about 0-2 dB of
+    truth where the winner is 3.5-15.7 dB short. Default mode rejects it on the steep edge: a
+    cliff it relocates rather than removes (Black Bag BW8/BW16 @ 30, LR4 @ 35: 57-137 dB/oct
+    at 16-22 Hz), unevenness (the −40 dB noise-floor variants, 13-19 dB of ripple), or one
+    section contributing 0.98 dB against the 1 dB limit. With `--content-edge` it fails the
+    ceiling check below the edge instead ("lifting the quiet floor": Black Bag BW12 @ 30
+    −80 dB, BW8 @ 30). Hulk BW8 @ 30 with `--content-edge` is the one case the other way:
+    `flatten` wins, and two `counterfactual` candidates that overshoot truth fail.
+  * **2 are ranking, and both are the rule working.** Hulk BW16 @ 30 −40 dB
+    (`--content-edge`): `flatten` 0.1 dB short against `counterfactual/35dB` 1.6, departures
+    1.50 and 1.39 — inside `ranking_tie_db`, so fewest sections decides (3 against 4). Send
+    Help BW8 @ 30 (`--content-edge`): the candidate truth prefers overshoots the original by
+    2.5 dB; departure picks one 0.7 short.
+  * **None is the proposal or the fit, and none is a cap.** Where `counterfactual` wins weakly
+    it is because its target is small — 5.6-6.7 dB peaks on the −40 dB variants against
+    `flatten`'s 20-24 — with pricing removing nothing, so T2's cap sizes are not what binds.
+  * **Decision:** ranking retained, T2 stays parked. The departure-weighting hypothesis (linear
+    Welch bins over-weighting 20-40 Hz) has nothing to act on: no weak winner is a ranking
+    loss. What decides these titles is how the shape clauses judge a steep correction, which
+    is priority 3's policy question — the evidence here goes to it: on steep injections the
+    clauses reject the candidate closest to truth, in both modes, by different clauses.
 * **R2 — added (2026-09-29).** Requested: let beqforge and beqdesigner work off a shared
   filesystem, with requests able to point at files and one cache both sides use, so a
   redesign skips the extraction. Reading the code for it: the server takes audio inline and
