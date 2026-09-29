@@ -61,7 +61,8 @@ does today, not a plan for something still to be built.
 [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) is the reviewed list of weaknesses and
 inconsistencies in the process itself — each with a testable check — and the stress-track shapes
 needed to run them. Read it before changing decision logic (targets, ceiling, acceptance,
-selection).
+selection). `plans/` holds step-by-step implementation plans for items agreed there
+but not yet built; follow the plan's steps and update it if the work departs from it.
 
 ## Running things
 

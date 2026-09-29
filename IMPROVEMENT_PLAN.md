@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **open** | Not started. Priority 9: the designer server uses the stage cache, so a redesign skips the analysis. beqforge only. |
+| R2a | **open** | Not started; plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9: the designer server uses the stage cache, so a redesign skips the analysis. beqforge only. |
 | R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -141,7 +141,8 @@ outside the harness, moves behind them.
    be measured rather than claimed from stage shares.
 9. **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
    redesign of a title already analysed then skips `diagnose`/`extract`/`identify` and a
-   parametric fit whose key did not move. beqforge only, no contract change; beqdesigner
+   parametric fit whose key did not move. Implementation plan, five commits:
+   [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). beqforge only, no contract change; beqdesigner
    already caches its own extraction, so this is the whole of the redesign saving. After the
    items above because none of them waits on it. Its warm-request timings decide R2b, so
    time them under `systemd-inhibit` with the transfer and decode reported separately. R2b
