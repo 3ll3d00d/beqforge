@@ -342,6 +342,12 @@ def _candidate(candidate) -> dict[str, Any]:
         "evidence_contract": "conditional-temporal-v1",
         "mastering_rolloff_support": None,
         "correction_support_score": _num(candidate.correction_support_score),
+        "evidence_excess": None
+        if candidate.evidence_excess is None
+        else {
+            key: (_num(value) if isinstance(value, float) else value)
+            for key, value in asdict(candidate.evidence_excess).items()
+        },
         "preference_shaping": "plateau-relative target; original source spectrum unknown",
         "correction": {
             "freqs": _arr(correction.freqs),

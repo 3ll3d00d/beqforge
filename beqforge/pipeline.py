@@ -68,6 +68,7 @@ from beqforge.filters import (
     correction_band_hz,
     fit_minimal_biquads_all,
     magnitude_db,
+    unstable_sections,
 )
 from beqforge.identify import IdentifyParams, Identification, identify_rolloff
 from beqforge.material import (
@@ -410,6 +411,93 @@ class Candidate:
     def confidence(self) -> float:
         """Compatibility alias for correction_support_score; no probability interpretation."""
         return self.correction_support_score
+
+    evidence_excess: "EvidenceExcess | None" = None
+    """How far the published cascade boosts past what contrast licenses. Record-only."""
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceExcess:
+    """Boost the cascade that will play delivers beyond the evidence ceiling (IMPROVEMENT_PLAN E9).
+
+    Pricing caps the *target* at the contrast ceiling; the fit only approximates the target,
+    so nothing had said whether the filter itself stays under it. Measured on the exact
+    published, quantised device response — the transfer that plays, not a before/after
+    spectrum, which would add estimator and transient effects — against
+    `contrast_ceiling_db`, over the design grid inside the analysed band. Below or above
+    that band nothing was measured, so it is left out rather than read as zero licence.
+
+    Record-only: nothing gates on it. A biquad cannot always realise zero at one unsupported
+    bin inside a region of positive gain, so a gate would need a stated realisation
+    allowance first. The grid resolves about 57 points an octave, well inside the narrowest
+    section `max_q` allows.
+    """
+
+    max_db: float
+    """Largest excess outside exclusions, dB; 0 or less when the cascade stays under."""
+    at_hz: float
+    width_octaves: float
+    """Contiguous width of positive excess around the largest, octaves."""
+    integrated_db_octaves: float
+    """Positive excess integrated over log-frequency outside exclusions, dB·octaves."""
+    unsupported_at_max: bool
+    """Whether the largest excess sits on a bin the evidence licenses no boost at all."""
+    excluded_max_db: float = math.nan
+    """Largest boost inside authored exclusions, where the licence is zero by definition."""
+
+
+def evidence_excess(
+    filters: list[BiquadSpec],
+    realisation: Realisation,
+    ceiling_db: np.ndarray,
+    measured_hz: tuple[float, float],
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
+) -> EvidenceExcess | None:
+    """Measure `EvidenceExcess`; `None` when unstable (no steady-state gain) or unmeasured."""
+    if filters and unstable_sections(filters, realisation):
+        return None
+    measured = (DESIGN_GRID >= measured_hz[0]) & (DESIGN_GRID <= measured_hz[1])
+    if not measured.any():
+        return None
+    gain = (
+        magnitude_db(
+            realisation.quantise(biquad_sos(filters, realisation.fs)),
+            DESIGN_GRID,
+            realisation.fs,
+        )
+        if filters
+        else np.zeros_like(DESIGN_GRID)
+    )
+    excess = gain - ceiling_db
+    kept = unexcluded(DESIGN_GRID, exclude_bands_hz)
+    inside = measured & kept
+    excluded = measured & ~kept
+    excluded_max = float(np.max(gain[excluded])) if excluded.any() else math.nan
+    if not inside.any():
+        return EvidenceExcess(
+            math.nan, math.nan, 0.0, 0.0, False, excluded_max_db=excluded_max
+        )
+    worst = int(np.flatnonzero(inside)[np.argmax(excess[inside])])
+    positive = inside & (excess > 0)
+    width = 0.0
+    if positive[worst]:
+        low = high = worst
+        while low > 0 and positive[low - 1]:
+            low -= 1
+        while high < len(DESIGN_GRID) - 1 and positive[high + 1]:
+            high += 1
+        width = float(np.log2(DESIGN_GRID[high] / DESIGN_GRID[low]))
+    octaves = np.log2(DESIGN_GRID)
+    over = np.where(inside, np.maximum(excess, 0.0), 0.0)
+    integrated = float(np.sum((over[1:] + over[:-1]) / 2 * np.diff(octaves)))
+    return EvidenceExcess(
+        max_db=float(excess[worst]),
+        at_hz=float(DESIGN_GRID[worst]),
+        width_octaves=width,
+        integrated_db_octaves=integrated,
+        unsupported_at_max=bool(ceiling_db[worst] <= 0.0),
+        excluded_max_db=excluded_max,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1533,11 +1621,8 @@ def run(
     )
 
     candidates: list[Candidate] = []
-    ceiling = (
-        contrast_ceiling_db(analysed.envelopes, params)
-        if params.judge_from_content_edge
-        else None
-    )
+    evidence_ceiling = contrast_ceiling_db(analysed.envelopes, params)
+    ceiling = evidence_ceiling if params.judge_from_content_edge else None
     for proposal in proposals:
         if proposal.filters is not None:
             filters, error = proposal.filters, proposal.residual_db
@@ -1561,6 +1646,19 @@ def run(
                     ceiling_db=ceiling,
                 )
             )
+        candidates[-1] = dataclasses.replace(
+            candidates[-1],
+            evidence_excess=evidence_excess(
+                candidates[-1].filters,
+                params.realisation,
+                evidence_ceiling,
+                (
+                    float(analysed.envelopes.freqs[0]),
+                    float(analysed.envelopes.freqs[-1]),
+                ),
+                params.exclude_bands_hz,
+            ),
+        )
 
     candidates = [
         dataclasses.replace(

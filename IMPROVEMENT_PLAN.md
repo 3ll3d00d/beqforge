@@ -40,7 +40,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | E6 | done | Report half: judge's notes reach the response. Rate half: the corpus's `natural_droop`, reported not gated under the content principle. |
 | E7 | checked | Fixed extraction bands kept; the targets barely move. Revisit if the plateau rule changes. |
 | E8 | done | Digital silence excluded from both frame classes. |
-| E9 | **open** | Not started. Priority 5: record-only measurement of boost delivered past the ceiling. |
+| E9 | done | Every candidate records its boost past the evidence ceiling. Real titles: none over 0.5 dB. Steep variants: accepted up to 4.0 dB over half an octave. No gate. |
 | E10 | parked | Not started. A fresh protocol for the content goal; unparks before a default change (priority 3) or A1-style tuning. |
 | T1 | done | `counterfactual` re-sums under the playback model. |
 | T2 | parked | Not started. Joins priority 4 if a cap size explains the weaker winners. |
@@ -118,11 +118,8 @@ outside the harness, moves behind them.
    20-40 Hz carries about four times the weight of 5-10 Hz, while the fitter scores on a
    logarithmic grid. If the cause is a `counterfactual` cap of the wrong size, T2 (derive the
    caps per channel) is done as part of this. "Ranking retained" is an acceptable outcome.
-5. **E9: measure boost delivered past the evidence ceiling (S, record-only).** Pricing caps
-   the target, not the cascade; nothing records how far a published filter exceeds what the
-   evidence licensed. Cheap, changes no decision, and it is "never trust a residual" applied
-   to the filter that actually plays. It also feeds 3 (how much noise the option lifts) and
-   E4 (whether ceiling holes matter).
+5. *(E9, done — see Progress.)* Records now say how far each cascade boosts past the ceiling.
+   No gate: the only material exceeding it is steep injections, where 4 and 3 already look.
 6. *(F1, done — see Progress.)* Its follow-ups, neither blocking: the screen measures drift on
    the optimiser's raw parameters and `accept` on the published ones (Hulk's 3-section
    `flatten`: 3.84 dB against 3.08), and it measures over the whole 3-400 Hz grid while the fit
@@ -916,6 +913,33 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
     fitter picks from, on its own objective, finds cascades acceptance rejects. The residual
     is not a proxy for the verdict ("never trust a residual", from the other side). Using the
     discarded fits properly means judging them; parked under priority 11.
+* **E9 — done (2026-09-29).** Every candidate now carries `evidence_excess`
+  (`pipeline.evidence_excess`, into the record and, for the selected one, the corpus's per-case
+  output): the exact published, quantised device response against `contrast_ceiling_db`, over
+  the design grid inside the analysed band only (unmeasured bins are left out, not read as
+  zero licence) — largest excess and where, its contiguous width, integrated positive excess
+  in dB·octaves, whether it sits on a bin with no licence at all, and the largest boost inside
+  exclusions reported apart. Unstable cascades get none (no steady-state gain). Record-only.
+  * **Checks:** unit tests (a shelf over a flat ceiling, a one-bin hole, exclusions,
+    unmeasured range, instability, a run's record); a run's verdicts are identical with the
+    field stripped. Full suite passes. Probe at `--tol 0` against C3's snapshot: nothing moved.
+    Negative corpus: selections, sections and recovery identical on all 63 cases, gate 0/45.
+    Five cases' *losing* candidates carry different failure text from the committed
+    `negative_corpus.json`; natural_droop/1 rerun at HEAD without E9 matches this run, so the
+    committed file predates HEAD there, not this change.
+  * **Audit** (published cascades against a ceiling rebuilt from each title's cached analysis;
+    real titles from HEAD reruns, variants from their records): on the 11 real titles no
+    candidate, accepted or not, exceeds the ceiling by more than 0.5 dB (worst accepted: Black
+    Bag, +0.13 dB at 4.9 Hz). On the 43 steep variants, 72 of 191 candidates exceed it by over
+    0.5 dB and 17 by over 3; accepted ones reach +4.0 dB over 0.58 octave (Black Bag BW16 @ 30,
+    `counterfactual/50dB`, the weak winner priority 4 is about), the rest of the accepted under
+    2.7 dB, mostly at the bottom of the band (4.9-8.7 Hz) or 18-20 Hz under a steep corner. The
+    largest are rejected candidates on Hulk BW8 @ 30, −80 dB (`flatten` +14.1 dB over 1.3
+    octaves). Corpus selections: filtered positives within +0.9 dB, except filtered/1's robust
+    one-section shelf (+5.6 dB over 0.28 octave); natural_droop's accepted ones +0.7 to +4.8.
+  * **Decision:** no gate. Real material never exceeds the ceiling; steep injections do, where
+    the tracking floor is also falsely low (T8), and they are what priorities 3 and 4 are
+    already examining. The field is there for them, and for the next review of a curve.
 
 ## Baseline: 2026-09-26 track set
 

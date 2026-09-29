@@ -64,8 +64,14 @@ def _run_case(job: tuple[str, int, float]) -> dict:
     scored = score_evidence_case(case.evidence_case(), report, params)
     scored.pop("notes", None)
     chosen = report.accepted
+    excess = None if chosen is None else chosen.evidence_excess
     scored.update(
         peak_boost_db=None if chosen is None else round(chosen.mv_adjust_db, 2),
+        # IMPROVEMENT_PLAN E9: how far the selected cascade boosts past the ceiling
+        evidence_excess_db=None if excess is None else round(excess.max_db, 2),
+        evidence_excess_width_octaves=(
+            None if excess is None else round(excess.width_octaves, 3)
+        ),
         sections=None if chosen is None else len(chosen.filters),
         shape=shape,
         seed=seed,
