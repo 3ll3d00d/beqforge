@@ -10,7 +10,7 @@
 * Before committing any change under `beqforge/`, follow AGENTS.md's "Regression checking": probe
   snapshot before and after, real runs only for the titles the probe names, the synthetic
   protocol for anything that can change a decision, and the outcome written into
-  `IMPROVEMENT_PLAN.md`. Don't substitute a full nine-title rerun, and don't skip it.
+  `TODO.md` and the completed evidence under `plans/`. Don't substitute a full nine-title rerun, and don't skip it.
 * Don't run `uv run python tools/design_beq.py` casually against real material — a run is
   40-80 s a title. Wrap any timed run in `systemd-inhibit` (see AGENTS.md's "Waiting on a long
   run") and use the background-task workflow rather than a foreground `sleep` loop.

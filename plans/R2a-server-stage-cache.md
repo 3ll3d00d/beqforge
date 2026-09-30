@@ -1,13 +1,15 @@
-# R2a — the designer server uses the stage cache: implementation plan
+# R2a — implemented server stage cache
 
 **Status:** done (2026-09-30), every "Done when" item met — steps 1-5 are `f3f9f89` to
 `7951cc0`, the Windows write fix `c7182d3`, and the executable build (run 36717974193)
 passed the warm-hit smoke test on Linux, macOS and Windows. Kept as the record of how it was
-built. Tracked as R2a in [IMPROVEMENT_PLAN.md](../IMPROVEMENT_PLAN.md) (priority 9). Its answers to
-beqdesigner are in that file's Progress, "R2 split". The other side is beqdesigner's
-`design/designer-by-reference.md` (their `63976c2`). R2b, requests by reference, was parked
-when this was written and built afterwards on request, outside this plan (see "Not in this
-plan"); beqdesigner's side of it is also complete.
+built. The measured outcomes and R2b completion are in
+[implemented changes](done-design-and-pipeline.md). Outstanding work is tracked only in
+[TODO.md](../TODO.md).
+
+The sections below preserve the original implementation sequence and checks as historical
+instructions against `e96129a`, not current tasks. Their “today” and “not yet verified” refer
+to that revision. All five steps shipped; R2b and beqdesigner's caller side shipped afterwards.
 
 ## What changes, and what does not
 
@@ -55,7 +57,7 @@ Each step is its own commit with its tests, and goes through AGENTS.md's "Regres
 checking". Take one probe snapshot on `e96129a` before step 1 and keep it as the reference
 for every step. None of the steps is meant to move a decision, so the check each time is
 `probe.py compare --tol 0`, which must show nothing. Record the outcome in
-IMPROVEMENT_PLAN.md's Progress with each commit.
+the archived improvement review's Progress with each commit.
 
 ### 1. Take the name out of the material fingerprint
 
@@ -185,7 +187,7 @@ for the server, since a request has no material path to sit beside.
   gives:
   - the wire share of a warm request: read, parse and decode, against the total;
   - the size of the request body.
-- Write the figures into IMPROVEMENT_PLAN.md's Progress under R2a. **That result is what
+- Write the figures into the archived improvement review's Progress under R2a. **That result is what
   decides R2b.** If the wire is a small share of a warm request, R2b stays parked and
   beqdesigner is told so. If not, R2b is proposed for unparking, with the numbers.
 

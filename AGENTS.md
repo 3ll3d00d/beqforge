@@ -49,20 +49,16 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/summarise.py` | Sanity-check an extraction before using it. |
 | `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
 | `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
-| `tools/negative_corpus.py` | The negative corpus (IMPROVEMENT_PLAN E2): `harness.corpus_case` titles across seven shapes, two channels each, truth known by construction. Reports false acceptances per shape with a 95% Clopper-Pearson interval, true positives and recovery on injected filters, and gates on the upper bound over the negatives a pipeline can tell from a filter (`natural_droop` is reported, not gated). The committed baseline is `negative_corpus.json`. |
-| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `refit_probe.py` (refits every title from its cached analysis and judges in both modes — the fast check for a fitter change), `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — IMPROVEMENT_PLAN A1), `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original; `--noise-db` adds a delivery noise floor after the filter, so where the programme drowns is known exactly) and `score_injected.py` (scores those variants' runs against that truth: shortfall inside the recoverable band, gain where noise dominates); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"), and a tracking floor that requires confident tracking (`t8_floor_rules.py`, IMPROVEMENT_PLAN T8: more conservative, no more stable). |
+| `tools/negative_corpus.py` | The negative corpus (historical review E2): `harness.corpus_case` titles across seven shapes, two channels each, truth known by construction. Reports false acceptances per shape with a 95% Clopper-Pearson interval, true positives and recovery on injected filters, and gates on the upper bound over the negatives a pipeline can tell from a filter (`natural_droop` is reported, not gated). The committed baseline is `negative_corpus.json`. |
+| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `refit_probe.py` (refits every title from its cached analysis and judges in both modes — the fast check for a fitter change), `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — historical review A1), `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original; `--noise-db` adds a delivery noise floor after the filter, so where the programme drowns is known exactly) and `score_injected.py` (scores those variants' runs against that truth: shortfall inside the recoverable band, gain where noise dominates); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"), and a tracking floor that requires confident tracking (`t8_floor_rules.py`, historical review T8: more conservative, no more stable). |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
 | `tests/` | `uv run pytest`. |
 
-[TODO.md](TODO.md) is the live backlog — genuinely open questions, backlog items and known rough
-edges. Everything in "Working on `design/`" below is what the shipped implementation actually
-does today, not a plan for something still to be built.
-[IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) is the reviewed list of weaknesses and
-inconsistencies in the process itself — each with a testable check — and the stress-track shapes
-needed to run them. Read it before changing decision logic (targets, ceiling, acceptance,
-selection). `plans/` holds step-by-step implementation plans for items agreed there
-but not yet built; follow the plan's steps and update it if the work departs from it.
+[TODO.md](TODO.md) is the sole prioritised backlog, including open decision questions and
+validation requirements. Read it before changing targets, ceiling, acceptance or selection.
+Completed implementation and measured research decisions live under `plans/`; they are
+historical evidence, not additional work queues.
 
 ## Running things
 
@@ -144,8 +140,7 @@ test suite checks the code does what it says; this checks what it now *decides* 
 material. A full `design_beq.py` pass over the baseline set is ~20 minutes, so the workflow is
 tiered: a cheap probe on every title, and real runs only where the probe says they are needed.
 
-**The baseline set.** The titles listed in `IMPROVEMENT_PLAN.md` ("Baseline: 2026-09-26 track
-set") as `data/<Title>.npz`, extracted as that section describes, each with its run record
+**The baseline set.** The titles listed in [plans/done-baseline-evidence.md](plans/done-baseline-evidence.md) ("Baseline: 2026-09-26 track set") as `data/<Title>.npz`, extracted as that section describes, each with its run record
 `data/<Title>.run.json.gz`. **Those records are the baseline** the probe re-judges against:
 don't overwrite them with a check run. Give check runs `--record <scratch>/<Title>.run.json.gz`.
 Refresh them deliberately, all together, when a change is accepted as the new baseline.
@@ -240,10 +235,10 @@ accepted as the new baseline. Allow 15-20 minutes:
 uv run python tools/negative_corpus.py --seeds 1-9 --output <scratch>/corpus.json
 ```
 
-**5. Write the outcome down** in `IMPROVEMENT_PLAN.md`'s "Progress": what changed, what the
-probe showed, which titles needed real runs and what they gave. In the same commit, update
-its row in the "Status" table at the top of that file (and the open-questions list under
-it, if the change opens or closes one). An item with no recorded outcome is not done.
+**5. Write the outcome down** in the appropriate implementation or research document under
+`plans/`: what changed, what the probe showed, which titles needed real runs and what they
+gave. In the same commit, update or remove its priority/status row in `TODO.md` and any
+open questions it resolves. An item with no recorded outcome is not done.
 
 **Pitfalls, each met at least once:**
 
@@ -314,7 +309,7 @@ mix's measured deficit inside `priced_by_evidence`, before the contrast ceiling;
 `restore_caps_db` (one candidate each, identical priced targets deduplicated) and only restores
 a channel as far as that channel's own contrast allows; the judged band runs from the tracking
 floor (at least `verify_floor_hz`) to the same deficit anchor `flatten` uses, widened to at
-least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6).
+least `min_judge_octaves` above the floor — no fixed top (historical review T6).
 
 ### Strategies and evidence pricing
 
@@ -323,14 +318,14 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
   `parametric` (fit and invert a rolloff) all produce a target, all go through the same fitter
   and the same acceptance model, and all run by default. Adding one is a function plus an entry
   in `STRATEGIES`. Select with `--strategy NAME` (repeatable, or `all`). On the nine-title
-  baseline (`IMPROVEMENT_PLAN.md`) `flatten` and `parametric` both win titles, and one title
+  baseline (`plans/done-baseline-evidence.md`) `flatten` and `parametric` both win titles, and one title
   abstains. No strategy has an opinion of its own: each will invert a noise floor as happily as
   a rolloff, which is what `priced_by_evidence` and `diagnose`'s guard are for. **Every strategy
   that builds a target must price it through `priced_by_evidence`, passing the mix's measured
   low-end deficit (`low_end_deficit_db`)**. Pricing is the whole of the evidence: the tracking-floor hold,
   the deficit cap and the contrast ceiling, identical for every strategy. `counterfactual` once
   skipped pricing and handed the fitter +35 to +46 dB of boost no measurement supported. Until
-  IMPROVEMENT_PLAN E3, only `flatten` got the hold and the cap, so the other two asked for up
+  historical review E3, only `flatten` got the hold and the cap, so the other two asked for up
   to 10 dB more below the floor and won selection on it.
 * **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but
   the outcome is a flat-to-rising response, and inverting the measured response reaches it
@@ -414,7 +409,7 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
   average it lifts that floor too (up to 17 dB on injected real titles), and the frozen
   protocol's `steep_leakage` is then accepted. Three "average programme" bounds were tried and
   failed — frame mean power (owned by a few transient frames), frame median (sparse programme
-  hides under it), mean over loud-or-quiet frames (the same transients). IMPROVEMENT_PLAN.md,
+  hides under it), mean over loud-or-quiet frames (the same transients). plans/research-design-decisions.md,
   "Steep filters", has the numbers. The probe sees it only with `snapshot --content-edge`.
 * Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by
   writing another one-off script. The point of the driver is that two titles become comparable;
@@ -450,7 +445,7 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
 * `Candidate.confidence` (`pipeline.correction_evidence_score`) is an **uncalibrated ordinal**,
   fit quality and recovered fraction both excluded by design — there is no labelled corpus to
   calibrate a probability against. It does not reorder `Report.accepted`, deliberately (see
-  `TODO.md` item 6). Use `recovered_fraction` (priced target ÷ measured deficit) and
+  the historical E3 review). Use `recovered_fraction` (priced target ÷ measured deficit) and
   `shaping_fraction` (share of the cascade's peak gain below the level-independence floor,
   clamped to [0, 1]) as the separate diagnostics they are; the legacy `accept.confidence_from_evidence` is kept only
   for callers of the old arithmetic and must not be revived as the live confidence measure.
@@ -481,7 +476,7 @@ least `min_judge_octaves` above the floor — no fixed top (IMPROVEMENT_PLAN T6)
   provenance, from when the question was "was a mastering filter applied?". Under the content
   principle (above) its low end is real, attenuated programme, and lifting it toward a flat
   goal is the dials working. So, like the corpus's `natural_droop`, it is **reported, not
-  counted as a false acceptance**. Since IMPROVEMENT_PLAN T6 it is accepted on both seeds (it
+  counted as a false acceptance**. Since historical review T6 it is accepted on both seeds (it
   had only been rejected by a sub-dB unevenness margin over an over-wide judged band). The
   protocol file and its predeclared results are left untouched; the guards that matter still
   hold — `stationary_coloured_noise` and `broadband` abstain on both seeds.
@@ -592,6 +587,6 @@ quantity (gain reduction actually required on the modelled sub feed) and had to 
 More generally, the catalogue has no negatives — nothing in it is known to be unfiltered — so it
 cannot validate a false-positive rate, and a per-title decision must never rest on a value
 derived from outside that title. This is the recurring failure mode in this package; see
-`TODO.md`'s "known contradictions" for the constants still standing in for a measurement.
+`TODO.md` for the constants still standing in for a measurement.
 
 `data/` holds extracted material and is gitignored. Nothing in it is committed.
