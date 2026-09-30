@@ -1121,6 +1121,32 @@ does not change between runs of the same code over the same title. `flatten` and
 """
 
 
+def cached_module_sets() -> list[tuple[str, ...]]:
+    """Every module set a stage-cache key digests: the analysis and each caching strategy's.
+
+    One list for the key and for the frozen build's baked digests (`beqforge.spec`), so the
+    two cannot drift apart.
+    """
+    sets = [cache.ANALYSIS_MODULES]
+    for strategy in STRATEGIES.values():
+        if strategy.cache_modules is not None and strategy.cache_modules not in sets:
+            sets.append(strategy.cache_modules)
+    return sets
+
+
+def _usable(store: "cache.Store | None") -> "cache.Store | None":
+    """The store, or None when this build cannot key a stage (`cache.CacheUnavailable`)."""
+    if store is None:
+        return None
+    try:
+        for modules in cached_module_sets():
+            cache.digest_of(modules)
+    except cache.CacheUnavailable as unavailable:
+        logger.warning(f"Running without the stage cache: {unavailable}")
+        return None
+    return store
+
+
 @dataclass(frozen=True, slots=True)
 class _Restoration:
     """What restoring a channel needs that does not depend on how far it is restored.
@@ -1330,7 +1356,7 @@ def analyse(
     precede fitting — plateau, floors, judged band, evidence ceiling — without paying for a fit.
     """
     timings = timings or Timings()
-    store = cache.as_store(cache_path)
+    store = _usable(cache.as_store(cache_path))
     params = params or PipelineParams()
     # One effective exclusion contract at every stage, including directly configured omissions.
     bands = tuple(
@@ -1527,7 +1553,7 @@ def propose(
 ) -> list[Proposal]:
     """Every selected strategy's proposals, each carrying the notes on what bound its target."""
     timings = timings or Timings()
-    store = cache.as_store(cache_path)
+    store = _usable(cache.as_store(cache_path))
     params = analysed.params
     diagnosis = analysed.diagnosis
     envelopes = analysed.envelopes
@@ -1593,6 +1619,8 @@ def run(
     """
     timings = Timings()
     FIT_STATS.reset()
+    # checked once, so a build that cannot key a stage warns once, not per stage
+    cache_path = _usable(cache.as_store(cache_path))
     analysed = analyse(material, params, cache_path, fresh, timings)
     params = analysed.params
     diagnosis = analysed.diagnosis

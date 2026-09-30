@@ -137,3 +137,17 @@ def test_no_reader_ever_sees_a_partial_entry(tmp_path, kind) -> None:
     assert writer.returncode == 0
     assert loads > 1
     assert store.load("analysis", key) == expected
+
+
+@pytest.mark.parametrize("kind", STORES)
+def test_entries_get_an_ordinary_files_permissions(tmp_path, kind) -> None:
+    """Not `mkstemp`'s private 0600: another process, maybe another user, reads them."""
+    import os
+
+    store = STORES[kind](tmp_path)
+    key = analysis_key()
+    store.store("analysis", key, {"which": 1})
+    path = store.path if kind == "file" else store.entry("analysis", key)
+    umask = os.umask(0)
+    os.umask(umask)
+    assert path.stat().st_mode & 0o777 == 0o666 & ~umask

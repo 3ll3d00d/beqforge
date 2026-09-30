@@ -17,9 +17,12 @@ this on Linux/macOS/Windows and smoke-tests the result with `tools/smoke_test_ex
 platform — same as an unpackaged `uv run` install, not something PyInstaller bundles.
 """
 
+import json
 from pathlib import Path
 
+from beqforge.cache import STAGE_DIGESTS_FILE, bake_digests
 from beqforge.cli import _SUBCOMMANDS
+from beqforge.pipeline import cached_module_sets
 from beqforge.record import BUILD_REVISION_FILE, revision
 
 # A frozen build has no git checkout and no .py sources to digest, so the revision a record or
@@ -31,11 +34,19 @@ _stamp.parent.mkdir(parents=True, exist_ok=True)
 _stamp.write_text(revision(), encoding="utf-8")
 print(f"beqforge build revision: {_stamp.read_text(encoding='utf-8')}")
 
+# Likewise the stage cache: its keys digest the sources each stage is computed by, which a
+# frozen build does not ship. Baked from the same module sets the keys use
+# (`beqforge.pipeline.cached_module_sets`), never a copy of them; without this file a frozen
+# build runs uncached rather than keying on nothing.
+_digests = Path(workpath) / STAGE_DIGESTS_FILE  # noqa: F821
+_digests.write_text(json.dumps(bake_digests(cached_module_sets())), encoding="utf-8")
+print(f"beqforge stage digests: {_digests.read_text(encoding='utf-8')}")
+
 a = Analysis(
     ["beqforge/cli.py"],
     pathex=[],
     binaries=[],
-    datas=[(str(_stamp), "beqforge")],
+    datas=[(str(_stamp), "beqforge"), (str(_digests), "beqforge")],
     hiddenimports=list(_SUBCOMMANDS.values()),
     hookspath=[],
     hooksconfig={},

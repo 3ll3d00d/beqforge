@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **active** | Steps 1-2 of 5 done: the key is the samples; writes are atomic, and a directory store keeps one file per entry. Step 3 found the packaged `beqforge design` crashes on its default cache. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
+| R2a | **active** | Steps 1-3 of 5 done: key is the samples; atomic writes and a directory store; the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache). Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
 | R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -949,6 +949,25 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a step 3 — the frozen build keys the cache on baked digests (2026-09-29).** Found
+  first, as the plan asked: a PyInstaller build of the current tree ran `beqforge design
+  <title>.npz` straight into `FileNotFoundError: …/beqforge/__init__.py` from
+  `cache.digest_of` — the packaged CLI could not run with its default cache. A live bug,
+  independent of R2a. Now `beqforge.spec` writes `STAGE_DIGESTS.json` beside
+  `BUILD_REVISION`: `cache.bake_digests` over `pipeline.cached_module_sets()` (the analysis
+  and every caching strategy's modules — the one list both the keys and the bake read). When
+  frozen, `digest_of` reads it; without it, or without the set asked for, it raises
+  `cache.CacheUnavailable`, and `run` checks that once, warns once and runs uncached. Unfrozen,
+  nothing changes.
+  * **Also fixed here, from step 2:** `mkstemp` made every cache file private (0600), where
+    they had been 0644; a directory shared between processes, possibly under different users,
+    needs the ordinary mode, so the temporary file now gets `0666 & ~umask` (tested).
+  * **Checks:** the baked map equals `digest_of` for every set and covers every caching
+    strategy; frozen keys equal unfrozen keys without reading a source; a frozen build without
+    the map raises; a run without it completes uncached with exactly one warning. Full suite
+    passes; probe at `--tol 0`: nothing moved. The rebuilt executable: `beqforge design` on
+    Ballad of Wallis Island ran cold (56.8 s, both stages cached) and then warm (19.5 s, both
+    reused); `smoke_test_exe.py` passes.
 * **R2a step 2 — atomic entries and a directory store (2026-09-29).** `cache.Store` is now
   a protocol with two stores. `FileStore` is the CLI's per-title file, unchanged in layout,
   now written to a temporary name beside it, fsynced and renamed, so a reader sees the old

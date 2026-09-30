@@ -38,6 +38,7 @@ import json
 import logging
 import math
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,14 +100,60 @@ def _package_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def digest_of(modules: tuple[str, ...]) -> str:
-    """SHA-256 over the named sources, first 12 hex. Paths are package-root relative."""
+STAGE_DIGESTS_FILE = "STAGE_DIGESTS.json"
+"""Written beside the package by `beqforge.spec`: each cached stage's module digest, baked."""
+
+
+class CacheUnavailable(RuntimeError):
+    """No trustworthy digest of the code a stage depends on, so no key: run uncached."""
+
+
+def _module_set_name(modules: tuple[str, ...]) -> str:
+    return "\0".join(modules)
+
+
+def _digest_sources(modules: tuple[str, ...]) -> str:
     root = _package_root()
     digest = hashlib.sha256()
     for name in modules:
         digest.update(name.encode("utf-8"))
         digest.update((root / name).read_bytes())
     return digest.hexdigest()[:12]
+
+
+def bake_digests(module_sets: list[tuple[str, ...]]) -> dict[str, str]:
+    """What `beqforge.spec` writes to `STAGE_DIGESTS_FILE`, from the tree being built."""
+    return {_module_set_name(m): _digest_sources(m) for m in module_sets}
+
+
+def _baked_digests_path() -> Path:
+    return _package_root() / STAGE_DIGESTS_FILE
+
+
+def digest_of(modules: tuple[str, ...]) -> str:
+    """SHA-256 over the named sources, first 12 hex. Paths are package-root relative.
+
+    A frozen build ships bytecode, not sources, so it reads the digests `beqforge.spec` baked
+    from the tree it was built from — identical to these by construction. Without them it
+    raises `CacheUnavailable` rather than keying on nothing: before this the packaged
+    `beqforge design` failed on its default cache with `FileNotFoundError` (IMPROVEMENT_PLAN
+    R2a, step 3).
+    """
+    if not getattr(sys, "frozen", False):
+        return _digest_sources(modules)
+    try:
+        baked = json.loads(_baked_digests_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as missing:
+        raise CacheUnavailable(
+            f"frozen build without {STAGE_DIGESTS_FILE}; stage cache disabled"
+        ) from missing
+    try:
+        return baked[_module_set_name(modules)]
+    except KeyError:
+        raise CacheUnavailable(
+            f"{STAGE_DIGESTS_FILE} has no digest for {', '.join(modules)}; "
+            "stage cache disabled"
+        ) from None
 
 
 def material_fingerprint(material: Material) -> str:
@@ -395,6 +442,12 @@ class Store(Protocol):
     def store(self, stage: str, key: dict[str, Any], payload: Any) -> None: ...
 
 
+def _umask() -> int:
+    current = os.umask(0)
+    os.umask(current)
+    return current
+
+
 def _write_atomic(path: Path, document: Any) -> None:
     """Write to a temporary name beside `path`, fsync, then rename over it.
 
@@ -406,6 +459,9 @@ def _write_atomic(path: Path, document: Any) -> None:
         dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
     )
     try:
+        # `mkstemp` makes the file private (0600); a cache shared between processes, possibly
+        # under different users, needs the mode an ordinary file would get here
+        os.chmod(temporary, 0o666 & ~_umask())
         with os.fdopen(fd, "wb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb") as zipped:
                 zipped.write(json.dumps(document).encode("utf-8"))
