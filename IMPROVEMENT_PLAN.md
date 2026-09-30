@@ -949,6 +949,13 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a follow-up — request timeouts in CI (2026-09-30).** The same CI run failed two server
+  cache tests on Linux with a client `TimeoutError` at 120 s. Not a hang: the server's late
+  reply met a closed socket (`BrokenPipeError`), and the runner took 9 minutes over that test
+  file against 2 locally, so the 33-41 s tests needed more than 120 s there. Every request in
+  `test_design_designer_server.py` that runs a real design now waits `DESIGN_TIMEOUT_S`
+  (900 s); `smoke_test_exe.py`'s defaults go from 20 s to 60 s for startup and from 90 s to
+  600 s a request, ahead of its first CI run on the R2a/R2b build. Tests only; no probe.
 * **R2a follow-up — cache writes on Windows (2026-09-30).** CI on `38ef5a0` failed
   `test_no_reader_ever_sees_a_partial_entry` on Windows, both stores: `os.replace` raised
   `PermissionError` (WinError 5) because Windows refuses to rename over a file another

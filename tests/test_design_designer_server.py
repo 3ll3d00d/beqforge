@@ -54,6 +54,12 @@ def server():
         thread.join(timeout=5)
 
 
+DESIGN_TIMEOUT_S = 900.0
+"""For a request that runs a real design. A guard against a hang, not a speed test: a cold
+request here takes 15-40 s on a 16-core desktop, and GitHub's Linux runner is about 4.5x
+slower (this file took 9 minutes there against 2 locally) — 120 s timed out on 2026-09-30."""
+
+
 def _request(address, method: str, path: str, body=None, timeout: float = 30.0):
     conn = http.client.HTTPConnection(*address, timeout=timeout)
     try:
@@ -196,7 +202,11 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     replying (`ContractViolation`'s docstring), not just this test's own assertions.
     """
     status, body = _request(
-        server, "POST", DESIGN_PATH, body=_known_filter_request(), timeout=60.0
+        server,
+        "POST",
+        DESIGN_PATH,
+        body=_known_filter_request(),
+        timeout=DESIGN_TIMEOUT_S,
     )
     assert status == 200
     assert body["contract_version"] == "1.0"
@@ -251,10 +261,14 @@ def test_a_repeat_request_reuses_every_stage_and_answers_the_same(
     )
     try:
         request = _known_filter_request()
-        first = _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+        first = _request(
+            httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+        )
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="beqforge.cache"):
-            second = _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+            second = _request(
+                httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+            )
     finally:
         _stop(httpd, thread)
     assert first == second
@@ -273,7 +287,7 @@ def test_another_server_setting_reuses_the_analysis_only(
         monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
     )
     try:
-        _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
     finally:
         _stop(httpd, thread)
     tilted = PipelineParams(
@@ -283,7 +297,9 @@ def test_another_server_setting_reuses_the_analysis_only(
     caplog.clear()
     try:
         with caplog.at_level(logging.INFO, logger="beqforge.cache"):
-            _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+            _request(
+                httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+            )
     finally:
         _stop(httpd, thread)
     assert _reused(caplog) == {"analysis"}
@@ -301,7 +317,7 @@ def test_bass_management_alone_reuses_the_analysis(
         monkeypatch, PipelineParams(strategies=("flatten",)), DirStore(tmp_path)
     )
     try:
-        _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
         managed = {
             **request,
             "bass_management": {
@@ -315,7 +331,7 @@ def test_bass_management_alone_reuses_the_analysis(
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="beqforge.cache"):
             status, _ = _request(
-                httpd.server_address, "POST", DESIGN_PATH, managed, 120.0
+                httpd.server_address, "POST", DESIGN_PATH, managed, DESIGN_TIMEOUT_S
             )
     finally:
         _stop(httpd, thread)
@@ -393,9 +409,11 @@ def test_a_request_by_reference_answers_as_the_same_request_inline(
     httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
     monkeypatch.setattr(_Handler, "shared_root", tmp_path.resolve())
     try:
-        first = _request(httpd.server_address, "POST", DESIGN_PATH, inline, 120.0)
+        first = _request(
+            httpd.server_address, "POST", DESIGN_PATH, inline, DESIGN_TIMEOUT_S
+        )
         second = _request(
-            httpd.server_address, "POST", DESIGN_PATH, by_reference, 120.0
+            httpd.server_address, "POST", DESIGN_PATH, by_reference, DESIGN_TIMEOUT_S
         )
     finally:
         _stop(httpd, thread)

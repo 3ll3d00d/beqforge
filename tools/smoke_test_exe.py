@@ -156,8 +156,10 @@ def main() -> int:
         "executable", type=Path, help="path to the built beqforge binary"
     )
     parser.add_argument("--port", type=int, default=8423)
-    parser.add_argument("--startup-timeout", type=float, default=20.0)
-    parser.add_argument("--request-timeout", type=float, default=90.0)
+    # guards against a hang, not speed limits: CI runners are several times slower than a
+    # desktop, and a onefile build unpacks itself before it can answer /health
+    parser.add_argument("--startup-timeout", type=float, default=60.0)
+    parser.add_argument("--request-timeout", type=float, default=600.0)
     args = parser.parse_args()
 
     if not args.executable.exists():
