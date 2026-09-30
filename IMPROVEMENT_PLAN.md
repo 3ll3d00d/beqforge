@@ -63,8 +63,8 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **active** | Steps 1-4 of 5 done: `serve-designer --cache-dir DIR` reuses unchanged stages (Send Help: 103 s cold, 47 s warm, records identical); the frozen build keys the cache on baked digests. Step 5: prove it in the executable and time the wire. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
-| R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
+| R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. |
+| R2b | parked | Stays parked on R2a's timings: the wire (read, parse, decode of a 708 MB body) is 1.5 s, 3% of a warm request on one host. Unparks if the designer moves to another host. beqdesigner to be told. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
@@ -136,7 +136,7 @@ outside the harness, moves behind them.
    the synthetic protocol and corpus, since a lower floor can license more boost.
 8. *(C5 and C4, done — see Progress.)* Runs account for their time; headroom's peak is exact
    and 3.5x faster. What is left of judging is small; the fitter is the cost now.
-9. **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
+9. *(R2a, done — see Progress; R2b stays parked on its timings.)* **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
    redesign of a title already analysed then skips `diagnose`/`extract`/`identify` and a
    parametric fit whose key did not move. Implementation plan, five commits:
    [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). beqforge only, no contract change; beqdesigner
@@ -949,6 +949,23 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a step 5 — proved in the executable, and timed (2026-09-30). R2a done.**
+  * `smoke_test_exe.py` now starts the executable with `--cache-dir` and sends its request
+    twice: the second answer must be identical, its record's stages must include
+    `analysis/cached`, and the directory must hold entries. The server refuses the cache unless
+    every cached stage's baked digest is present, so that hit covers them all (the request is
+    `flatten` only, as before; `parametric`'s reuse is covered by the in-process server
+    tests). Passes on a local Linux build; CI runs it on every platform.
+  * The server logs one timing line per request (body size; read, parse, decode, design,
+    respond). `tools/experiments/request_timing.py` POSTs a real title as beqdesigner does,
+    cold then warm twice, under `systemd-inhibit` on an otherwise idle machine. Alto Knights
+    (8 channels, 123 min, the largest): body 708 MB; cold 110.5 s (wire 1.41 s, design
+    109.0); warm 50.6 and 50.7 s (wire 1.51 and 1.48 s — read 0.13, parse 0.50, decode 0.87 —
+    design 49.1-49.2). Client-side encode, beqdesigner's cost, 1.87 s.
+  * **R2b decision:** stays parked. Requests by reference would save only the wire, 3% of a
+    warm request when both run on one host. Its other trigger stands: a designer on another
+    host, where 708 MB is about 6 s at 1 Gb/s. **To tell beqdesigner** (their D1): R2a is in,
+    no contract change; D1 waits on a remote-host deployment.
 * **R2a step 4 — `serve-designer --cache-dir DIR` (2026-09-30).** Off by default, like
   `--record-dir`. When set, the server builds one `DirStore` at start-up and
   `designer.design(..., cache=store)` passes it to `run`; the start-up line names it. Several

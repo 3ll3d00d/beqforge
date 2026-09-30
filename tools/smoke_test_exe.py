@@ -12,10 +12,17 @@ fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's 
 packaging failure mode and the one platform difference (Windows defaults to 'spawn', which
 re-execs the frozen binary itself) that cannot be verified by only checking `--help` or
 `/health`. Exits non-zero and says why on any failure.
+
+The request is then sent a second time: the server runs with `--cache-dir`, and the second
+answer must be identical and must have come from the stage cache — the proof that a frozen
+build can key the cache at all (IMPROVEMENT_PLAN R2a; before, `digest_of` read sources the
+executable does not ship). The server refuses the cache unless every cached stage's baked
+digest is present, so a hit on the analysis covers them all.
 """
 
 import argparse
 import base64
+import gzip
 import http.client
 import json
 import shutil
@@ -118,6 +125,7 @@ def main() -> int:
         return 1
 
     records = Path(tempfile.mkdtemp(prefix="beqforge-smoke-"))
+    stages = Path(tempfile.mkdtemp(prefix="beqforge-smoke-cache-"))
     proc = subprocess.Popen(
         [
             str(args.executable),
@@ -128,6 +136,8 @@ def main() -> int:
             "flatten",
             "--record-dir",
             str(records),
+            "--cache-dir",
+            str(stages),
             "--quiet",
         ]
     )
@@ -171,6 +181,29 @@ def main() -> int:
             )
             return 1
         print(f"OK: run record {written.name}")
+
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", args.port, timeout=args.request_timeout
+        )
+        try:
+            again_status, again = _post(conn, "/design", _known_filter_request())
+        finally:
+            conn.close()
+        if again_status != 200 or again != body:
+            print("FAIL: the repeat request answered differently", file=sys.stderr)
+            return 1
+        with gzip.open(written, "rt", encoding="utf-8") as handle:
+            stages_run = [name for name, _ in json.load(handle)["timings"]["stages"]]
+        if "analysis/cached" not in stages_run:
+            print(
+                f"FAIL: the repeat request did not reuse the analysis: {stages_run}",
+                file=sys.stderr,
+            )
+            return 1
+        if not any(stages.rglob("*.json.gz")):
+            print(f"FAIL: nothing cached in {stages}", file=sys.stderr)
+            return 1
+        print("OK: repeat request answered the same, from the stage cache")
         return 0
     finally:
         proc.terminate()
@@ -180,6 +213,7 @@ def main() -> int:
             proc.kill()
             proc.wait()
         shutil.rmtree(records, ignore_errors=True)
+        shutil.rmtree(stages, ignore_errors=True)
 
 
 if __name__ == "__main__":

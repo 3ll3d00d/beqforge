@@ -21,6 +21,7 @@ import json
 import logging
 import math
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -66,11 +67,15 @@ class _Handler(BaseHTTPRequestHandler):
                 404, {"error": f"unknown path {self.path!r}, expected {DESIGN_PATH!r}"}
             )
             return
+        started = time.perf_counter()
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
+        read = time.perf_counter()
         try:
             body = json.loads(raw)
+            parsed = time.perf_counter()
             request = request_from_json(body)
+            decoded = time.perf_counter()
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as malformed:
             logger.warning(f"malformed request body: {malformed}")
             self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
@@ -79,6 +84,7 @@ class _Handler(BaseHTTPRequestHandler):
         response = design(
             request, self.params, record_dir=self.record_dir, cache=self.cache
         )
+        designed = time.perf_counter()
         try:
             validate_response(response)
         except ContractViolation as bug:
@@ -95,6 +101,14 @@ class _Handler(BaseHTTPRequestHandler):
         )
         logger.info(f"POST {DESIGN_PATH}: {outcome}")
         self._respond(200, response_to_json(response))
+        # the wire's share of a request, apart from the design itself: what decides whether
+        # requests by reference are worth having (IMPROVEMENT_PLAN R2a/R2b)
+        logger.info(
+            f"request timing: body {length / 1e6:.1f} MB, read {read - started:.2f} s, "
+            f"parse {parsed - read:.2f} s, decode {decoded - parsed:.2f} s, "
+            f"design {designed - decoded:.2f} s, "
+            f"respond {time.perf_counter() - designed:.2f} s"
+        )
 
     def _respond(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
