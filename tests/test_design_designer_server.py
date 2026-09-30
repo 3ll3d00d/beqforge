@@ -16,6 +16,7 @@ recipe `beqforge.harness.evidence_cases` uses for its own validated positives.
 
 import http.client
 import json
+import logging
 import threading
 
 import numpy as np
@@ -208,3 +209,126 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     assert candidate["mv_adjust_db"] > 0.0  # a boost was actually proposed
 
     validate_response(_response_from_json(body))  # must not raise
+
+
+def _serve(monkeypatch, params: PipelineParams, cache):
+    """A server of its own, with its own settings — `_Handler`'s are class attributes, so
+    these are restored when the test ends and the module's shared server is unaffected."""
+    monkeypatch.setattr(_Handler, "params", params)
+    monkeypatch.setattr(_Handler, "cache", cache)
+    httpd = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, thread
+
+
+def _stop(httpd, thread) -> None:
+    httpd.shutdown()
+    thread.join(timeout=5)
+    httpd.server_close()
+
+
+def _reused(caplog) -> set[str]:
+    return {
+        r.message.split(":")[0].strip()
+        for r in caplog.records
+        if "reused from" in r.message
+    }
+
+
+BOTH = ("flatten", "parametric")
+
+
+def test_a_repeat_request_reuses_every_stage_and_answers_the_same(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    """R2a: `--cache-dir` — the second request for a title skips its analysis."""
+    from beqforge.cache import DirStore
+
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
+    )
+    try:
+        request = _known_filter_request()
+        first = _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            second = _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+    finally:
+        _stop(httpd, thread)
+    assert first == second
+    assert _reused(caplog) == {"analysis", "parametric"}
+    assert list((tmp_path / "analysis").iterdir())
+
+
+def test_another_server_setting_reuses_the_analysis_only(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    from beqforge.accept import AcceptParams
+    from beqforge.cache import DirStore
+
+    request = _known_filter_request()
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
+    )
+    try:
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+    finally:
+        _stop(httpd, thread)
+    tilted = PipelineParams(
+        strategies=BOTH, accept=AcceptParams(target_tilt_db_per_octave=1.0)
+    )
+    httpd, thread = _serve(monkeypatch, tilted, DirStore(tmp_path))
+    caplog.clear()
+    try:
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+    finally:
+        _stop(httpd, thread)
+    assert _reused(caplog) == {"analysis"}
+    # both configurations' parametric entries kept side by side
+    assert len(list((tmp_path / "parametric").iterdir())) == 2
+
+
+def test_bass_management_alone_reuses_the_analysis(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    from beqforge.cache import DirStore
+
+    request = _known_filter_request()
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=("flatten",)), DirStore(tmp_path)
+    )
+    try:
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, 120.0)
+        managed = {
+            **request,
+            "bass_management": {
+                "lpf_fs": 100.0,
+                "lpf_position": "Before",
+                "headroom_type": "WCS",
+                "clip_before": False,
+                "clip_after": False,
+            },
+        }
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            status, _ = _request(
+                httpd.server_address, "POST", DESIGN_PATH, managed, 120.0
+            )
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert "analysis" in _reused(caplog)
+
+
+def test_without_a_cache_dir_nothing_is_written(monkeypatch, tmp_path) -> None:
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    try:
+        status, _ = _request(
+            httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
+        )
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert not list(tmp_path.iterdir())

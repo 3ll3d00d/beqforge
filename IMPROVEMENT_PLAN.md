@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | **active** | Steps 1-3 of 5 done: key is the samples; atomic writes and a directory store; the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache). Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
+| R2a | **active** | Steps 1-4 of 5 done: `serve-designer --cache-dir DIR` reuses unchanged stages (Send Help: 103 s cold, 47 s warm, records identical); the frozen build keys the cache on baked digests. Step 5: prove it in the executable and time the wire. Plan in [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). Priority 9. |
 | R2b | parked | Not started. Requests by reference (contract 1.2). Unparks only if R2a's warm-request timings show the transfer matters, or the designer moves to another host. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -949,6 +949,19 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a step 4 — `serve-designer --cache-dir DIR` (2026-09-30).** Off by default, like
+  `--record-dir`. When set, the server builds one `DirStore` at start-up and
+  `designer.design(..., cache=store)` passes it to `run`; the start-up line names it. Several
+  servers may share the directory (step 2's atomic writes; each server single-threaded).
+  * **Checks** (real servers in-process, one directory): the same request twice — the second
+    reuses the analysis and `parametric`, and the responses are identical; a second server
+    with `--goal-tilt` 1.0 reuses the analysis and recomputes `parametric`, both
+    configurations' entries kept; a request differing only in `bass_management` reuses the
+    analysis; without `--cache-dir` nothing is written. Designer tests whose fake `run` took
+    only `(material, params)` now accept the keyword. Full suite passes.
+  * **Real title** (Send Help, sent as beqdesigner would, default settings): uncached 102.5 s,
+    cached cold 103.1 s, warm 47.2 s (beside the test suite; not a benchmark). The three run
+    records are `compare_records.py`-identical.
 * **R2a step 3 — the frozen build keys the cache on baked digests (2026-09-29).** Found
   first, as the plan asked: a PyInstaller build of the current tree ran `beqforge design
   <title>.npz` straight into `FileNotFoundError: …/beqforge/__init__.py` from

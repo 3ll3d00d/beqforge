@@ -37,6 +37,7 @@ from beqforge.designer import (  # noqa: E402
 )
 from beqforge import record  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
+from beqforge.cache import DirStore, Store  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -48,6 +49,7 @@ DESIGN_PATH = "/design"
 class _Handler(BaseHTTPRequestHandler):
     params: PipelineParams  # set on the class before serving
     record_dir: Path | None = None
+    cache: Store | None = None
 
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
@@ -74,7 +76,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
             return
 
-        response = design(request, self.params, record_dir=self.record_dir)
+        response = design(
+            request, self.params, record_dir=self.record_dir, cache=self.cache
+        )
         try:
             validate_response(response)
         except ContractViolation as bug:
@@ -176,6 +180,16 @@ def main() -> int:
             "replayable with `beqforge replay`; responses name the file"
         ),
     )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "keep the stage cache here, one file per entry, and reuse any stage whose key "
+            "has not moved: a repeat request skips the analysis. Several servers may "
+            "share one directory. Off by default"
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="only warnings and above")
     args = parser.parse_args()
 
@@ -217,6 +231,7 @@ def main() -> int:
 
     _Handler.params = params
     _Handler.record_dir = args.record_dir
+    _Handler.cache = DirStore(args.cache_dir) if args.cache_dir else None
     # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
     # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
     # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
@@ -229,6 +244,7 @@ def main() -> int:
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"
         + (f"; records to {args.record_dir}" if args.record_dir else "")
+        + (f"; stage cache in {args.cache_dir}" if args.cache_dir else "")
         + ")"
     )
     try:

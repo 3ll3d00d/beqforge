@@ -32,6 +32,7 @@ from typing import Literal
 import numpy as np
 
 from beqforge import BiquadSpec, explain, record
+from beqforge.cache import Store
 from beqforge.design import DesignMethod
 from beqforge.material import Material
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
@@ -248,6 +249,7 @@ def design(
     params: PipelineParams | None = None,
     *,
     record_dir: Path | None = None,
+    cache: Store | None = None,
 ) -> DesignResponse:
     """designer-interface.md §1: one call, one title, one answer.
 
@@ -266,6 +268,10 @@ def design(
     Every response says which build produced it (`beqforge_revision` in the accepted
     candidate's commentary, or a trailing bracket on a decline message); with `record_dir`,
     the full run record is written there too and named the same way — see `_provenance`.
+
+    With `cache`, every stage whose key has not moved is reused from it — the analysis for any
+    request carrying the same samples, the parametric proposal while the server's settings are
+    unchanged (IMPROVEMENT_PLAN R2a). Nothing about the answer depends on it.
     """
     params = params or PipelineParams()
 
@@ -289,7 +295,7 @@ def design(
         )
         params = dataclasses.replace(params, playback=playback)
 
-    report = run(material, params)
+    report = run(material, params, cache_path=cache)
     provenance = _provenance(report, params, material, record_dir)
 
     rejected = _rejected(report, params, report_gain_reduction)

@@ -428,7 +428,7 @@ def test_decline_for_no_passing_candidate_lists_failures() -> None:
 def test_design_returns_a_single_candidate_when_one_is_accepted(monkeypatch) -> None:
     accepted = _candidate()
     report = _report([accepted])
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -447,7 +447,7 @@ def test_design_declines_when_no_candidate_was_built(monkeypatch) -> None:
     report = _report(
         [], evidence_notes=("no usable contiguous mix plateau; restoration withheld",)
     )
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -465,7 +465,7 @@ def test_design_declines_when_nothing_passed_acceptance(monkeypatch) -> None:
         _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
     )
     report = _report([failing])
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -483,7 +483,7 @@ def test_design_turns_on_gain_reduction_only_with_bass_management(monkeypatch) -
     report = _report([accepted])
     seen_params = {}
 
-    def fake_run(material, params):
+    def fake_run(material, params, **_):
         seen_params["playback"] = params.playback
         return report
 
@@ -511,7 +511,7 @@ def test_design_echoes_the_request_contract_version(monkeypatch) -> None:
     report = _report(
         [], evidence_notes=("no qualifying loud events; restoration withheld",)
     )
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version="1.0",
@@ -556,7 +556,7 @@ def _small_request(mono_mix: np.ndarray | None = None) -> DesignRequest:
 
 def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None:
     report = _report([_candidate()])
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
     monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
     commentary = design(_small_request()).candidates[0].commentary
     assert commentary["beqforge_revision"] == "abc123+src:def456"
@@ -571,7 +571,7 @@ def test_a_decline_names_the_build_that_made_it(monkeypatch) -> None:
         _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
     )
     monkeypatch.setattr(
-        "beqforge.designer.run", lambda material, params: _report([failing])
+        "beqforge.designer.run", lambda material, params, **_: _report([failing])
     )
     monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
     response = design(_small_request())
@@ -647,7 +647,7 @@ def test_the_judges_own_notes_reach_the_response() -> None:
 def test_the_response_says_the_fractions_in_words_not_bare_numbers(monkeypatch) -> None:
     """'Recovered fraction 0.981' meant nothing to a reviewer; the sentence has to carry it."""
     monkeypatch.setattr(
-        "beqforge.designer.run", lambda material, params: _report([_candidate()])
+        "beqforge.designer.run", lambda material, params, **_: _report([_candidate()])
     )
     commentary = design(_small_request()).candidates[0].commentary
     assert "recovered_fraction" not in commentary
@@ -692,7 +692,7 @@ def _failing(label: str, *failures: str, confidence: float = 0.8) -> Candidate:
 
 
 def _design_with(monkeypatch, report: Report) -> DesignResponse:
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
     return design(
         DesignRequest(
             contract_version=CONTRACT_VERSION,
