@@ -49,7 +49,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | T5 | checked | Folded into T4. |
 | T6 | done | Judged band ends at the deficit anchor, not a fixed 45 Hz. |
 | T7 | checked | Low priority; no verdict depends on it. |
-| T8 | **open** | Chained tracking rejected. The floor is a noisy threshold decision: on Black Bag's own scenes it lands at 25.1 Hz only 55% of the time, and injection moves it within that spread. No leakage bias. Next: a floor rule that accounts for the uncertainty (priority 7). |
+| T8 | checked | Chained tracking rejected; the floor's spread is real (Black Bag 25.1 Hz in 55% of resamples). A confidence-bound floor rule was built and measured: more conservative and *less* stable on 4 of 7 titles with a floor, and it cut real correction on 28 Years Later and Alto Knights. Not adopted; the point rule already lands on each title's modal floor. |
 | F1 | done | The drift screen charges a fragile cascade its drift instead of vetoing it; Hulk BW8 @ 30, −80 dB unblocked. The smooth penalty cannot help there (the target is fragile at any accuracy). |
 | F2 | **open** | Not started. Priority 10: needs a device-behaviour harness first. |
 | F3 | done | Band mismatch fixed; Black Bag accepted. The "one more section" question is parked (a time trade-off). |
@@ -124,16 +124,11 @@ outside the harness, moves behind them.
    where it searches, a different question. Done: what each robustness quantity means is in
    AGENTS.md ("Publication, playback and verification"); writing it down found that
    `fit_error_db` means two things (TODO 5).
-7. **T8: the tracking floor is a noisy threshold decision (steps 1-2 done, see Progress).**
-   The floor decides where the target is held flat and where the judged band starts. It is the
-   first half-octave band, walking down, whose envelope correlates below 0.5 with the
-   plateau's — and on Black Bag that correlation's 90% interval is 0.27-0.59 in the band that
-   sets it, so resampling the title's own scenes moves the floor between 35.5, 25.1 and 8.9 Hz.
-   Next, a decision change: a floor rule that respects that uncertainty — e.g. stop only where
-   the band fails with confidence (the bootstrap's upper bound below the threshold), or take
-   the floor as the lowest band of the contiguous run the plateau reaches with confidence —
-   judged with the probe and `refit_probe.py` (the floor moves targets and judged bands), and
-   the synthetic protocol and corpus, since a lower floor can license more boost.
+7. *(T8, checked — not adopted; see Progress.)* A floor rule that requires confident tracking
+   (the correlation less `confidence_z` bootstrap errors) was measured. It is no more stable than
+   the point rule, and it costs correction on two titles. The point floor equals the modal floor
+   of its own resamples on every title, so no rule tried improves on it. Revisit only if a title's
+   point floor and resampled mode disagree (`tools/experiments/t8_floor_rules.py` reports both).
 8. *(C5 and C4, done — see Progress.)* Runs account for their time; headroom's peak is exact
    and 3.5x faster. What is left of judging is small; the fitter is the cost now.
 9. *(R2a and R2b, done — see Progress. R2b was unparked on request despite R2a's timings, and
@@ -950,6 +945,45 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **T8 — a floor rule for the tracking floor's spread: checked, not adopted (2026-09-30).**
+  Priority 7 asked for a floor rule that respects the correlation's uncertainty. Two rules came
+  from the plan's own suggestions. Each was measured on the 11 titles
+  (`tools/experiments/t8_floor_rules.py`, now kept); the bound rule was also built into
+  `diagnose` and run through the whole regression workflow.
+  * **Stop only where a band fails with confidence** (the upper bound, 95%, below 0.5). This
+    tracks through bands whose best estimate says they are not tracked: Black Bag's floor goes
+    from 25.1 to 4.4 Hz, and 28 Years Later tracks to the bottom through bands at 0.43-0.47.
+    That licenses boost on missing evidence. Rejected without building it.
+  * **Continue only while a band tracks with confidence** (`confident_tracking`: the
+    correlation less `confidence_z` = 1.645 block-bootstrap standard errors must clear 0.5;
+    resampled by contiguous runs of live samples, as the ceiling resamples runs of frames, so
+    no block length is asserted; stored as the tracking curve, so a channel's restoration
+    allowance used it too). Built and checked:
+    * **Floors** (probe): 28 Years Later 20.5 → 29.0 Hz (the plateau's own edge), Alto Knights
+      12.8 → 18.0, Black Bag 25.1 → 35.5, Bugonia 6.4 → 12.8, Send Help none → 4.3; the
+      other six unchanged. Targets moved on 8 titles.
+    * **Real runs** of the 8, against their baseline records: every title that accepted
+      still accepts. Caught Stealing, Obsession, Send Help and Hulk publish the same
+      corrected curve; Black Bag (+9.0 → +7.3 dB, within about 2 dB of the old curve) and
+      Bugonia (+5.4 → +5.1) are close. **Alto Knights** keeps `flatten` but lifts less: at
+      10 Hz −2.4 becomes −9.5 dB, and at 5 Hz −8.9 becomes −15.1. **28 Years Later** switches
+      from `parametric` (+6.6 dB) to a `flatten` of +1.9 dB that leaves 16 Hz at −6.3 dB
+      against −1.6. In both, the band that moved the floor has a point correlation of
+      0.55-0.59 and a bound of 0.48-0.49.
+    * **Synthetic protocol**, both seeds: identical selections and false acceptances. The
+      corpus was not run, since the change was not adopted.
+    * **Stability**, the question T8 asked: each rule re-applied to 400 resamples of the
+      title's own runs, with the share landing on the modal floor. Point → bound: 28 Years
+      Later 55% → 66%, Alto Knights 74 → 56, Ballad 66 → 97, Black Bag 68 → 48, Bugonia 51 →
+      70, Obsession 97 → 65, Send Help 84 → 50 (the other four are 100% either way). Any
+      threshold has marginal bands. A confidence bound only moves the threshold, so the coin
+      flip lands on different bands, and more often below the plateau.
+  * **Bagged floor** (the median of the resampled floors). Equal to the point floor on every
+    title, so it would change nothing here while adding a bootstrap to every band.
+  * **Decision:** no code change. The instability is real, but on every title the point rule
+    lands on the floor its own resamples pick most often. The rule that addressed the spread
+    cost correction without making the floor any steadier. The baseline records and the stage
+    cache are untouched: the check ran in a scratch worktree.
 * **R2a/R2b — closed out (2026-09-30).** The executable workflow had not run since
   2026-09-17, so step 5's warm-hit check and R2b's by-reference request had only passed on a
   local Linux build. Dispatched on `3928780` (run 36717974193): built and smoke-tested on
