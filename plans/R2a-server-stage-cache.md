@@ -1,9 +1,13 @@
 # R2a — the designer server uses the stage cache: implementation plan
 
-**Status:** agreed, not built. Tracked as R2a in [IMPROVEMENT_PLAN.md](../IMPROVEMENT_PLAN.md)
-(priority 9). Its answers to beqdesigner are in that file's Progress, "R2 split". The other
-side is beqdesigner's `design/designer-by-reference.md` (their `63976c2`). R2b, requests by
-reference, is parked. Nothing in this plan builds any part of it (see "Not in this plan").
+**Status:** done (2026-09-30), every "Done when" item met — steps 1-5 are `f3f9f89` to
+`7951cc0`, the Windows write fix `c7182d3`, and the executable build (run 36717974193)
+passed the warm-hit smoke test on Linux, macOS and Windows. Kept as the record of how it was
+built. Tracked as R2a in [IMPROVEMENT_PLAN.md](../IMPROVEMENT_PLAN.md) (priority 9). Its answers to
+beqdesigner are in that file's Progress, "R2 split". The other side is beqdesigner's
+`design/designer-by-reference.md` (their `63976c2`). R2b, requests by reference, was parked
+when this was written and built afterwards on request, outside this plan (see "Not in this
+plan"); beqdesigner's side of it is also complete.
 
 ## What changes, and what does not
 

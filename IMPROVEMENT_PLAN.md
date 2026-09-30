@@ -64,7 +64,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
 | R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. Follow-up: a write held off by a reader on Windows retries, then skips rather than raising. |
-| R2b | done | `serve-designer --shared-root DIR`: arrays by reference (contract 1.2) — decoded, checked, 422 naming the array when unusable; `/health` advertises it. On a 2.7 h title the wire goes from 7.8 s to 1.7 s a request. beqdesigner's caller side (their D1.1-D1.4) is theirs to build. |
+| R2b | done | `serve-designer --shared-root DIR`: arrays by reference (contract 1.2) — decoded, checked, 422 naming the array when unusable; `/health` advertises it. On a 2.7 h title the wire goes from 7.8 s to 1.7 s a request. beqdesigner's caller side (their D1.1-D1.4) is complete. The executable passes the by-reference and warm-hit smoke tests on all three CI platforms. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
@@ -136,7 +136,8 @@ outside the harness, moves behind them.
    the synthetic protocol and corpus, since a lower floor can license more boost.
 8. *(C5 and C4, done — see Progress.)* Runs account for their time; headroom's peak is exact
    and 3.5x faster. What is left of judging is small; the fitter is the cost now.
-9. *(R2a, done — see Progress; R2b stays parked on its timings.)* **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
+9. *(R2a and R2b, done — see Progress. R2b was unparked on request despite R2a's timings, and
+   beqdesigner's caller side, their D1.1-D1.4, is complete too.)* **R2a: the designer server uses the stage cache (S/M; split from R2 2026-09-29).** A
    redesign of a title already analysed then skips `diagnose`/`extract`/`identify` and a
    parametric fit whose key did not move. Implementation plan, five commits:
    [plans/R2a-server-stage-cache.md](plans/R2a-server-stage-cache.md). beqforge only, no contract change; beqdesigner
@@ -949,6 +950,13 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a/R2b — closed out (2026-09-30).** The executable workflow had not run since
+  2026-09-17, so step 5's warm-hit check and R2b's by-reference request had only passed on a
+  local Linux build. Dispatched on `3928780` (run 36717974193): built and smoke-tested on
+  Linux, macOS and Windows, all passing — a cold and a warm request with `--cache-dir`, and
+  the same request by reference under `--shared-root`, each through the frozen fitter's
+  worker processes. beqdesigner's side of R2b (their D1.1-D1.4: contract text, binding,
+  sources, configuration) is complete. `plans/R2a-server-stage-cache.md` is marked done.
 * **R2a follow-up — request timeouts in CI (2026-09-30).** The same CI run failed two server
   cache tests on Linux with a client `TimeoutError` at 120 s. Not a hang: the server's late
   reply met a closed socket (`BrokenPipeError`), and the runner took 9 minutes over that test
