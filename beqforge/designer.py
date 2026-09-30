@@ -35,6 +35,7 @@ from beqforge import BiquadSpec, explain, record
 from beqforge.cache import Store
 from beqforge.design import DesignMethod
 from beqforge.material import Material
+from beqforge.reference import array_from_reference
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
@@ -375,11 +376,30 @@ def _rejected(
     return entries or None
 
 
-def _ndarray_from_json(d: dict) -> np.ndarray:
+def _ndarray_from_json(
+    d: dict,
+    name: str = "array",
+    shared_root: Path | None = None,
+    fs: int = 0,
+    opened: dict | None = None,
+) -> np.ndarray:
+    """One array, inline (`data_base64`) or, from 1.2, by reference (`file` + `sha256`).
+
+    Exactly one of the two. A body that breaks that, or a `file` without its `sha256`, is
+    malformed (`ValueError`, 400); a well-formed reference that cannot be honoured raises
+    `UnusableReference` (422) from `beqforge.reference`.
+    """
     if d.get("dtype") != _ARRAY_DTYPE:
         raise ValueError(
             f"unsupported array dtype {d.get('dtype')!r}, expected {_ARRAY_DTYPE!r}"
         )
+    inline, by_reference = "data_base64" in d, "file" in d
+    if inline == by_reference:
+        raise ValueError(f"{name} needs exactly one of data_base64 or file")
+    if by_reference:
+        if not isinstance(d["file"], dict) or not d.get("sha256"):
+            raise ValueError(f"{name}: a file reference needs file.path and sha256")
+        return array_from_reference(name, d, shared_root, fs, opened)
     data = np.frombuffer(base64.b64decode(d["data_base64"]), dtype="<f8")
     return data.reshape(tuple(d["shape"]))
 
@@ -393,16 +413,29 @@ def _ndarray_to_json(arr: np.ndarray) -> dict:
     }
 
 
-def request_from_json(body: dict) -> DesignRequest:
-    """designer-interface.md §7.1's request body, as POSTed by `http_designer(url)`."""
+def request_from_json(body: dict, shared_root: Path | None = None) -> DesignRequest:
+    """designer-interface.md §7.1's request body, as POSTed by `http_designer(url)`.
+
+    `shared_root` is where this server finds audio sent by reference (1.2); without one, a
+    `file` array is refused with `UnusableReference`. The material the arrays become is named
+    "designer-request" either way, so a request by reference and the same request inline give
+    the same cache key and the same record.
+    """
     channels = body.get("channels")
+    fs = int(body["fs"])
+    opened: dict = {}
     request = DesignRequest(
         contract_version=body["contract_version"],
-        fs=int(body["fs"]),
+        fs=fs,
         coverage=body["coverage"],
-        mono_mix=_ndarray_from_json(body["mono_mix"]),
+        mono_mix=_ndarray_from_json(
+            body["mono_mix"], "mono_mix", shared_root, fs, opened
+        ),
         channels=(
-            {name: _ndarray_from_json(arr) for name, arr in channels.items()}
+            {
+                name: _ndarray_from_json(arr, name, shared_root, fs, opened)
+                for name, arr in channels.items()
+            }
             if channels
             else None
         ),

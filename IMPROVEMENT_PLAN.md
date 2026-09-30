@@ -64,7 +64,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
 | R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. |
-| R2b | parked | Stays parked on R2a's timings: the wire (read, parse, decode of a 708 MB body) is 1.5 s, 3% of a warm request on one host. Unparks if the designer moves to another host. beqdesigner to be told. |
+| R2b | **active** | Unparked on request (2026-09-30). Step 1 of 2 done: arrays by reference decode, check and refuse per beqdesigner's §3; a real title by reference gives a record identical to inline. Step 2: the server (`--shared-root`, 422, `/health`). |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
@@ -949,6 +949,30 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2b step 1 — arrays by reference (2026-09-30).** Unparked on request, against R2a's
+  timing decision; beqdesigner's own measurement (`design/designer-by-reference.md` §2: 8.4 s
+  inline against about 2.2 s by reference on a 2.7 h title, counting the caller's encoding)
+  supports it. Built to their §3, which carries our §6 amendments. New `beqforge/reference.py`:
+  `resolve` refuses an absolute or backslashed path, a `..` component, and anything whose real
+  path (after symlinks) leaves the root's; `read_column` decodes one WAV column by the
+  contract's arithmetic (integer `s / 2**(b-1)`, float widened) with `scipy.io.wavfile`, each
+  file decoded once per request; `array_from_reference` checks rate (refused, never
+  resampled), channel range, frame count and the SHA-256 of the decoded column, all before
+  the array is used. A reference that cannot be honoured raises `UnusableReference` naming the
+  array — deliberately not a `ValueError`, which the server answers 400. `request_from_json`
+  takes `shared_root` and accepts exactly one of `data_base64` or `file` per array (both, or a
+  `file` without `sha256`, is malformed); requests may mix the two; the material stays
+  "designer-request".
+  * **Checks:** s16, s24 (plain and WAVE_FORMAT_EXTENSIBLE, as ffmpeg writes), s32 and float
+    WAVs written byte by byte decode exactly by the arithmetic; u8 refused; each path escape
+    (absolute, `..`, backslash, a symlink out of the root) refused; channel, shape, digest,
+    missing file, non-WAV, rate and no-shared-root each refused with the array named; a mixed
+    request by reference equals the inline one array for array and in cache key. Against the
+    caller's own decoder: beqdesigner's `soundfile` and ours give identical SHA-256s for
+    Ballad of Wallis Island's real `mono.wav` and all six columns of its `multichannel.wav`
+    (s24). That title by reference and inline through `design()`: `compare_records.py`
+    identical, and the same record name (audio digest). Full suite passes; probe at
+    `--tol 0`: nothing moved.
 * **R2a step 5 — proved in the executable, and timed (2026-09-30). R2a done.**
   * `smoke_test_exe.py` now starts the executable with `--cache-dir` and sends its request
     twice: the second answer must be identical, its record's stages must include
