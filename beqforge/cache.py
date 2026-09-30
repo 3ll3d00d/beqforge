@@ -40,6 +40,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -448,11 +449,36 @@ def _umask() -> int:
     return current
 
 
-def _write_atomic(path: Path, document: Any) -> None:
+REPLACE_RETRY_S = (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
+"""Waits between attempts to rename over an entry another process has open (Windows only)."""
+
+
+def _replace(temporary: str, path: Path) -> bool:
+    """Rename `temporary` over `path`; False if a reader kept it open throughout.
+
+    Windows refuses to replace a file any process has open, so a reader mid-load makes the
+    rename fail with `PermissionError` (CI, 2026-09-30). Readers hold an entry only while
+    they decompress it, so wait and retry. If it is still held after the last wait, give up:
+    the entry already there is the same payload or a stale one, so skipping costs at most a
+    recompute, never a wrong answer — and a cache must not fail the run it serves.
+    """
+    for wait in (*REPLACE_RETRY_S, None):
+        try:
+            os.replace(temporary, path)
+            return True
+        except PermissionError:
+            if wait is None:
+                return False
+            time.sleep(wait)
+    return False
+
+
+def _write_atomic(path: Path, document: Any) -> bool:
     """Write to a temporary name beside `path`, fsync, then rename over it.
 
     A reader sees the old file or the new one, never a partial one (IMPROVEMENT_PLAN R2a): a
     rename within one directory is atomic, and the fsync makes sure what is renamed is on disk.
+    Returns False, having written nothing, when the rename could not be made (`_replace`).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(
@@ -467,7 +493,11 @@ def _write_atomic(path: Path, document: Any) -> None:
                 zipped.write(json.dumps(document).encode("utf-8"))
             raw.flush()
             os.fsync(raw.fileno())
-        os.replace(temporary, path)
+        if _replace(temporary, path):
+            return True
+        logger.warning(f"  could not replace {path}: held open by another process")
+        Path(temporary).unlink(missing_ok=True)
+        return False
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
@@ -512,7 +542,8 @@ class FileStore:
     def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
         document = _read_document(self.path) if self.path.is_file() else {}
         document[stage] = {"key": key, "payload": payload}
-        _write_atomic(self.path, document)
+        if not _write_atomic(self.path, document):
+            return
         logger.info(
             f"  {stage}: cached to {self.path} ({self.path.stat().st_size / 1e6:.1f} MB)"
         )
@@ -551,7 +582,8 @@ class DirStore:
 
     def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
         path = self.entry(stage, key)
-        _write_atomic(path, {"key": key, "payload": payload})
+        if not _write_atomic(path, {"key": key, "payload": payload}):
+            return
         logger.info(f"  {stage}: cached to {path} ({path.stat().st_size / 1e6:.1f} MB)")
 
 

@@ -63,7 +63,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | C6 | done | AGENTS.md corrected on identification's role, `parametric`'s own fit and the stage shares. |
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
-| R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. |
+| R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. Follow-up: a write held off by a reader on Windows retries, then skips rather than raising. |
 | R2b | done | `serve-designer --shared-root DIR`: arrays by reference (contract 1.2) — decoded, checked, 422 naming the array when unusable; `/health` advertises it. On a 2.7 h title the wire goes from 7.8 s to 1.7 s a request. beqdesigner's caller side (their D1.1-D1.4) is theirs to build. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
@@ -949,6 +949,18 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2a follow-up — cache writes on Windows (2026-09-30).** CI on `38ef5a0` failed
+  `test_no_reader_ever_sees_a_partial_entry` on Windows, both stores: `os.replace` raised
+  `PermissionError` (WinError 5) because Windows refuses to rename over a file another
+  process has open, and the concurrent reader had it open. Step 2's "a reader sees the old
+  file or the new one" held; the writer crashed instead, which would have failed a run or a
+  request whenever two processes shared a cache. `_write_atomic` now retries the rename
+  through short waits (`REPLACE_RETRY_S`, about 1.9 s in all), and if the entry is still
+  held, drops the write with a warning: what is already there is the same payload or a stale
+  one, so a skipped write costs a recompute, never a wrong answer. Tests: a rename refused
+  twice then allowed lands; one refused throughout is skipped without raising, leaves the
+  old entry and no temporary file. Probe (`--tol 0`): nothing on any title; `cache.py` is in
+  no stage key. Full suite passes locally.
 * **R2b step 2 — the server, and timed (2026-09-30). R2b done on beqforge's side.**
   `serve-designer --shared-root DIR` (must be a directory; off by default) passes the root to
   `request_from_json`. An `UnusableReference` is answered **422** with

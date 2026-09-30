@@ -151,3 +151,44 @@ def test_entries_get_an_ordinary_files_permissions(tmp_path, kind) -> None:
     umask = os.umask(0)
     os.umask(umask)
     assert path.stat().st_mode & 0o777 == 0o666 & ~umask
+
+
+def _held_open(monkeypatch, refusals: int | None) -> list[int]:
+    """`os.replace` refuses as Windows does while a reader has the target open."""
+    import os
+
+    real = os.replace
+    calls = [0]
+
+    def replace(src, dst):
+        calls[0] += 1
+        if refusals is None or calls[0] <= refusals:
+            raise PermissionError(5, "Access is denied")
+        real(src, dst)
+
+    monkeypatch.setattr(C, "REPLACE_RETRY_S", (0.0, 0.0, 0.0))
+    monkeypatch.setattr(C.os, "replace", replace)
+    return calls
+
+
+@pytest.mark.parametrize("kind", STORES)
+def test_a_write_waits_for_a_reader_to_let_go(tmp_path, kind, monkeypatch) -> None:
+    store = STORES[kind](tmp_path)
+    key = analysis_key()
+    calls = _held_open(monkeypatch, refusals=2)
+    store.store("analysis", key, {"which": 1})
+    assert calls[0] == 3
+    assert store.load("analysis", key) == {"which": 1}
+
+
+@pytest.mark.parametrize("kind", STORES)
+def test_a_write_held_off_throughout_is_skipped_not_raised(
+    tmp_path, kind, monkeypatch
+) -> None:
+    store = STORES[kind](tmp_path)
+    key = analysis_key()
+    store.store("analysis", key, {"which": 1})
+    _held_open(monkeypatch, refusals=None)
+    store.store("analysis", key, {"which": 2})
+    assert store.load("analysis", key) == {"which": 1}
+    assert not [p for p in tmp_path.rglob("*.tmp")]
