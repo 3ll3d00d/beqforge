@@ -18,6 +18,10 @@ answer must be identical and must have come from the stage cache — the proof t
 build can key the cache at all (IMPROVEMENT_PLAN R2a; before, `digest_of` read sources the
 executable does not ship). The server refuses the cache unless every cached stage's baked
 digest is present, so a hit on the analysis covers them all.
+
+Last, the same audio is sent by reference (contract 1.2): written to float64 WAVs under the
+server's `--shared-root` and named by path with each column's SHA-256. The answer must be the
+same again — the proof that WAV decoding and the path checks work inside the executable.
 """
 
 import argparse
@@ -91,6 +95,41 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
     }
 
 
+def _by_reference(root: Path) -> dict:
+    """`_known_filter_request`, its arrays in float64 WAVs under `root`, sent by path.
+
+    float64 so the files hold the inline values exactly; the digest is of the decoded column.
+    """
+    import hashlib
+
+    from scipy.io import wavfile
+
+    request = _known_filter_request()
+
+    def decode(encoded: dict) -> np.ndarray:
+        return np.frombuffer(base64.b64decode(encoded["data_base64"]), dtype="<f8")
+
+    def reference(name: str, values: np.ndarray) -> dict:
+        wavfile.write(root / name, request["fs"], values)
+        return {
+            "dtype": "float64",
+            "shape": [len(values)],
+            "file": {"path": name, "channel": 0},
+            "sha256": hashlib.sha256(
+                np.ascontiguousarray(values, dtype="<f8").tobytes()
+            ).hexdigest(),
+        }
+
+    return {
+        **request,
+        "mono_mix": reference("mono.wav", decode(request["mono_mix"])),
+        "channels": {
+            name: reference(f"{name}.wav", decode(encoded))
+            for name, encoded in request["channels"].items()
+        },
+    }
+
+
 def _wait_for_health(port: int, deadline: float) -> bool:
     while time.time() < deadline:
         try:
@@ -98,9 +137,10 @@ def _wait_for_health(port: int, deadline: float) -> bool:
             try:
                 conn.request("GET", "/health")
                 response = conn.getresponse()
-                if response.status == 200 and json.loads(response.read()) == {
-                    "status": "ok"
-                }:
+                if (
+                    response.status == 200
+                    and json.loads(response.read()).get("status") == "ok"
+                ):
                     return True
             finally:
                 conn.close()
@@ -126,6 +166,7 @@ def main() -> int:
 
     records = Path(tempfile.mkdtemp(prefix="beqforge-smoke-"))
     stages = Path(tempfile.mkdtemp(prefix="beqforge-smoke-cache-"))
+    shared = Path(tempfile.mkdtemp(prefix="beqforge-smoke-shared-"))
     proc = subprocess.Popen(
         [
             str(args.executable),
@@ -138,6 +179,8 @@ def main() -> int:
             str(records),
             "--cache-dir",
             str(stages),
+            "--shared-root",
+            str(shared),
             "--quiet",
         ]
     )
@@ -204,6 +247,21 @@ def main() -> int:
             print(f"FAIL: nothing cached in {stages}", file=sys.stderr)
             return 1
         print("OK: repeat request answered the same, from the stage cache")
+
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", args.port, timeout=args.request_timeout
+        )
+        try:
+            ref_status, by_ref = _post(conn, "/design", _by_reference(shared))
+        finally:
+            conn.close()
+        if ref_status != 200 or by_ref != body:
+            print(
+                f"FAIL: the request by reference answered differently: {ref_status} {by_ref}",
+                file=sys.stderr,
+            )
+            return 1
+        print("OK: the same audio by reference answered the same")
         return 0
     finally:
         proc.terminate()
@@ -214,6 +272,7 @@ def main() -> int:
             proc.wait()
         shutil.rmtree(records, ignore_errors=True)
         shutil.rmtree(stages, ignore_errors=True)
+        shutil.rmtree(shared, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqforge.designer import (  # noqa: E402
+    CONTRACT_VERSION,
     ContractViolation,
     design,
     request_from_json,
@@ -39,6 +40,7 @@ from beqforge.designer import (  # noqa: E402
 from beqforge import record  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.cache import DirStore, Store  # noqa: E402
+from beqforge.reference import UnusableReference  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -51,13 +53,24 @@ class _Handler(BaseHTTPRequestHandler):
     params: PipelineParams  # set on the class before serving
     record_dir: Path | None = None
     cache: Store | None = None
+    shared_root: Path | None = None
 
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
-            self._respond(200, {"status": "ok"})
+            # 1.2: what a caller registering a by-reference designer checks first, so a
+            # server without a shared root shows up at registration, not on its first title.
+            # "status" stays for anything already polling it.
+            self._respond(
+                200,
+                {
+                    "status": "ok",
+                    "contract_version": CONTRACT_VERSION,
+                    "shared_root": self.shared_root is not None,
+                },
+            )
             return
         self._respond(404, {"error": f"unknown path {self.path!r}"})
 
@@ -74,8 +87,21 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(raw)
             parsed = time.perf_counter()
-            request = request_from_json(body)
+            request = request_from_json(body, shared_root=self.shared_root)
             decoded = time.perf_counter()
+        except UnusableReference as refused:
+            # a well-formed reference this server cannot honour: a configuration error on one
+            # side or the other, never a decline and never retried inline (§3, §4)
+            logger.warning(f"unusable reference: {refused}")
+            self._respond(
+                422,
+                {
+                    "error": f"cannot use {refused.array} by reference: {refused.reason}",
+                    "array": refused.array,
+                    "reason": refused.reason,
+                },
+            )
+            return
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as malformed:
             logger.warning(f"malformed request body: {malformed}")
             self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
@@ -204,6 +230,17 @@ def main() -> int:
             "share one directory. Off by default"
         ),
     )
+    parser.add_argument(
+        "--shared-root",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "accept audio by reference (contract 1.2): an array may name a WAV by a path "
+            "relative to DIR, beqdesigner's work_dir as this host sees it. Paths escaping "
+            "DIR, even through a symlink, are refused. Off by default: a reference is then "
+            "answered 422"
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="only warnings and above")
     args = parser.parse_args()
 
@@ -246,6 +283,9 @@ def main() -> int:
     _Handler.params = params
     _Handler.record_dir = args.record_dir
     _Handler.cache = DirStore(args.cache_dir) if args.cache_dir else None
+    if args.shared_root is not None and not args.shared_root.is_dir():
+        parser.error(f"--shared-root {args.shared_root} is not a directory")
+    _Handler.shared_root = args.shared_root.resolve() if args.shared_root else None
     # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
     # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
     # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
@@ -259,6 +299,7 @@ def main() -> int:
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"
         + (f"; records to {args.record_dir}" if args.record_dir else "")
         + (f"; stage cache in {args.cache_dir}" if args.cache_dir else "")
+        + (f"; audio by reference under {args.shared_root}" if args.shared_root else "")
         + ")"
     )
     try:

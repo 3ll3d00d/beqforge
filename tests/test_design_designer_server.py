@@ -14,6 +14,7 @@ much longer material; this is neither). Still real: injected via `beqforge.harne
 recipe `beqforge.harness.evidence_cases` uses for its own validated positives.
 """
 
+import base64
 import http.client
 import json
 import logging
@@ -141,7 +142,7 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
 def test_health_check(server) -> None:
     status, body = _request(server, "GET", "/health")
     assert status == 200
-    assert body == {"status": "ok"}
+    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": False}
 
 
 def test_unknown_get_path_is_404(server) -> None:
@@ -332,3 +333,113 @@ def test_without_a_cache_dir_nothing_is_written(monkeypatch, tmp_path) -> None:
         _stop(httpd, thread)
     assert status == 200
     assert not list(tmp_path.iterdir())
+
+
+def _by_reference(request: dict, root) -> dict:
+    """The same request, its arrays written to float64 WAVs under `root` and sent by path.
+
+    float64 WAV so the file holds the inline values exactly: the two requests must be the
+    same request, not merely close.
+    """
+    from scipy.io import wavfile
+
+    from beqforge.reference import digest
+
+    def decode(encoded):
+        return np.frombuffer(base64.b64decode(encoded["data_base64"]), dtype="<f8")
+
+    (root / "t_1").mkdir(exist_ok=True)
+    mono = decode(request["mono_mix"])
+    wavfile.write(root / "t_1" / "mono.wav", request["fs"], mono)
+    names = list(request["channels"])
+    columns = np.column_stack([decode(request["channels"][n]) for n in names])
+    wavfile.write(root / "t_1" / "multichannel.wav", request["fs"], columns)
+
+    def ref(path, channel, values):
+        return {
+            "dtype": "float64",
+            "shape": [len(values)],
+            "file": {"path": f"t_1/{path}", "channel": channel},
+            "sha256": digest(values),
+        }
+
+    return {
+        **request,
+        "contract_version": "1.2",
+        "mono_mix": ref("mono.wav", 0, mono),
+        "channels": {
+            n: ref("multichannel.wav", i, columns[:, i]) for i, n in enumerate(names)
+        },
+    }
+
+
+def test_health_says_whether_references_are_accepted(monkeypatch, tmp_path) -> None:
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", tmp_path)
+    try:
+        status, body = _request(httpd.server_address, "GET", "/health")
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": True}
+
+
+def test_a_request_by_reference_answers_as_the_same_request_inline(
+    monkeypatch, tmp_path
+) -> None:
+    """R2b over a real socket: same audio by path, same response."""
+    inline = {**_known_filter_request(), "contract_version": "1.2"}
+    by_reference = _by_reference(inline, tmp_path)
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", tmp_path.resolve())
+    try:
+        first = _request(httpd.server_address, "POST", DESIGN_PATH, inline, 120.0)
+        second = _request(
+            httpd.server_address, "POST", DESIGN_PATH, by_reference, 120.0
+        )
+    finally:
+        _stop(httpd, thread)
+    assert first[0] == second[0] == 200
+    assert first[1] == second[1]
+
+
+def test_a_reference_without_a_shared_root_is_422_naming_the_array(
+    monkeypatch, tmp_path
+) -> None:
+    by_reference = _by_reference(_known_filter_request(duration_s=20.0), tmp_path)
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    try:
+        status, body = _request(httpd.server_address, "POST", DESIGN_PATH, by_reference)
+    finally:
+        _stop(httpd, thread)
+    assert status == 422
+    assert body["array"] == "mono_mix"
+    assert "no shared root" in body["reason"]
+
+
+def test_an_escaping_path_is_422_and_both_forms_is_400(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    by_reference = _by_reference(_known_filter_request(duration_s=20.0), root)
+    escaping = {
+        **by_reference,
+        "channels": {
+            "LFE": {
+                **by_reference["channels"]["LFE"],
+                "file": {"path": "../outside.wav", "channel": 0},
+            }
+        },
+    }
+    both = {
+        **by_reference,
+        "mono_mix": {**by_reference["mono_mix"], "data_base64": "AAAA"},
+    }
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", root.resolve())
+    try:
+        escaped = _request(httpd.server_address, "POST", DESIGN_PATH, escaping)
+        doubled = _request(httpd.server_address, "POST", DESIGN_PATH, both)
+    finally:
+        _stop(httpd, thread)
+    assert escaped[0] == 422 and escaped[1]["array"] == "LFE"
+    assert doubled[0] == 400

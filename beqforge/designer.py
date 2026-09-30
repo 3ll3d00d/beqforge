@@ -1,4 +1,4 @@
-"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.1.
+"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.2.
 
 Read that document (in the sibling `beqdesigner` repo, `design/designer-interface.md`) before
 touching this file — it is the contract, not this module. In short: beqdesigner POSTs a
@@ -11,6 +11,11 @@ wire format and `beqforge.pipeline.run`, kept separately testable without a sock
 decline) with its failures as `rejection_reasons`, for a reviewer to see what was tried and why
 it lost. It is a separate list rather than a flag on `candidates` so a 1.0 caller, which ignores
 fields it does not know, can never publish one.
+
+1.2 (HTTP binding only; beqdesigner's `design/designer-by-reference.md` §3) lets an array
+arrive by reference — a WAV under a root both sides can see, with the SHA-256 of the decoded
+column — instead of as base64. The data model does not change: `request_from_json` turns a
+reference back into the same array (`beqforge.reference`), or refuses it naming the array.
 
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
@@ -40,7 +45,7 @@ from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.1"
+CONTRACT_VERSION = "1.2"
 """The version this module implements. Responses echo the request's own version instead."""
 
 Coverage = Literal["complete_programme", "excerpt"]

@@ -64,7 +64,7 @@ merged. *Checked*: the check ran and the decision was no change. *Open*: not sta
 | R1 | done | Responses name their build; the server writes replayable records. |
 | R2 | split | Split into R2a and R2b, agreed with beqdesigner's `design/designer-by-reference.md` (`63976c2`); answers to its §6 in Progress. |
 | R2a | done | `serve-designer --cache-dir DIR`: a repeat request skips the analysis (Alto Knights 110 s cold, 50 s warm); the frozen build keys the cache on baked digests (the packaged `beqforge design` had crashed on its default cache); smoke test proves a warm hit in the executable. |
-| R2b | **active** | Unparked on request (2026-09-30). Step 1 of 2 done: arrays by reference decode, check and refuse per beqdesigner's §3; a real title by reference gives a record identical to inline. Step 2: the server (`--shared-root`, 422, `/health`). |
+| R2b | done | `serve-designer --shared-root DIR`: arrays by reference (contract 1.2) — decoded, checked, 422 naming the array when unusable; `/health` advertises it. On a 2.7 h title the wire goes from 7.8 s to 1.7 s a request. beqdesigner's caller side (their D1.1-D1.4) is theirs to build. |
 
 **Done outside the IDs above:** designer diagnosis (`found`/`correction`/`alternatives`);
 the response explains content, not cause; clipping stated in the response; shaping fraction
@@ -949,6 +949,28 @@ baseline titles; a full `design_beq.py` run is made only for titles the probe sa
   `fit_error_db` carrying two meanings: the objective (target error or quantisation change,
   whichever is larger) unless pruning dropped a section, then the target error alone. Added to
   TODO 5; changing it moves what `residual_target_db` compares against, so it is not done here.
+* **R2b step 2 — the server, and timed (2026-09-30). R2b done on beqforge's side.**
+  `serve-designer --shared-root DIR` (must be a directory; off by default) passes the root to
+  `request_from_json`. An `UnusableReference` is answered **422** with
+  `{"error", "array", "reason"}`; a malformed body stays **400**. `GET /health` answers
+  `{"status": "ok", "contract_version": "1.2", "shared_root": true|false}` — `status` kept for
+  anything already polling it (beqdesigner's §3 names only the other two; to tell them).
+  `CONTRACT_VERSION` is 1.2; responses echo the request's version, as before.
+  * **Checks:** in-process server tests — `/health` with and without a root; a request by
+    reference answers exactly as the same request inline over a real socket; a reference
+    without a root is 422 naming `mono_mix`; an escaping path is 422 naming the channel; both
+    forms in one array is 400. Full suite passes. `smoke_test_exe.py` now also sends its
+    request by reference (float64 WAVs under `--shared-root`) and requires the same answer;
+    it passes on a local Linux build.
+  * **Timing** (`request_timing.py --reference`, idle machine): One Battle After Another,
+    beqdesigner's measured title — 2.7 h, 8 channels, a 932 MB body. Warm, inline: caller 5.74 s
+    (base64 and JSON) + wire 2.02 s (read 0.19, parse 0.67, decode 1.16) = 7.76 s. By
+    reference: caller 0.69 s (SHA-256) + wire 0.96 s (read the WAVs, check) = 1.65 s. Design
+    33.5-33.9 s either way. So 6.1 s saved a request, about 15% of a warm one end to end —
+    the same as beqdesigner's own figures (8.4 against 2.2 s).
+  * **To tell beqdesigner:** beqforge serves 1.2 by reference now; their D1.1 (contract text,
+    schema, conformance rows), D1.2 (binding), D1.3 (sources) and D1.4 (configuration) are
+    theirs. `/health` carries `status` beside the two §3 fields.
 * **R2b step 1 — arrays by reference (2026-09-30).** Unparked on request, against R2a's
   timing decision; beqdesigner's own measurement (`design/designer-by-reference.md` §2: 8.4 s
   inline against about 2.2 s by reference on a 2.7 h title, counting the caller's encoding)
