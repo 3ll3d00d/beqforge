@@ -21,7 +21,12 @@ from beqforge_device_check.evidence import (
     run_lock,
 )
 from beqforge_device_check.manifest import digest, validate
-from beqforge_device_check.measurement import SweepSettings, recover, sweep
+from beqforge_device_check.measurement import (
+    CaptureInterrupted,
+    SweepSettings,
+    recover,
+    sweep,
+)
 
 
 class Engine(Protocol):
@@ -151,7 +156,21 @@ def measure(
     engine.mute(False)
     if settle and getattr(engine, "live", True):
         time.sleep(settle)
-    y, stream = capture.capture(x, settings.rate)
+    try:
+        y, stream = capture.capture(x, settings.rate)
+    except CaptureInterrupted as error:
+        atomic_arrays(directory / "captures" / f"{attempt}.npz", samples=error.samples)
+        atomic_json(directory / "captures" / f"{attempt}.json", error.metadata)
+        append(
+            log,
+            {
+                "attempt": attempt,
+                "state": "failed",
+                "failures": [str(error)],
+                "partial_capture": True,
+            },
+        )
+        raise
     if y.ndim != 2 or y.shape[0] != len(x):
         raise ValueError("capture backend returned missing samples")
     atomic_arrays(directory / "captures" / f"{attempt}.npz", samples=y)
@@ -301,6 +320,10 @@ def run(
     resume: bool = False,
 ) -> dict:
     validate(manifest)
+    if (directory / "bundle-import.json").exists():
+        raise ValueError(
+            "imported evidence is for offline analysis; use a new local measurement run"
+        )
     qualification = json.loads((qualification_dir / "qualification.json").read_text())
     if qualification["hash"] != digest(
         {k: v for k, v in qualification.items() if k != "hash"}

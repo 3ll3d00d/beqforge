@@ -133,3 +133,22 @@ host audio services, USB permissions and macOS microphone permission remain host
 The preview is unsigned and unnotarised; Windows ASIO has not been verified. Distribution
 metadata and helper/native notices accompany the artifact. Hardware qualification and the
 pilot are required on each claimed target before it can become a validated release.
+
+## Offline exchange and interrupted captures
+
+```sh
+beqforge-device-check import-bundle results.zip --out imported-run/
+beqforge-device-check analyse imported-run/ --out replayed-report/
+```
+
+Import requires per-file SHA-256, rejects duplicate/unregistered/traversing/symlink paths and
+bounds uncompressed size to 2 GiB. It validates every file in a temporary directory before
+exposing the destination. The destination must be new. Imported evidence is for offline
+analysis; it cannot resume live control. Summary bundles retain their insufficient-for-replay
+label. Local exports preserve bench identities and host configuration; automatic redacted
+community export is still pending, so this preview does not claim a share-safe bundle.
+
+A failed stream retains the samples captured so far, actual stream settings, callback
+statuses and timestamps. The transaction marks them invalid, stops the run and attempts
+restoration. A stream rate differing from the requested rate aborts. Partial capture does
+not become a completed measurement and is never automatically retried.

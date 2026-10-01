@@ -8,6 +8,8 @@ import time
 
 import numpy as np
 
+from beqforge_device_check.measurement import CaptureInterrupted
+
 
 def devices(timeout_s: float = 10) -> dict:
     # Native backend discovery can block on an unavailable host audio service. Keep
@@ -111,29 +113,52 @@ class StreamCapture:
                 raise sd.CallbackStop
 
         started = time.monotonic()
-        with sd.Stream(
-            device=(self.input_index, self.output_index),
-            samplerate=rate,
-            channels=(inputs, outputs),
-            dtype="float32",
-            blocksize=blocksize,
-            latency=config.get("latency", "high"),
-            callback=callback,
-            finished_callback=done.set,
-        ) as stream:
-            if not done.wait(len(stimulus) / rate + 15):
-                stream.abort()
-                raise TimeoutError("audio capture timed out; stopped stream")
-            actual = {"samplerate": stream.samplerate, "latency": list(stream.latency)}
-        if position != len(stimulus) or np.any(statuses[:callbacks]):
-            raise RuntimeError(
-                f"audio capture stopped at {position}/{len(stimulus)} samples; statuses {statuses[:callbacks].tolist()}"
-            )
-        return recorded, {
-            "actual": actual,
-            "elapsed_s": time.monotonic() - started,
-            "sample_count": position,
-            "format": "float32",
-            "callback_timestamps": timestamps[:callbacks].tolist(),
-            "statuses": statuses[:callbacks].tolist(),
-        }
+        actual = {}
+
+        def metadata() -> dict:
+            return {
+                "actual": actual,
+                "elapsed_s": time.monotonic() - started,
+                "sample_count": position,
+                "expected_samples": len(stimulus),
+                "format": "float32",
+                "callback_timestamps": timestamps[:callbacks].tolist(),
+                "statuses": statuses[:callbacks].tolist(),
+            }
+
+        try:
+            with sd.Stream(
+                device=(self.input_index, self.output_index),
+                samplerate=rate,
+                channels=(inputs, outputs),
+                dtype="float32",
+                blocksize=blocksize,
+                latency=config.get("latency", "high"),
+                callback=callback,
+                finished_callback=done.set,
+            ) as stream:
+                actual = {
+                    "samplerate": stream.samplerate,
+                    "latency": list(stream.latency),
+                }
+                if stream.samplerate != rate:
+                    stream.abort()
+                    raise RuntimeError(
+                        "actual stream sample rate differs from requested rate"
+                    )
+                if not done.wait(len(stimulus) / rate + 15):
+                    stream.abort()
+                    raise TimeoutError("audio capture timed out; stopped stream")
+            if position != len(stimulus) or np.any(statuses[:callbacks]):
+                raise RuntimeError(
+                    f"audio capture stopped at {position}/{len(stimulus)} samples; "
+                    f"statuses {statuses[:callbacks].tolist()}"
+                )
+        except (RuntimeError, TimeoutError, sd.PortAudioError) as error:
+            saved = metadata()
+            saved["valid"] = False
+            saved["failure"] = str(error)
+            raise CaptureInterrupted(
+                str(error), recorded[:position].copy(), saved
+            ) from error
+        return recorded, metadata()

@@ -102,6 +102,7 @@ class Minidsp:
             "serial": self.serial,
             "helper_version": self.helper.version,
             "helper_sha256": self.helper.hash,
+            "scope": "electrical route through explicitly selected miniDSP unit",
             "storage_readback": "unavailable; sent coefficients do not verify storage",
         }
 

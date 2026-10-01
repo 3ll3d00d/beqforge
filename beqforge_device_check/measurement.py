@@ -10,6 +10,15 @@ from scipy.signal import correlate, welch
 from beqforge_device_check.profiles import finite
 
 
+class CaptureInterrupted(RuntimeError):
+    """Aborted stream carrying its bounded partial evidence to the transaction writer."""
+
+    def __init__(self, message: str, samples: np.ndarray, metadata: dict):
+        super().__init__(message)
+        self.samples = samples
+        self.metadata = metadata
+
+
 @dataclass(frozen=True, slots=True)
 class SweepSettings:
     rate: int = 96000

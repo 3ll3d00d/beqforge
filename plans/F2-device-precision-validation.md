@@ -672,3 +672,27 @@ This host's Linux build is a local preview, not evidence of the workflow's Ubunt
 signing/drivers and actual playback/capture remain unverified. The Linux audio discovery timeout
 seen in the source run did not occur in either frozen preview. No hardware measurements were
 made and no designer behaviour changed.
+
+### 8. Interrupted capture evidence and bounded offline import
+
+Stream interruptions now carry the captured sample prefix, actual stream settings, callback
+statuses/timestamps and failure to the transaction writer. Missing frames, timeout and actual
+rate mismatch abort rather than losing partial audio or marking it completed. Restoration still
+runs. The miniDSP identity now includes its electrical-route scope used by run records.
+
+ZIP exchange records per-file SHA-256. Import rejects duplicate/unregistered/traversing/symlink
+members, checks size bounds and every hash in a temporary directory, and exposes only a fully
+validated new destination. Imported evidence cannot resume live control. Local bundles retain
+bench provenance; automatic credential/path redaction for community sharing remains unfinished
+and is explicitly documented rather than claiming share-safe exports.
+
+Validation: thirty-three F2 tests passed, one optional real-Camilla test skipped. Tests verify
+that interrupted samples/statuses survive restoration; exported/imported complete numerical
+runs regenerate identical report results; malformed paths/hashes/oversized bundles leave no
+visible destination. Ruff passes. The frozen self-test now includes import/offline replay too.
+
+Remaining F2 work is deliberately open: direct interface/bypass and duration/tail convergence
+qualification, live pilot and arithmetic/noise/ring-out experiments, JRiver feasibility,
+channel-specific catalogue formats, shared-frequency matched comparison/denominators, redacted
+community exchange and cross-platform CI/bench verification. The current preview validates a
+numerical/control workflow, not the device precision conclusions or the full protocol.

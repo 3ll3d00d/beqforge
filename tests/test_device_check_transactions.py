@@ -1,12 +1,13 @@
 import json
 from dataclasses import replace
 
+import numpy as np
 import pytest
 
 from beqforge_device_check.analyse import analyse
-from beqforge_device_check.evidence import bundle, run_lock
+from beqforge_device_check.evidence import bundle, import_bundle, run_lock
 from beqforge_device_check.manifest import digest, generate
-from beqforge_device_check.measurement import SweepSettings
+from beqforge_device_check.measurement import CaptureInterrupted, SweepSettings
 from beqforge_device_check.profiles import PROFILES
 from beqforge_device_check.transactions import Simulation, qualify, run
 
@@ -59,6 +60,10 @@ def test_transaction_restore_resume_and_offline_bundle(tmp_path, bench):
     exported = bundle(directory, tmp_path / "results.zip")
     assert exported["replayable"]
     assert any(name.startswith("captures/") for name in exported["files"])
+    imported = tmp_path / "imported"
+    import_bundle(tmp_path / "results.zip", imported)
+    replayed = analyse(imported, tmp_path / "replayed")
+    assert replayed["results"] == report["results"]
     (directory / "unrelated-secret.txt").write_text("do not export")
     partial = bundle(directory, tmp_path / "summary.zip", summary_only=True)
     assert not partial["replayable"]
@@ -106,6 +111,34 @@ def test_stale_qualification_and_concurrent_run_refused(tmp_path, bench):
         run_lock(tmp_path / "locked"),
     ):
         pass
+
+
+def test_interrupted_stream_retains_samples_and_metadata(tmp_path, bench):
+    config, manifest, engine = bench
+
+    class Interrupted:
+        def capture(self, samples, rate):
+            raise CaptureInterrupted(
+                "input overflow",
+                np.ones((64, 1), dtype=np.float32),
+                {"valid": False, "sample_count": 64, "statuses": [2]},
+            )
+
+    directory = tmp_path / "partial"
+    with pytest.raises(CaptureInterrupted, match="overflow"):
+        run(
+            config,
+            manifest,
+            tmp_path / "qualification",
+            directory,
+            engine,
+            Interrupted(),
+        )
+    capture = next((directory / "captures").glob("*.npz"))
+    with np.load(capture, allow_pickle=False) as data:
+        assert data["samples"].shape == (64, 1)
+    assert json.loads(capture.with_suffix(".json").read_text())["statuses"] == [2]
+    assert json.loads((directory / "run.json").read_text())["restored"]
 
 
 def test_live_identity_measurement_requires_disconnected_bench_ack(tmp_path, bench):

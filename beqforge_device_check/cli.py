@@ -12,7 +12,12 @@ import numpy as np
 
 from beqforge_device_check.analyse import analyse, compare
 from beqforge_device_check.catalogue import import_snapshot
-from beqforge_device_check.evidence import atomic_bytes, atomic_json, bundle
+from beqforge_device_check.evidence import (
+    atomic_bytes,
+    atomic_json,
+    bundle,
+    import_bundle,
+)
 from beqforge_device_check.manifest import digest, generate, validate
 from beqforge_device_check.measurement import SweepSettings
 from beqforge_device_check.profiles import PROFILES, DeviceProfile
@@ -320,6 +325,10 @@ def self_test(directory: Path) -> dict:
     )
     report = analyse(directory / "run", directory / "run")
     exported = bundle(directory / "run", directory / "results.zip")
+    import_bundle(directory / "results.zip", directory / "imported")
+    replayed = analyse(directory / "imported", directory / "replayed")
+    if replayed["results"] != report["results"]:
+        raise ValueError("bundle import changed offline analysis")
     import sounddevice as sd
 
     from beqforge_device_check.audio import devices
@@ -346,6 +355,7 @@ def self_test(directory: Path) -> dict:
         "portaudio": audio,
         "native_portaudio": native_portaudio,
         "bundle_bytes": exported["bytes"],
+        "bundle_replay_verified": True,
         "provenance": provenance(),
     }
     atomic_json(directory / "self-test.json", result)
@@ -405,6 +415,9 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("directory", type=Path)
     command.add_argument("--out", type=Path, required=True)
     command.add_argument("--summary-only", action="store_true")
+    command = sub.add_parser("import-bundle")
+    command.add_argument("archive", type=Path)
+    command.add_argument("--out", type=Path, required=True)
     return root
 
 
@@ -451,6 +464,8 @@ def dispatch(args) -> dict | list:
         return self_test(args.out)
     if args.command == "bundle":
         return bundle(args.directory, args.out, summary_only=args.summary_only)
+    if args.command == "import-bundle":
+        return import_bundle(args.archive, args.out)
     if args.command in ("analyse", "catalogue-analyse"):
         if len(args.directories) == 1:
             report = analyse(args.directories[0], args.out)
