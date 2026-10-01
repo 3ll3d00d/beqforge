@@ -45,18 +45,17 @@ class DiagnoseParams:
     22-35 Hz, justified as "above any plausible knee and below where mains content starts
     dominating" — which is §2.1's forbidden move written down, since it makes a knee above
     22 Hz unrepresentable rather than unusual. Measured, the band is not a passband on any
-    channel of any title tried: it slopes at +0.8 to +40 dB/octave, and on the fourth title
-    the mains fall at +40 dB/octave straight through it, because that title's wall is at
-    19-21 Hz and the "reference" sits on its shoulder. Referencing there understated those
-    channels' attenuation by 13-17 dB.
+    channel: it slopes by anything from a gentle tilt to tens of dB/octave, and where a mix's
+    own wall sits inside it the "reference" lands on the shoulder of the knee, so the
+    attenuation is understated by however much the shoulder has already fallen.
 
     A single fixed band cannot be right for both a full-range channel and the LFE in any
-    case: the LFE carries its own lowpass, measured at 32-62 Hz across four titles, so a band
+    case: the LFE carries its own lowpass, typically somewhere in the tens of Hz, so a band
     high enough to clear a mains knee is already on the LFE's downslope.
 
     Sampling uniformly in log frequency weights each octave equally, so the LFE's passband is
     not swamped by the two octaves above its lowpass; a high percentile rather than the
-    maximum so a narrow authored feature — the first title's +14 dB hump at 20 Hz — does not
+    maximum so a narrow authored feature (a hump a third of an octave wide, say) does not
     become the reference."""
 
     reference_tolerance_db: float = 3.0
@@ -69,7 +68,9 @@ class DiagnoseParams:
     """Maximum absolute trend of a usable plateau; steeper monotonic spectra abstain."""
 
     knee_slope_db_per_octave: float = 14.0
-    """Proposal heuristic for a steep channel, never proof of mastering attenuation."""
+    """Labels a channel "steep" in the diagnosis and record. Descriptive only: it no longer
+    decides which channels `counterfactual` restores — `pipeline.channels_missing_low_end` does,
+    because on the corpus this slope could not tell a filter from programme (IMPROVEMENT_PLAN T3)."""
 
     strata: tuple[tuple[float, float], ...] = (
         (40.0, 80.0),
@@ -113,8 +114,8 @@ class ChannelDiagnosis:
     """Where this channel sits within `reference_tolerance_db` of its own reference level.
 
     Reported because it is the assumption every attenuation figure rests on, and it is not a
-    constant: measured across four titles the lower edge runs 12.8-36.7 Hz and the LFE's
-    upper edge 31.7-62.2 Hz. A plateau whose lower edge sits at or above the channel's knee
+    constant: the lower edge varies by a factor of about three between mixes and the LFE's
+    upper edge by a factor of two. A plateau whose lower edge sits at or above the channel's knee
     means the reference is on the knee's shoulder and the attenuation is understated."""
 
     share_se: np.ndarray | None = None
@@ -240,10 +241,11 @@ def plateau_reference(
     params: DiagnoseParams,
     exclude_bands_hz: tuple[tuple[float, float], ...] = (),
 ) -> tuple[float, tuple[float, float]]:
-    """A channel's own reference level, and the band over which it holds it.
+    """Find this spectrum's contiguous plateau and its median level.
 
-    The level a channel's attenuation is measured against has to come from that channel on
-    that title. See `DiagnoseParams.reference_percentile` for why a fixed band cannot do it.
+    Median-filter for discovery, retain near-high-percentile flat regions,
+    then prefer the widest, flattest and lowest one. Its raw median anchors
+    measured deficits and keeps targets and verification on the same reference.
     """
     grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
     bands = (*params.exclude_bands_hz, *exclude_bands_hz)
@@ -559,7 +561,12 @@ def diagnose(
     params: DiagnoseParams | None = None,
     extraction_params: "ExtractionParams | None" = None,
 ) -> Diagnosis:
-    """Decompose the mix per channel and locate the two floors R1 and R2 depend on."""
+    """Locate each channel's attenuation and the mix's correction boundaries.
+
+    Reference spectra to their own plateaus, measure local knees and signed mix
+    shares, then test level invariance and event tracking. These measurements
+    constrain channel restoration and the band over which a filter is judged.
+    """
     params = params or DiagnoseParams()
     freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
     band = (freqs >= params.band_hz[0]) & (freqs <= params.band_hz[1])
@@ -649,7 +656,12 @@ def _temporal_evidence(
     reference_hz: tuple[float, float],
     freqs: np.ndarray,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, float, float, np.ndarray]:
-    """Measure each subject against its own plateau, including the actual combined mix."""
+    """Find level-invariance and programme-tracking floors below a subject's plateau.
+
+    Compare spectra across scene levels for the first floor; descend in bands and
+    correlate each band's time envelope with the plateau for the second. Failed or
+    unavailable tracking ends the band in which correction can be judged.
+    """
     unavailable = np.full_like(freqs, np.nan)
     if not all(math.isfinite(f) for f in reference_hz) or len(subject) < WELCH_NPERSEG:
         return {}, unavailable, math.nan, params.band_hz[1], unavailable
@@ -657,7 +669,20 @@ def _temporal_evidence(
     if len(strata) < 2:
         spread = np.full_like(strata_freqs, np.nan)
     else:
-        spread = np.ptp(np.vstack(list(strata.values())), axis=0)
+        # Each stratum smoothed as the deficit is before the spread is taken. Per bin, the
+        # spread between strata is estimator noise as much as anything — on Obsession it swung
+        # 2-19 dB from one 0.24 Hz bin to the next — and the first bin over tolerance ends the
+        # run below. Unsmoothed, a single noisy bin just under the plateau put the floor at
+        # 24.2 Hz on strata that agree within 5 dB down to 13 Hz.
+        spread = np.ptp(
+            np.vstack(
+                [
+                    smooth_unexcluded(v, strata_freqs, params.exclude_bands_hz, 15)
+                    for v in strata.values()
+                ]
+            ),
+            axis=0,
+        )
     # searched downward from the *bottom* of the channel's plateau, not from the top of the
     # spectrum or the top of the plateau. Above it the strata diverge because loud scenes have
     # a different content spectrum, not because anything was filtered, and the spread is

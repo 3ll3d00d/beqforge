@@ -21,6 +21,7 @@ import json
 import logging
 import math
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -29,12 +30,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqforge.designer import (  # noqa: E402
+    CONTRACT_VERSION,
     ContractViolation,
     design,
     request_from_json,
     response_to_json,
     validate_response,
 )
+from beqforge import record  # noqa: E402
+from beqforge.accept import AcceptParams  # noqa: E402
+from beqforge.cache import DirStore, Store  # noqa: E402
+from beqforge.reference import UnusableReference  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 
@@ -45,13 +51,26 @@ DESIGN_PATH = "/design"
 
 class _Handler(BaseHTTPRequestHandler):
     params: PipelineParams  # set on the class before serving
+    record_dir: Path | None = None
+    cache: Store | None = None
+    shared_root: Path | None = None
 
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
-            self._respond(200, {"status": "ok"})
+            # 1.2: what a caller registering a by-reference designer checks first, so a
+            # server without a shared root shows up at registration, not on its first title.
+            # "status" stays for anything already polling it.
+            self._respond(
+                200,
+                {
+                    "status": "ok",
+                    "contract_version": CONTRACT_VERSION,
+                    "shared_root": self.shared_root is not None,
+                },
+            )
             return
         self._respond(404, {"error": f"unknown path {self.path!r}"})
 
@@ -61,17 +80,37 @@ class _Handler(BaseHTTPRequestHandler):
                 404, {"error": f"unknown path {self.path!r}, expected {DESIGN_PATH!r}"}
             )
             return
+        started = time.perf_counter()
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
+        read = time.perf_counter()
         try:
             body = json.loads(raw)
-            request = request_from_json(body)
+            parsed = time.perf_counter()
+            request = request_from_json(body, shared_root=self.shared_root)
+            decoded = time.perf_counter()
+        except UnusableReference as refused:
+            # a well-formed reference this server cannot honour: a configuration error on one
+            # side or the other, never a decline and never retried inline (§3, §4)
+            logger.warning(f"unusable reference: {refused}")
+            self._respond(
+                422,
+                {
+                    "error": f"cannot use {refused.array} by reference: {refused.reason}",
+                    "array": refused.array,
+                    "reason": refused.reason,
+                },
+            )
+            return
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as malformed:
             logger.warning(f"malformed request body: {malformed}")
             self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
             return
 
-        response = design(request, self.params)
+        response = design(
+            request, self.params, record_dir=self.record_dir, cache=self.cache
+        )
+        designed = time.perf_counter()
         try:
             validate_response(response)
         except ContractViolation as bug:
@@ -88,6 +127,14 @@ class _Handler(BaseHTTPRequestHandler):
         )
         logger.info(f"POST {DESIGN_PATH}: {outcome}")
         self._respond(200, response_to_json(response))
+        # the wire's share of a request, apart from the design itself: what decides whether
+        # requests by reference are worth having (IMPROVEMENT_PLAN R2a/R2b)
+        logger.info(
+            f"request timing: body {length / 1e6:.1f} MB, read {read - started:.2f} s, "
+            f"parse {parsed - read:.2f} s, decode {decoded - parsed:.2f} s, "
+            f"design {designed - decoded:.2f} s, "
+            f"respond {time.perf_counter() - designed:.2f} s"
+        )
 
     def _respond(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -130,12 +177,68 @@ def main() -> int:
         help="authored feature to drop, in Hz; repeatable",
     )
     parser.add_argument(
+        "--goal-tolerance",
+        type=float,
+        default=1.5,
+        metavar="DB",
+        help="how far from the goal a low end may sit and need no correction (default 1.5)",
+    )
+    parser.add_argument(
+        "--goal-tilt",
+        type=float,
+        default=0.0,
+        metavar="DB_PER_OCT",
+        help=(
+            "the low end asked for below the knee: 0 flat (default), positive a rise toward "
+            "the bottom, negative a gentle rolloff"
+        ),
+    )
+    parser.add_argument(
+        "--content-edge",
+        action="store_true",
+        help=(
+            "opt-in: judge from the content edge, not the tracking floor — recovers steep "
+            "filters partway down to where the programme meets the noise, but can lift that "
+            "noise where loud scenes stand clear of it (IMPROVEMENT_PLAN, steep filters)"
+        ),
+    )
+    parser.add_argument(
         "--strategy",
         action="append",
         metavar="NAME",
         help=(
             "target-derivation strategy to run; repeatable. "
             f"One of {', '.join(sorted(STRATEGIES))}, or 'all'. Default: all"
+        ),
+    )
+    parser.add_argument(
+        "--record-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "write each request's run record here (designer-<digest>.run.json.gz), "
+            "replayable with `beqforge replay`; responses name the file"
+        ),
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "keep the stage cache here, one file per entry, and reuse any stage whose key "
+            "has not moved: a repeat request skips the analysis. Several servers may "
+            "share one directory. Off by default"
+        ),
+    )
+    parser.add_argument(
+        "--shared-root",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "accept audio by reference (contract 1.2): an array may name a WAV by a path "
+            "relative to DIR, beqdesigner's work_dir as this host sees it. Paths escaping "
+            "DIR, even through a symlink, are refused. Off by default: a reference is then "
+            "answered 422"
         ),
     )
     parser.add_argument("--quiet", action="store_true", help="only warnings and above")
@@ -170,9 +273,19 @@ def main() -> int:
         ),
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
+        judge_from_content_edge=args.content_edge,
+        accept=AcceptParams(
+            target_tilt_db_per_octave=args.goal_tilt,
+            goal_tolerance_db=args.goal_tolerance,
+        ),
     )
 
     _Handler.params = params
+    _Handler.record_dir = args.record_dir
+    _Handler.cache = DirStore(args.cache_dir) if args.cache_dir else None
+    if args.shared_root is not None and not args.shared_root.is_dir():
+        parser.error(f"--shared-root {args.shared_root} is not a directory")
+    _Handler.shared_root = args.shared_root.resolve() if args.shared_root else None
     # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
     # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
     # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
@@ -183,7 +296,11 @@ def main() -> int:
     server = HTTPServer((args.host, args.port), _Handler)
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
-        f"(strategies: {', '.join(strategies)})"
+        f"(strategies: {', '.join(strategies)}; build {record.revision()}"
+        + (f"; records to {args.record_dir}" if args.record_dir else "")
+        + (f"; stage cache in {args.cache_dir}" if args.cache_dir else "")
+        + (f"; audio by reference under {args.shared_root}" if args.shared_root else "")
+        + ")"
     )
     try:
         server.serve_forever()
@@ -195,4 +312,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows defaults a redirected/piped stdout to the system codepage rather than
+    # UTF-8, which crashes on any non-ASCII output; force UTF-8 so a print never dies
+    # on the encoding rather than the content.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

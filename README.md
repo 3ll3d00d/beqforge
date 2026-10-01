@@ -58,9 +58,10 @@ redraw pictures from what `design_beq.py` already wrote, so they cost no rerun. 
 records the material as less than the complete programme (folded into the stage cache's key so
 an excerpt and the full programme never share a cached analysis; `design` abstains outright on
 an excerpt, per `designer-interface.md`'s `coverage` field);
-`--mono-only` drops the per-channel arrays and roughly halves the file, which is fine for the
-`flatten` strategy alone but starves `counterfactual` and the per-channel diagnosis of the
-channels they need. Without those channels, sub-feed headroom is reported as unavailable.
+`--mono-only` drops the per-channel arrays and roughly halves the file. It is useful for
+inspection but cannot support a design: the pipeline requires
+channel decomposition and declines mono-only material. Sub-feed headroom is unavailable
+without the channels.
 
 **`design data/FILM.npz`** — the entry point. Exit status is 0 when a candidate was accepted, 1
 when abstaining was the correct output — neither is an error. Key flags:
@@ -68,7 +69,10 @@ when abstaining was the correct output — neither is an error. Key flags:
 | flag | effect |
 | --- | --- |
 | `--strategy NAME` (repeatable) | run only the named strategies (`flatten`, `counterfactual`, `parametric`); default `all` |
-| `--exclude LOW HIGH` (repeatable) | drop an authored feature (Hz) from the target and the judgement — still manual, see TODO.md |
+| `--exclude LOW HIGH` (repeatable) | omit an authored feature (Hz) from evidence, targets and judgement; remaining fragmented evidence causes a decline — still manual, see TODO.md |
+| `--goal-tilt DB_PER_OCT` | the low end you want below the knee: `0` flat (default), positive a rise toward the bottom, negative a gentle rolloff. Every target is built toward it, and results are judged and ranked against it |
+| `--goal-tolerance DB` | how far from that goal the low end may already sit and be left alone (default `1.5`); a title with nothing beyond it declines with `within_goal_tolerance` |
+| `--content-edge` | **opt-in, experimental.** Judge from where the title's contrast stops licensing the deficit, not from the tracking floor, so a steep filter is recovered partway, down to where the programme meets the noise, instead of declined. The price: below that point, noise can be lifted where loud scenes stand clear of it. See [TODO.md](TODO.md), "Fresh validation protocol and steep-filter policy" |
 | `--charts DIR` | write peak/average charts per candidate into `DIR/<name>/` |
 | `--record PATH` / `--no-record` | where to write the run record (default: `<material>.run.json.gz` alongside it), or skip writing one |
 | `--cache PATH` / `--fresh` / `--no-cache` | the stage cache: where to keep it (default: `<material>.cache.json.gz`), force a recompute and overwrite it, or use neither |
@@ -81,7 +85,7 @@ the schema, code or available source material has changed, and says why; `--forc
 anyway.
 
 **`serve-designer`** — runs this pipeline as a live beqdesigner filter designer over HTTP,
-implementing `designer-interface.md` v1.0 §7.1 rather than working from a `.npz`/`--beq` export.
+implementing `designer-interface.md` v1.2 §7.1 rather than working from a `.npz`/`--beq` export.
 See "beqdesigner integration" below.
 
 **`ledger [RECORDS...]`** — every `data/*.run.json.gz` by default, or specific ones named on the
@@ -96,7 +100,7 @@ straight off disk. A stale record is skipped with a warning rather than failing 
 
 `beqforge serve-designer` runs this pipeline as a live, HTTP-bound filter designer for
 [`beqdesigner`](https://github.com/3ll3d00d/beqdesigner), implementing its
-`design/designer-interface.md` v1.0 contract (§7.1's HTTP binding) rather than the file-based
+`design/designer-interface.md` v1.2 contract (§7.1's HTTP binding) rather than the file-based
 `.npz` → `design` → `--beq` export flow above:
 
 ```bash
@@ -111,9 +115,52 @@ from pipeline.designer.http_binding import http_designer
 register_designer('beqforge.v1', http_designer('http://host:8420/design'))
 ```
 
-Device realisation, which strategies run and authored exclusions are server-wide flags (see
-`--help`); everything per-title — the audio itself, its coverage, an optional per-channel
-decomposition and bass-management model — arrives in the request. `beqforge/designer.py` is the
+Device realisation, which strategies run, authored exclusions, the goal (`--goal-tilt`,
+`--goal-tolerance`, as for `design`) and the opt-in `--content-edge` are server-wide flags (see `--help`); everything
+per-title — the audio itself, its coverage, an optional per-channel decomposition and
+bass-management model — arrives in the request. `--record-dir DIR` also writes each request's
+full run record into `DIR` (`designer-<digest>.run.json.gz`, named by a digest of the request's
+audio), which `beqforge replay` can redraw and export.
+
+**Stage cache.** `--cache-dir DIR` enables the server's persistent stage cache (off by
+default). Repeat requests reuse analysis and unchanged parametric proposals; changed effective
+parameters or stage code invalidate only affected entries. Entries are addressed by content,
+written atomically, and retained without eviction. Packaged executables use baked stage
+digests. On the measured two-hour, eight-channel Alto Knights request this reduced design
+time from 110 s cold to 50 s warm. See the [completed cache record](plans/R2a-server-stage-cache.md).
+
+**Audio by reference (contract 1.2).** `--shared-root DIR` permits request arrays to name a WAV
+relative to that root plus the SHA-256 of its decoded column, instead of inline base64 audio.
+The server resolves, decodes and checks each reference; an unusable reference gets HTTP 422
+naming the array, rather than a design decline. Inline requests remain supported.
+`GET /health` reports `contract_version` and whether `shared_root` is enabled. Each request
+logs read, parse, decode, design and response timings; `tools/experiments/request_timing.py`
+measures cold and warm requests.
+
+**Rejected candidates.** Every candidate failed by the judge is returned in `rejected` with
+its failure reasons, for review beside the accepted answer or decline. The server validates
+responses against the contract before sending them.
+
+**What a response says.** An accepted candidate's `commentary` opens with a plain-language
+diagnosis, in this order:
+
+* `found` — the reference plateau and its level; which channels carry it, and which are
+  absent or digital silence; down to where there is real bass content (the low end rising and
+  falling with the rest of the soundtrack); the judged band; the goal.
+* `correction` — the filter; how much of what the low end is missing the content supports
+  lifting; and, frequency by frequency, what was wanted, what the content supports, and the
+  low end against the reference before → after.
+* `clipping` — whether the filtered sub feed clips, and if so how far to turn the sub channel
+  down, measured over the whole programme on the bass-managed sub feed (yours if the request
+  carried `bass_management`, otherwise the assumed LR4 80 Hz model, and it says which).
+  Clipping is reported, never used to reject a filter. The typed `gain_reduction_db` field is
+  filled only when the request carries `bass_management`, as the contract requires.
+* `alternatives` — why each other candidate was rejected or not chosen.
+
+The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves
+noticed), `effective_params` and `beqforge_revision` (which build answered). The raw
+recovered and shaping fractions are kept in the run record, not the response. A decline's `decline_message` gives the reason first, then `| found: …` with
+the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.
 
@@ -126,18 +173,87 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 `multiprocessing` `spawn` inside a frozen executable, which only a real fit exercises. To build
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
+## How a filter is designed
+
+The idea in one line: **find out how much low bass the film's own soundtrack is missing, work
+out how much of that is safe to put back, and build the simplest filter that does it.**
+
+**1. Look at what the soundtrack actually contains.** A well-mastered mix has a level it
+holds across the bass range, its "plateau". Many film mixes then sag below some frequency —
+sometimes by design, sometimes because a rolloff was applied in mastering. The gap between
+that sag and the plateau is the *deficit*, and it is what a BEQ (bass EQ) exists to fill. The
+plateau is found from each title's own audio; no frequency range is assumed in advance.
+
+**2. Decide how much of the deficit is believable.** Boosting is only safe where there is real
+bass to lift. The tool compares the loudest passages with the quietest ones, frequency by
+frequency: where big bass events clearly stand out from the background, the boost is
+justified; where they don't, whatever is down there is probably noise, and boosting it would
+just make the noise louder. So every frequency gets a *ceiling* on how much boost the evidence
+supports, and the wanted correction is cut down to fit under it — a boost may be smaller than
+the sag it aims at, but never larger than the evidence allows. If there is no evidence at all
+(a short excerpt, no channel information, no real bass events), no boost is allowed and the
+tool declines to design anything.
+
+**3. Propose targets in more than one way.** Three strategies each say "this is the boost
+curve we want", and all of them go through the same ceiling:
+
+* **flatten** — take the mix's own low end and simply raise the sag back to the plateau.
+* **counterfactual** — look at the individual channels, undo the attenuation that appears to
+  have been applied to any that look filtered, rebuild the mix, and see how much the low end
+  would have gained. It tries several limits on how far to undo each channel.
+* **parametric** — fit a textbook rolloff shape to the mix and invert it.
+
+They often disagree, and that disagreement is information, so the tool keeps them all.
+
+**4. Fit a filter you could actually publish.** Each target is matched with the fewest
+biquad sections that follow it closely (up to four), using values rounded the way a real
+device would store them. It has to be stable, and it can't lean on a tiny bass boost far below
+where the film has any content.
+
+**5. Check the filter, not just the fit.** The finished filter is applied to the film's real
+audio and the corrected low end is examined. It is rejected if it does not achieve what the
+evidence allowed, boosts something that isn't content, leaves a step or sharp cliff, is wobblier
+than the original material, stops short of where content continues, or has a section doing
+almost nothing. A filter that matches its target perfectly still fails if the target itself
+was wrong — which is why the check is made on the corrected result, not on the match.
+
+**6. Pick one, or none.** Of the candidates that pass, the tool prefers the one closest to
+the goal, and where two are effectively tied, the one with fewer sections. If nothing passes,
+it says so and gives the reasons; that is a valid answer, not a failure.
+
+**The goal is yours to set.** "Put the missing bass back" needs a definition of how the low
+end *should* look, and that is a preference, not something the audio can say. By default the
+goal is flat below the knee, and a low end already within 1.5 dB of it is left alone. So is a
+low end whose shortfall is no bigger than the ripple the soundtrack shows anyway, higher up
+where nothing is missing — that is texture, not a missing low end. The goal
+can instead rise toward the bottom or roll off gently (`--goal-tilt`), and the tolerance can be
+widened or narrowed (`--goal-tolerance`). Steps 1-3 build toward the goal you set, and steps
+5-6 judge and rank against it, so changing it changes what is proposed, not just what is
+kept.
+
+Two things are reported alongside the answer rather than folded into a score: how much of the
+sag the filter actually recovers (it is often only part), and how much headroom the boosted
+subwoofer signal would need. Headroom is measured on the bass-managed sub feed, which is where
+a BEQ really runs, and it is reported, never used to reject a filter. The tool also cannot tell
+from the audio alone whether a sag was a deliberate mastering choice, so choosing to restore it
+is always a preference; the guarantee is only that the boost stays within what was measured.
+[AGENTS.md](AGENTS.md) has the precise rules behind each step.
+
 ## How it works, and why
 
 [AGENTS.md](AGENTS.md)'s "Working on `design/`" section is the full account — principles,
 strategies and evidence pricing, the evidence/confidence model, publication/playback/
-verification, and performance. [TODO.md](TODO.md) is the live backlog of what's still open and
-unevidenced.
+verification, and performance. [TODO.md](TODO.md) is the sole prioritised backlog, including
+open policy questions, parked experiments and validation material. Historical evidence lives
+in [implemented changes](plans/done-design-and-pipeline.md),
+[research decisions](plans/research-design-decisions.md) and
+[baseline evidence](plans/done-baseline-evidence.md).
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest              # ~2 minutes, ~420 tests
+uv run pytest              # ~2 minutes, ~460 tests
 uv run ruff check beqforge tools tests
 uv run ruff format beqforge tools tests
 ```

@@ -6,24 +6,23 @@ their outputs are directly comparable, and any of them may be selected, combined
 at once with the best surviving candidate taken. They disagree usefully, and a disagreement
 is evidence about the material rather than a problem to be resolved by picking a favourite.
 
-* **`flatten`** — invert the measured mix response. The rule the human-validated filters on
-  all three titles turned out to represent: the shape a good correction produces is flat to
-  the bottom of the evidence, and the target is simply the mix's own curve negated. Needs no
-  model of the rolloff and no `N`/`A` separation, which is the part §0 calls the weak link.
+* **`flatten`** — invert the measured mix response: the shape a good correction produces is
+  flat to the bottom of the evidence, and the target is the mix's own deficit against its
+  plateau. Needs no model of the rolloff and no `N`/`A` separation, which is the weak link.
 * **`counterfactual`** — restore the filtered channels, re-sum, read the deficit off the mix.
-  The route that answered title 2, where the sum carries no usable evidence below ~15 Hz
-  because the filtered channel is 23 dB under the mains there.
-* **`parametric`** — `identify_rolloff` on the mono mix and invert the fitted rolloff (§3.5).
-  The soft-hinge route; the only one that can produce an exact closed-form inversion when the
-  alignment is representable, which on the three titles so far it never was.
+  The route for a mix whose sum carries no usable evidence at the bottom because a filtered
+  channel sits far under the mains there.
+* **`parametric`** — `identify_rolloff` on the mono mix and invert the fitted rolloff.
+  The soft-hinge route; the only one that can produce an exact closed-form inversion, when the
+  alignment is representable.
 
 `flatten` is validated only on modern, bass-rich material. On a sparse or old mix, flattening
 would lift the noise floor with the content, and nothing in the target itself objects — that
-is what the guard is for. `diagnose`'s level-independence test, band tracking and noise floor
-bound how far down a correction may reach and say when to abstain; they are not on the path to
-producing a target.
+is what the evidence pricing is for. `diagnose`'s band tracking sets the noise floor below
+which `flatten` holds its boost flat, and its level-independence test is diagnostic only;
+identification is not on the path to a target except through `parametric`.
 
-Candidates are judged against §6.4 and the survivors ranked. The ranking is deliberately
+Candidates are judged by `accept.assess` and the survivors ranked. The ranking is deliberately
 shallow — the acceptance model does the work, and a scalar score that could overrule it would
 reintroduce exactly the aggregate-blindness R1 exists to defeat.
 """
@@ -38,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import scipy.fft
 
 from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge import cache
@@ -57,7 +57,7 @@ from beqforge.diagnose import (
     supported_mix_change,
     unexcluded,
 )
-from beqforge.extraction import ExtractionParams, extract
+from beqforge.extraction import Envelopes, ExtractionParams, extract
 from beqforge.filters import (
     FIT_STATS,
     FitRequest,
@@ -68,6 +68,7 @@ from beqforge.filters import (
     correction_band_hz,
     fit_minimal_biquads_all,
     magnitude_db,
+    unstable_sections,
 )
 from beqforge.identify import IdentifyParams, Identification, identify_rolloff
 from beqforge.material import (
@@ -77,7 +78,13 @@ from beqforge.material import (
     PlaybackParams,
     bass_managed_sum,
 )
-from beqforge.verify import Correction, device_waveform, verify, waveform_peak
+from beqforge.verify import (
+    Correction,
+    device_waveform,
+    house_curve_db,
+    verify,
+    waveform_peak,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +98,9 @@ class Timings:
 
     def __init__(self) -> None:
         self.stages: list[tuple[str, float]] = []
+        self.details: dict[str, float] = {}
+        self._started = time.perf_counter()
+        self.elapsed_s: float = math.nan
 
     @contextmanager
     def stage(self, label: str):
@@ -100,9 +110,35 @@ class Timings:
         finally:
             self.stages.append((label, time.perf_counter() - started))
 
+    @contextmanager
+    def detail(self, label: str):
+        """Time part of a stage, summed per label; never counted in `total_s`.
+
+        What judging is spent on (verify, headroom, assess) sits inside each `judge/…` stage,
+        so it is kept apart rather than nested, where it would be counted twice.
+        """
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.details[label] = (
+                self.details.get(label, 0.0) + time.perf_counter() - started
+            )
+
+    def finish(self) -> "Timings":
+        """Stamp the run's wall time; what the stages do not cover becomes visible."""
+        self.elapsed_s = time.perf_counter() - self._started
+        return self
+
     @property
     def total_s(self) -> float:
+        """The sum of the timed stages — not the run's wall time, see `elapsed_s`."""
         return sum(seconds for _, seconds in self.stages)
+
+    @property
+    def unattributed_s(self) -> float:
+        """Wall time no stage accounts for: cache I/O and hashing, blockers, references."""
+        return self.elapsed_s - self.total_s
 
 
 PUBLISH_FS = 96000.0
@@ -144,10 +180,9 @@ class PipelineParams:
     levels the mix against the mix's **own plateau** (`plateau_reference`) and stops where its
     own deficit stops, so neither the level nor the extent is a constant.
 
-    Measured, the mix plateau begins at 13.9, 18.3, 21.6 and 32.3 Hz across the four titles.
-    40 Hz fell inside all four, so the old constant was not yet wrong — but by only 1.24x on
-    the fourth, and a title with a knee near 50 Hz would have been levelled inside its own
-    rolloff.
+    A fixed 40 Hz sat inside the plateau of every mix it was tried on, so it was not yet wrong
+    — but only narrowly on some, and a mix with a knee near 50 Hz would have been levelled
+    inside its own rolloff.
 
     Scanning **upward from the bottom** and taking the first crossing is what keeps the
     high-frequency fall out of the target. Referenced to a plateau level rather than to a
@@ -168,25 +203,23 @@ class PipelineParams:
     is inverting something that is not a filter is exactly what is not known in advance, and
     the acceptance model is better placed to reject the wrong ones than a prior is.
 
-    50 added on Predator, the title the original three could not close: 45 dB still fell at
-    2.8 dB/oct (`max_tilt_db_per_octave` is 2.0), 50 dB reached the plateau and passed outright
-    — and 55/60/70 dB all produced the *identical* target, so 50 is not an arbitrary stop, it
-    is where this channel's own measured attenuation runs out. Cheap to try even where it does
-    nothing: a cap whose target matches an earlier one is deduplicated before fitting."""
+    The sweep runs to 50 dB because that is where a very heavily attenuated channel's own
+    measured attenuation runs out: smaller caps can leave the restored mix still falling too
+    steeply for the acceptance model (`max_tilt_db_per_octave`), while beyond 50 dB every cap
+    produces the identical target, so the top of the sweep is a natural stop, not an arbitrary
+    one. Cheap to try even where it does nothing: a cap whose target matches an earlier one is
+    deduplicated before fitting."""
 
     max_sections: int = 4
     """Ceiling on biquads a fit may spend, escalated from 1 up to this (`_tiers`).
 
-    Tried at `BIQUAD_BUDGET` (10, designer-interface.md v1.0 §5) on the theory that a title
-    exhausting 4 sections without settling was budget-starved rather than shape-limited.
-    Measured on Predator, the one real title that both exhausts the budget and has the most
-    to gain: `counterfactual/25dB` spent the extra room, settling at 5 sections instead of 4,
-    and failed on the *same* comparative checks anyway — "still falls at 11.7 dB/oct —
-    under-corrected; corrected level -9.6 dB is outside -3..+8" is not a section-count
-    problem. Every other candidate hit its identical wall at whatever section count it tried.
-    Cost was not proportionate to that answer: 997 s against 70 s, 265 optimiser runs against
-    40, for the same abstention — the estimate that "`max_sections=5` would roughly
-    double a run" was, if anything, optimistic about 10.
+    Raising it to `BIQUAD_BUDGET` (10, designer-interface.md v1.0 §5) was tried on the theory
+    that a title exhausting 4 sections without settling was budget-starved rather than
+    shape-limited. It was not: the extra sections were spent, and the candidate failed the same
+    comparative checks anyway ("still falls ... under-corrected; corrected level outside the
+    window" is not a section-count problem). Every other candidate hit its identical wall at
+    whatever section count it tried. Cost was out of proportion to that answer — an order of
+    magnitude more time and optimiser runs for the same abstention.
 
     Reverted rather than left at 10 and merely undocumented: a search-cost ceiling that costs
     14x on exactly the titles it was meant to help, for no change in outcome, is not a free
@@ -224,11 +257,10 @@ class PipelineParams:
     exactly that evidence (contiguous runs, not raw frames, because a 50%-overlapping frame
     pair is not two independent observations), so the ceiling now tightens where the estimate
     itself is shaky and relaxes where it is not, per bin per title, instead of asserting one
-    number for every extraction. Checked against all eight titles on hand: the derived
-    ceiling came out looser than the old flat one everywhere the evidence was solid, and did
-    what the flat one could not on the one title with almost none of it (Nocturnal Animals,
-    10 independent loud events) — SE there ran 4-8x every other title's, and the ceiling
-    tightened accordingly without being told to.
+    number for every extraction. Where the evidence is solid the derived ceiling comes out
+    looser than the old flat one; where a title has almost none (a handful of independent
+    loud events) the standard error runs several times larger than elsewhere and the ceiling
+    tightens accordingly without being told to.
 
     Missing or deliberately omitted measurements license no boost."""
 
@@ -275,7 +307,31 @@ class PipelineParams:
     because `_fit_all` now has to guarantee it contains every derived placement band, and a
     constant it cannot see is one it cannot check."""
 
-    verify_band_hz: tuple[float, float] = (5.0, 45.0)
+    verify_floor_hz: float = 5.0
+    """Lowest frequency any result is judged at; the tracking floor may raise it.
+
+    The top of the judged band is not a setting: it is the deficit's first settled end, widened
+    to at least `AcceptParams.min_judge_octaves` above the floor (`_judged_top_hz`). It was
+    `max(45 Hz, anchor)`, which judged a correction ending at 15 Hz out to 45 Hz and diluted
+    every shape check with an octave and a half of untouched passband (IMPROVEMENT_PLAN T6)."""
+
+    judge_from_content_edge: bool = False
+    """Opt-in: start the judged band at the content edge, not the tracking floor.
+
+    The content edge (`content_edge_hz`) is the lowest frequency down to which the title's
+    loud-quiet contrast licenses the whole deficit. Below a steep filter's edge the priced
+    target already falls into the quiet floor with the programme, and the shape clauses
+    judged there reject that fall as a cliff — so the default declines almost every steep
+    filter even where most of it is recoverable. With this on, the shape clauses judge only
+    above the edge, and below the judged band a cascade may boost no more than contrast
+    licenses (plus `AcceptParams.level_tolerance_db`).
+
+    Off by default because it trades something that cannot yet be judged without listening:
+    it recovers 17 of 18 noise-floored steep injections against 2, but where loud scenes stand
+    clear of a floor that dominates on average it lifts that floor too — up to 17 dB on
+    injected real titles — and the frozen protocol's `steep_leakage` is then accepted where it
+    abstained. IMPROVEMENT_PLAN "Steep filters" has the measurements."""
+
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored intervals omitted from evidence, with zero requested correction.
 
@@ -385,6 +441,93 @@ class Candidate:
         """Compatibility alias for correction_support_score; no probability interpretation."""
         return self.correction_support_score
 
+    evidence_excess: "EvidenceExcess | None" = None
+    """How far the published cascade boosts past what contrast licenses. Record-only."""
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceExcess:
+    """Boost the cascade that will play delivers beyond the evidence ceiling (IMPROVEMENT_PLAN E9).
+
+    Pricing caps the *target* at the contrast ceiling; the fit only approximates the target,
+    so nothing had said whether the filter itself stays under it. Measured on the exact
+    published, quantised device response — the transfer that plays, not a before/after
+    spectrum, which would add estimator and transient effects — against
+    `contrast_ceiling_db`, over the design grid inside the analysed band. Below or above
+    that band nothing was measured, so it is left out rather than read as zero licence.
+
+    Record-only: nothing gates on it. A biquad cannot always realise zero at one unsupported
+    bin inside a region of positive gain, so a gate would need a stated realisation
+    allowance first. The grid resolves about 57 points an octave, well inside the narrowest
+    section `max_q` allows.
+    """
+
+    max_db: float
+    """Largest excess outside exclusions, dB; 0 or less when the cascade stays under."""
+    at_hz: float
+    width_octaves: float
+    """Contiguous width of positive excess around the largest, octaves."""
+    integrated_db_octaves: float
+    """Positive excess integrated over log-frequency outside exclusions, dB·octaves."""
+    unsupported_at_max: bool
+    """Whether the largest excess sits on a bin the evidence licenses no boost at all."""
+    excluded_max_db: float = math.nan
+    """Largest boost inside authored exclusions, where the licence is zero by definition."""
+
+
+def evidence_excess(
+    filters: list[BiquadSpec],
+    realisation: Realisation,
+    ceiling_db: np.ndarray,
+    measured_hz: tuple[float, float],
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
+) -> EvidenceExcess | None:
+    """Measure `EvidenceExcess`; `None` when unstable (no steady-state gain) or unmeasured."""
+    if filters and unstable_sections(filters, realisation):
+        return None
+    measured = (DESIGN_GRID >= measured_hz[0]) & (DESIGN_GRID <= measured_hz[1])
+    if not measured.any():
+        return None
+    gain = (
+        magnitude_db(
+            realisation.quantise(biquad_sos(filters, realisation.fs)),
+            DESIGN_GRID,
+            realisation.fs,
+        )
+        if filters
+        else np.zeros_like(DESIGN_GRID)
+    )
+    excess = gain - ceiling_db
+    kept = unexcluded(DESIGN_GRID, exclude_bands_hz)
+    inside = measured & kept
+    excluded = measured & ~kept
+    excluded_max = float(np.max(gain[excluded])) if excluded.any() else math.nan
+    if not inside.any():
+        return EvidenceExcess(
+            math.nan, math.nan, 0.0, 0.0, False, excluded_max_db=excluded_max
+        )
+    worst = int(np.flatnonzero(inside)[np.argmax(excess[inside])])
+    positive = inside & (excess > 0)
+    width = 0.0
+    if positive[worst]:
+        low = high = worst
+        while low > 0 and positive[low - 1]:
+            low -= 1
+        while high < len(DESIGN_GRID) - 1 and positive[high + 1]:
+            high += 1
+        width = float(np.log2(DESIGN_GRID[high] / DESIGN_GRID[low]))
+    octaves = np.log2(DESIGN_GRID)
+    over = np.where(inside, np.maximum(excess, 0.0), 0.0)
+    integrated = float(np.sum((over[1:] + over[:-1]) / 2 * np.diff(octaves)))
+    return EvidenceExcess(
+        max_db=float(excess[worst]),
+        at_hz=float(DESIGN_GRID[worst]),
+        width_octaves=width,
+        integrated_db_octaves=integrated,
+        unsupported_at_max=bool(ceiling_db[worst] <= 0.0),
+        excluded_max_db=excluded_max,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class Report:
@@ -406,10 +549,22 @@ class Report:
     """Flatness difference below which two candidates are the same answer (`accepted`).
 
     Inside it, the one with fewer sections wins — R3's parsimony, applied where it belongs.
-    Two of the three titles with more than one passing candidate are genuine ties by this
-    measure: Nocturnal Animals at 2.47 against 2.49 dB and Tron at 1.32 against 1.34, where
-    preferring the lower number is preferring noise. Title 3's pair sit 1.54 against 4.27 and
-    are not a tie at all."""
+    Candidates whose departures differ by a few hundredths of a dB are genuinely tied, since
+    the measure's own scatter is far larger, and preferring the lower number would be
+    preferring noise. Candidates that differ by a clear margin are not a tie at all."""
+
+    mix_reference_db: float = math.nan
+    """Median level of the mix's own plateau: what every deficit is measured against."""
+
+    mix_plateau_hz: tuple[float, float] = (math.nan, math.nan)
+    """Where that plateau is. NaN when the mix has none, which is itself a blocker."""
+
+    judged_band_hz: tuple[float, float] | None = None
+    """The band every candidate's corrected curve was judged over; `None` if never set."""
+
+    blockers: tuple[str, ...] = ()
+    """Why the run abstained before proposing anything — also in `evidence_notes`, where they
+    come last. Kept apart so a decline can lead with its reason."""
 
     @property
     def accepted(self) -> Candidate | None:
@@ -423,10 +578,10 @@ class Report:
         asking for a house curve is not handed the flattest candidate — then on section count
         within `ranking_tie_db`. It was ranked on `wobble_db`, which is the statistic the
         flatness clause judges but the wrong one to choose *between* passing candidates: it is
-        blind to level and tilt, which acceptance admits across an 11 dB and 4.5 dB/octave
-        range respectively, and the margins it decided on were 0.08-0.23 dB of a quantity
-        whose own scatter is 3-14 dB. On title 3 that preferred a candidate 3.70 dB above
-        plateau to one 0.36 dB below it, for 0.09 dB of wobble and one fewer section.
+        blind to level and tilt, which acceptance admits across a wide range, and the margins it
+        decided on were a fraction of a dB in a quantity whose own scatter is several dB. That
+        could prefer a candidate several dB above plateau to one a fraction of a dB below it,
+        for a hair less wobble and one fewer section.
         """
         passing = [c for c in self.candidates if c.verdict.passed]
         if not passing:
@@ -472,27 +627,16 @@ def _deficit_anchor(
     params: "PipelineParams",
     plateau_hz: tuple[float, float],
 ) -> float:
-    """Where `flatten`'s correction stops — the first upward crossing into nothing.
+    """Find the first sustained end of the low-frequency mix deficit.
 
-    The target has to stop somewhere or the mix's own high-frequency fall is read as a deficit
-    (§3.4a). Stopping it with a hard zero left a step of 0.58-1.08 dB across one 0.55 Hz grid
-    point, inside the band the residual is scored over, and no biquad cascade follows a step
-    that narrow — so the minimax residual was bounded below by half of it and the fit could
-    never stop early. The taper is that fix; this is where to put it.
-
-    Scanned upward from the bottom so only the *first* zero counts. A deficit measured against
-    a plateau level necessarily returns above the plateau's top, and that return is programme,
-    not deficit.
+    Scan upward from the first deficit and require a settled run below the floor;
+    this anchors the target taper without following unrelated high-frequency shape.
     """
     keep = unexcluded(grid, params.exclude_bands_hz)
     over = (deficit_db >= params.flatten_deficit_floor_db) & keep
     if not over.any():
         # nothing to correct anywhere; the caller discards the proposal on max() < 1 dB
         return float(plateau_hz[0])
-    # a sustained run below the floor, not one point under it. A mix wobbles around its own
-    # plateau by several dB (§6.4), so a single crossing is the material's roughness rather
-    # than the end of the correction, and stopping on one would truncate the target in a dip.
-    # Same reasoning as `_lowest_run` in `diagnose`.
     run = max(1, int(round(len(grid) * params.flatten_settled_octaves / _GRID_OCTAVES)))
     first = int(np.argmax(over))
     settled = np.convolve(
@@ -501,8 +645,7 @@ def _deficit_anchor(
     closed = np.flatnonzero(settled >= run)
     if closed.size:
         return float(grid[first + int(closed[0])])
-    # the deficit never closes inside the band — the plateau's lower edge is the last honest
-    # statement about where the mix stops being short, so stop there rather than off the end
+    # A deficit that never settles ends at the plateau's lower edge.
     return float(plateau_hz[0])
 
 
@@ -549,29 +692,210 @@ def correction_evidence_score(target: np.ndarray, envelopes, z: float) -> float:
     return float(np.sum(weight * on_grid) / weight.sum())
 
 
+def _flat_deficit(material: Material, params: "PipelineParams"):
+    """The mix against its own plateau: spectrum, reference, smoothed deficit and its anchor.
+
+    Shared by the target (`low_end_deficit_db`) and the judged band (`judged_band_hz`) so
+    both find the knee in the same place. `None` when the mix has no usable plateau.
+    """
+    freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    level, plateau_hz = plateau_reference(
+        response, freqs, params.diagnose, params.exclude_bands_hz
+    )
+    if not math.isfinite(level):
+        return None
+    deficit = smooth_unexcluded(
+        np.maximum(-(response - level), 0.0), freqs, params.exclude_bands_hz, 15
+    )
+    on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+    anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
+    return freqs, response, level, plateau_hz, on_grid, anchor
+
+
+def _judged_top_hz(
+    anchor_hz: float, params: "PipelineParams", noise_floor_hz: float = math.nan
+) -> float:
+    """Upper edge of the judged band — and the pivot of the goal below the knee.
+
+    The deficit's first settled end (where the correction stops), but at least
+    `min_judge_octaves` above the band's floor, so there is always enough band to read a
+    slope over. No fixed frequency.
+    """
+    low = params.verify_floor_hz
+    if not math.isnan(noise_floor_hz):
+        low = max(low, noise_floor_hz)
+    widest = low * 2.0**params.accept.min_judge_octaves
+    return min(max(anchor_hz, widest), float(DESIGN_GRID[-1]))
+
+
+def low_end_deficit_db(
+    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
+) -> np.ndarray | None:
+    """What the mix's low end is missing: the most any strategy may ask a filter to restore.
+
+    Measured against the **goal** below the knee: `verify.house_curve_db` at
+    `AcceptParams.target_tilt_db_per_octave`, pivoting at the top of the judged band. Flat by
+    default; a positive tilt asks for a rising low end, a negative one for a gentle rolloff.
+    The deficit is kept from the bottom up to its first settled end (`_deficit_anchor`) and
+    tapered off above it.
+
+    A shortfall *above* that point is not a missing low end. It is the passband's own shape —
+    a bass-heavy source whose plateau sits at the bottom of the band reads everything above
+    it as "deficit" — and a strategy allowed to fill it reshapes the passband. It did: a
+    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (IMPROVEMENT_PLAN E2).
+
+    This is `flatten`'s unpriced target; every strategy's target is capped by it in
+    `priced_by_evidence`. `None` when the mix has no usable plateau.
+    """
+    measured = _flat_deficit(material, params)
+    if measured is None:
+        return None
+    freqs, response, level, plateau_hz, on_grid, anchor = measured
+    tilt = params.accept.target_tilt_db_per_octave
+    if tilt != 0.0:
+        goal = house_curve_db(
+            freqs, _judged_top_hz(anchor, params, noise_floor_hz), tilt
+        )
+        deficit = smooth_unexcluded(
+            np.maximum(level + goal - response, 0.0),
+            freqs,
+            params.exclude_bands_hz,
+            15,
+        )
+        on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
+        anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
+    return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
+
+
+def passband_ripple_db(
+    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
+) -> tuple[float, tuple[float, float]] | None:
+    """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
+
+    Measured on the same smoothed mean spectrum the deficit is, over the passband above the
+    correction — the top of the judged band to the top of the analysis band — as the spread of
+    the curve about its own log-frequency trend, so a tilted passband is not read as ripple.
+
+    Crest to trough, not a one-sided dip, because the reference sits near the 90th percentile
+    of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
+    negative corpus (IMPROVEMENT_PLAN E2) every unfiltered title's low-end deficit came in
+    under this (at most 0.77x); every real title and injected filter above it (1.08x and up).
+    `None` when there is no passband left above the correction to measure.
+    """
+    measured = _flat_deficit(material, params)
+    if measured is None:
+        return None
+    freqs, response, _, _, _, anchor = measured
+    low, high = (
+        _judged_top_hz(anchor, params, noise_floor_hz),
+        params.diagnose.band_hz[1],
+    )
+    band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, params.exclude_bands_hz)
+    if band.sum() < 8:
+        return None
+    smooth = smooth_unexcluded(response, freqs, params.exclude_bands_hz, 15)[band]
+    octaves = np.log2(freqs[band])
+    about = smooth - np.polyval(np.polyfit(octaves, smooth, 1), octaves)
+    return float(np.max(about) - np.min(about)), (low, high)
+
+
+def channels_missing_low_end(material: Material, params: "PipelineParams") -> list[str]:
+    """The channels whose own low end falls short by more than their own texture.
+
+    Each channel on its own: its deficit against its own plateau (`low_end_deficit_db`, toward
+    flat) against the crest-to-trough ripple of its own passband (`passband_ripple_db`) — the
+    texture rule applied per channel, the same 1x boundary and no constant. This replaced a
+    fixed 14 dB/octave steepest-slope threshold (IMPROVEMENT_PLAN T3). On the corpus the slope
+    decided on noise — unfiltered channels measured 8.5-22.9 dB/octave, injected 2nd-order
+    filters 13.5-23.3 — while this separated them completely: filtered channels 4.6-19.1x,
+    unfiltered 0.15-0.82x. A channel whose deficit or ripple cannot be measured is not restored.
+    """
+    flat = dataclasses.replace(
+        params, accept=dataclasses.replace(params.accept, target_tilt_db_per_octave=0.0)
+    )
+    names = []
+    for name, samples in material.channels.items():
+        solo = Material(name, material.fs, samples, {}, material.coverage)
+        deficit = low_end_deficit_db(solo, flat)
+        texture = passband_ripple_db(solo, flat)
+        if deficit is not None and texture is not None and deficit.max() > texture[0]:
+            names.append(name)
+    return names
+
+
+def _worth_correcting(target: np.ndarray, params: "PipelineParams") -> bool:
+    """Whether an evidence-priced target asks for more than the goal tolerance anywhere."""
+    return float(np.max(target)) > params.accept.goal_tolerance_db
+
+
+def _held_below_floor(
+    target: np.ndarray, floor_hz: float
+) -> tuple[np.ndarray, list[str]]:
+    """Hold a target flat below the tracking floor, never above its own value there.
+
+    Below the floor nothing tracks the passband, so there is nothing to recover: the boost is
+    held at its value at the floor rather than chasing a curve that describes noise. Temporal
+    contrast alone licenses up to 14 dB more down there on real titles (IMPROVEMENT_PLAN E5),
+    so this is the only place the tracking evidence reaches a target.
+    """
+    notes: list[str] = []
+    if math.isnan(floor_hz):
+        return target, notes
+    below = DESIGN_GRID < floor_hz
+    if not below.any():
+        return target, notes
+    held = float(np.interp(floor_hz, DESIGN_GRID, target))
+    withheld = float(np.max(target[below])) - held
+    # The hold cannot exceed the local measured deficit.
+    over_by = float(np.max(held - target[below]))
+    target = np.where(below, np.minimum(held, target), target)
+    if withheld >= 0.5:
+        notes.append(
+            f"noise floor binds: the target asks for a further {withheld:.1f} dB below "
+            f"{floor_hz:.1f} Hz, held flat because nothing down there tracks the passband"
+        )
+    if over_by >= 0.5:
+        notes.append(
+            f"noise-floor hold capped at the local target below {floor_hz:.1f} Hz: "
+            f"the flat hold at {held:.1f} dB would have exceeded it by up to "
+            f"{over_by:.1f} dB"
+        )
+    return target, notes
+
+
 def priced_by_evidence(
     target: np.ndarray,
     envelopes,
     diagnosis: Diagnosis,
     params: "PipelineParams",
+    deficit_db: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[str]]:
-    """Clip a target to the boost each bin's own measured margin supports.
+    """Bound a target by every piece of evidence, the same way for every strategy.
 
-    Per-bin, at `confidence_z` standard errors, independent of what any other bin or title needs.
-    Unsupported bins license zero boost, including profiling omissions. The noise-floor
-    hold must not expand this allowance: it bounds target construction, not evidence.
+    In order: held flat below the tracking floor (`_held_below_floor`); capped at the mix's
+    measured low-end deficit, when `deficit_db` is given (`low_end_deficit_db`); clipped to peak–quiet
+    contrast minus its uncertainty, where missing or excluded bins license zero boost. The
+    result is the target passed to fitting.
+
+    Only `flatten` used to get the first two. A model inversion or a channel restoration
+    handed straight to the ceiling asked for 10 dB more than `flatten` below the floor of 28
+    Years Later, and a parametric target reached 1.54 times the measured deficit on Send Help
+    — the ambition IMPROVEMENT_PLAN E3 found selection rewarding.
     """
-    native_ceiling = envelopes.boost_ceiling(params.confidence_z)
-    ceiling = np.interp(
-        DESIGN_GRID, envelopes.freqs, native_ceiling, left=0.0, right=0.0
-    )
-    ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
-    # Per-bin, not global: a target whose *peak* sits under the ceiling's peak can still be
-    # clipped somewhere else entirely. Measured on Alien — target.max() (35 dB, near 22 Hz)
-    # never exceeded noise_ceiling.max() (42 dB, near 30 Hz), so this note was silent while
-    # 5-17 Hz was being held 10-12 dB below its raw deficit the whole time. The bin with the
-    # worst clip is the one worth naming, not the target's own unrelated peak.
-    notes = evidence_notes(envelopes, params.confidence_z)
+    target, notes = _held_below_floor(target, diagnosis.noise_floor_hz)
+    if deficit_db is not None:
+        excess = target - deficit_db
+        worst = int(np.argmax(excess))
+        if excess[worst] > 0.5:
+            notes.append(
+                f"deficit cap binds: the target asks for {target[worst]:.1f} dB at "
+                f"{DESIGN_GRID[worst]:.1f} Hz, where the mix is {deficit_db[worst]:.1f} dB "
+                "below its reference"
+            )
+        target = np.minimum(target, deficit_db)
+    ceiling = contrast_ceiling_db(envelopes, params)
+    # which bins failed or lacked evidence is a property of the run, not of this target, and
+    # `analyse` already reports it once in the run's limitations
     clipped = target - ceiling
     worst_bin = int(np.argmax(clipped))
     if clipped[worst_bin] > 0.5:
@@ -591,77 +915,16 @@ def flatten_targets(
     identification: "Identification | None",
     params: "PipelineParams",
 ) -> list[Proposal]:
-    """Invert the measured mix response — make it flat.
+    """Request enough boost to reach the mix's own spectral plateau.
 
-    The three human-validated filters track this within 2-4 dB, and the residual is a
-    near-constant offset rather than a shape error: one sits ~3 dB above flat, the other two
-    ~2 dB below. Flat is the shape; how far past flat to go is the preference dial of §4.3.
+    The plateau-relative deficit, tapered where it closes, then priced — held below the
+    tracking floor and clipped to measured contrast — like every other strategy's target.
     """
-    freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    # "flat" means the mix's own plateau, measured on the mix, not a level read off one
-    # nominated frequency. A point reference also inherits whatever local wobble sits at that
-    # point: across the four titles the plateau level and the level at 40 Hz differ by -2.5 to
-    # +2.8 dB, which is a straight offset on the whole target.
-    level, plateau_hz = plateau_reference(
-        response, freqs, params.diagnose, params.exclude_bands_hz
-    )
-    if not math.isfinite(level):
+    unpriced = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    if unpriced is None:
         return []
-    response = response - level
-    deficit = smooth_unexcluded(
-        np.maximum(-response, 0.0), freqs, params.exclude_bands_hz, 15
-    )
-
-    target = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
-    anchor = _deficit_anchor(DESIGN_GRID, target, params, plateau_hz)
-    # Tapered to nothing above the reference, not cut off there. The mix keeps falling above
-    # the reference — by 5 to 11.6 dB over 45-200 Hz on the three titles — and that fall is
-    # the programme, not a deficit, so the target has to stop. Stopping it with a hard zero
-    # left a step of 0.58, 0.69 and 1.08 dB across a single grid point 0.55 Hz wide, inside
-    # the 5-200 Hz band the residual is scored over. No cascade of biquads follows a step
-    # that narrow, so the minimax residual was bounded below by half of it — 0.54 dB on the
-    # third title, above `residual_target_db` — and the fit could never stop early, spending
-    # the whole section budget to chase an artefact of where the target was truncated.
-    target *= _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
-    notes: list[str] = []
-    # The floor binds before the cap. `max_gain_db` is a preference dial (§4.3) and the noise
-    # floor is evidence, so clipping first lets the dial pre-empt the measurement: on a floor
-    # with a slope of its own the raw deficit runs to 43-62 dB, the cap flattens it to 26
-    # before the hold is consulted, and the guard then finds nothing left to hold. Clipping a
-    # runaway is not the same as declining to chase it, and only the second is a reason.
-    floor = diagnosis.noise_floor_hz
-    if not math.isnan(floor):
-        # below the noise floor there is nothing to recover; hold the boost rather than
-        # continuing to chase a curve that is describing noise
-        held = float(np.interp(floor, DESIGN_GRID, target))
-        below = DESIGN_GRID < floor
-        local_deficit = target
-        withheld = float(np.max(local_deficit[below])) - held if below.any() else 0.0
-        # Capped at the local measured deficit, not held flat unconditionally (§14, step 4).
-        # The flat hold asks for `held` at every frequency below the floor, but `held` is read
-        # off the target just *above* the floor and nothing guarantees the deficit below it
-        # never dips under that value — on Blazing Saddles it does, and the flat hold asked
-        # for 32.2 dB at 5 Hz where the mix is only 20.9 dB short, 154% of the measured deficit.
-        # Capping rather than tapering to zero: a taper below the floor would ask a shelf
-        # cascade for a band-pass shape and invite a cancelling pair, where a cap just stops
-        # asking for more than was measured.
-        over_by = float(np.max(held - local_deficit[below])) if below.any() else 0.0
-        target = np.where(below, np.minimum(held, local_deficit), target)
-        if withheld >= 0.5:
-            notes.append(
-                f"noise floor binds: the mix asks for a further {withheld:.1f} dB below "
-                f"{floor:.1f} Hz, held flat because nothing down there tracks the passband"
-            )
-        if over_by >= 0.5:
-            notes.append(
-                f"noise-floor hold capped at the local measured deficit below {floor:.1f} Hz: "
-                f"the flat hold at {held:.1f} dB would have exceeded it by up to "
-                f"{over_by:.1f} dB"
-            )
-    unpriced = target
-    target, capped = priced_by_evidence(target, envelopes, diagnosis, params)
-    notes.extend(capped)
-    if target.max() < 1.0:
+    target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, unpriced)
+    if not _worth_correcting(target, params):
         return []
     return [
         Proposal(
@@ -677,28 +940,30 @@ def counterfactual_targets(
     identification: "Identification | None",
     params: "PipelineParams",
 ) -> list[Proposal]:
-    """Restore the filtered channels, re-sum, and read the deficit off the mix."""
-    if not diagnosis.filtered_channels:
+    """Build priced mix targets from individually restored channels.
+
+    Try each restoration cap, re-sum the channels, price the resulting mix
+    deficit by contrast, and deduplicate targets before fitting.
+    """
+    names = channels_missing_low_end(material, params)
+    if not names:
         return []
-    # Everything that does not depend on the cap, computed once. Each channel's spectrum, the
-    # bin axis it sits on and the mix's own reference are the same for every cap, and this
-    # title's sample count factors as 2 * 3 * 47 * 24049 — that 24,049 puts pocketfft on a
-    # Bluestein path, so one forward transform is 1.22 s and one inverse 0.95 s. Three caps
-    # were paying for six of each where two would do.
-    restoration = _Restoration(material, diagnosis)
+    # Reuse channel spectra across restoration caps.
+    restoration = _Restoration(material, diagnosis, params.playback, names)
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     proposals: list[Proposal] = []
     for cap in params.restore_caps_db:
         unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
-        # Priced by the same evidence as `flatten`'s. A restored deficit is still only a claim
-        # about what the mix would have been, and a claim about a bin with no measurable margin
-        # is not evidence about that bin — see `priced_by_evidence`.
-        target, capped = priced_by_evidence(unpriced, envelopes, diagnosis, params)
-        if target.max() < 1.0:
-            logger.info(f"  cap {cap:.0f} dB: deficit under 1 dB, nothing to correct")
+        target, capped = priced_by_evidence(
+            unpriced, envelopes, diagnosis, params, deficit
+        )
+        if not _worth_correcting(target, params):
+            logger.info(
+                f"  cap {cap:.0f} dB: within {params.accept.goal_tolerance_db:g} dB of the "
+                "goal, nothing to correct"
+            )
             continue
-        # A cap only changes the target when it binds. On title 1 no channel is attenuated by
-        # 25 dB, so all three caps describe one deficit and fitting each spent two thirds of
-        # the run recomputing one answer.
+        # Skip caps that produce the same priced target.
         for seen in proposals:
             if np.allclose(seen.target_db, target, atol=1e-6):
                 logger.info(
@@ -733,6 +998,45 @@ def parametric_params(params: PipelineParams) -> DesignParams:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ParametricDerivation:
+    """Everything a parametric proposal is derived from beyond the analysis: its cache key.
+
+    `parametric_params` is only what `design` fits with. `parametric_targets` also measures the
+    mix's deficit against the goal, prices the target through `priced_by_evidence` and drops it
+    inside the goal tolerance, and those read the goal dials, the deficit-anchor and taper
+    rules and the verification floor off `PipelineParams`. Keyed on the fitter's settings
+    alone, a rerun with a different `--goal-tilt` reused the old goal's proposal
+    (IMPROVEMENT_PLAN C3). Exclusions and the plateau rule reach the key through
+    `DiagnoseParams`, which the key already holds.
+    """
+
+    design: DesignParams
+    target_tilt_db_per_octave: float
+    goal_tolerance_db: float
+    min_judge_octaves: float
+    verify_floor_hz: float
+    flatten_settled_octaves: float
+    flatten_deficit_floor_db: float
+    flatten_taper_ratio: float
+    exclude_bands_hz: tuple[tuple[float, float], ...]
+
+
+def parametric_derivation(params: PipelineParams) -> ParametricDerivation:
+    """The configuration component of the parametric stage's cache key."""
+    return ParametricDerivation(
+        design=parametric_params(params),
+        target_tilt_db_per_octave=params.accept.target_tilt_db_per_octave,
+        goal_tolerance_db=params.accept.goal_tolerance_db,
+        min_judge_octaves=params.accept.min_judge_octaves,
+        verify_floor_hz=params.verify_floor_hz,
+        flatten_settled_octaves=params.flatten_settled_octaves,
+        flatten_deficit_floor_db=params.flatten_deficit_floor_db,
+        flatten_taper_ratio=params.flatten_taper_ratio,
+        exclude_bands_hz=params.exclude_bands_hz,
+    )
+
+
 def parametric_targets(
     material: Material,
     diagnosis: Diagnosis,
@@ -740,19 +1044,23 @@ def parametric_targets(
     identification: "Identification | None",
     params: "PipelineParams",
 ) -> list[Proposal]:
-    """Invert the rolloff fitted by `identify_rolloff` (§3.5)."""
+    """Propose the identified rolloff's protected and evidence-priced inverse."""
     if identification is None or not identification.detected:
         return []
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     result = design(
         identification,
         envelopes,
         parametric_params(params),
         price_target=lambda target: priced_by_evidence(
-            target, envelopes, diagnosis, params
+            target, envelopes, diagnosis, params, deficit
         ),
     )
     if not result.filters:
         logger.info(f"  parametric declined: {result.decline_reason}")
+        return []
+    if result.target_db is not None and not _worth_correcting(result.target_db, params):
+        logger.info("  parametric: within the goal tolerance, nothing to correct")
         return []
     return [
         Proposal(
@@ -781,25 +1089,62 @@ class Strategy:
     derive: "Callable[..., list[Proposal]]"
     cache_modules: tuple[str, ...] | None = None
     effective_params: Callable[[PipelineParams], object] = lambda params: params
-    """Settings consumed by derivation; also the configuration component of its cache key."""
+    """Settings the derivation reports it ran with, recorded on each proposal."""
+    cache_params: Callable[[PipelineParams], object] | None = None
+    """Everything derivation reads, as the configuration component of its cache key.
+
+    `None` means `effective_params`. A strategy whose reported settings are narrower than what
+    it reads must declare this, or a changed setting is served a stale proposal."""
+
+    def cache_config(self, params: PipelineParams) -> object:
+        return (self.cache_params or self.effective_params)(params)
 
 
 STRATEGIES = {
     "flatten": Strategy(flatten_targets),
     "counterfactual": Strategy(counterfactual_targets),
     "parametric": Strategy(
-        parametric_targets, cache.PARAMETRIC_MODULES, parametric_params
+        parametric_targets,
+        cache.PARAMETRIC_MODULES,
+        parametric_params,
+        parametric_derivation,
     ),
 }
 """Every way of deriving a target, by name. All equal citizens of the same pipeline.
 
 `parametric` is the one that caches, because it is the one whose target derivation runs an
-optimiser: it calls `design`, which calls the fitter, and across the four titles that is 403 s
-of a 1,586 s run — more than any other single stage. What it contributes is a statement about
+optimiser: it calls `design`, which calls the fitter, and that is more than any other single
+stage of a run. What it contributes is a statement about
 the *material* — does this look like a deliberate rolloff, of what alignment and order — which
 does not change between runs of the same code over the same title. `flatten` and
 `counterfactual` derive a curve directly and are not worth the round trip.
 """
+
+
+def cached_module_sets() -> list[tuple[str, ...]]:
+    """Every module set a stage-cache key digests: the analysis and each caching strategy's.
+
+    One list for the key and for the frozen build's baked digests (`beqforge.spec`), so the
+    two cannot drift apart.
+    """
+    sets = [cache.ANALYSIS_MODULES]
+    for strategy in STRATEGIES.values():
+        if strategy.cache_modules is not None and strategy.cache_modules not in sets:
+            sets.append(strategy.cache_modules)
+    return sets
+
+
+def _usable(store: "cache.Store | None") -> "cache.Store | None":
+    """The store, or None when this build cannot key a stage (`cache.CacheUnavailable`)."""
+    if store is None:
+        return None
+    try:
+        for modules in cached_module_sets():
+            cache.digest_of(modules)
+    except cache.CacheUnavailable as unavailable:
+        logger.warning(f"Running without the stage cache: {unavailable}")
+        return None
+    return store
 
 
 @dataclass(frozen=True, slots=True)
@@ -811,24 +1156,75 @@ class _Restoration:
     three forward and three inverse transforms of a two-hour signal for one answer.
     """
 
+    names: list[str]
+    """The channels to restore — `channels_missing_low_end` in a run."""
     spectra: dict[str, np.ndarray]
     bins: np.ndarray
     before_db: np.ndarray
+    mix: np.ndarray
+    """The mix a restored channel is re-summed into — see `_restoration_mix`."""
+    gains: dict[str, float]
+    """Each channel's weight in `mix`."""
+    length: int
+    """Transform length: the programme zero-padded to a length the FFT factors quickly.
 
-    def __init__(self, material: Material, diagnosis: Diagnosis) -> None:
-        spectra = {
-            name: np.fft.rfft(material.channels[name])
-            for name in diagnosis.filtered_channels
-        }
+    Unpadded, the length is whatever the programme happens to be, and a two-hour title can
+    factor as 2*3*613*1741 or 7*7*144779 — pocketfft's slow path, measured at 1.9 s a transform
+    and 86 s for one title's counterfactual targets. Padding (typically by under 1%) takes that
+    to about 0.1 s. It changes the restoration only at the programme's ends, where the
+    zero-phase gain's circular wrap now reads zeros instead of the other end of the film."""
+
+    def __init__(
+        self,
+        material: Material,
+        diagnosis: Diagnosis,
+        playback: PlaybackParams | None = None,
+        names: list[str] | None = None,
+    ) -> None:
+        names = diagnosis.filtered_channels if names is None else names
+        object.__setattr__(self, "names", list(names))
+        mix, gains = _restoration_mix(material, playback or PlaybackParams())
+        object.__setattr__(self, "mix", mix)
+        object.__setattr__(self, "gains", gains)
+        length = scipy.fft.next_fast_len(len(mix), real=True)
+        spectra = {name: np.fft.rfft(material.channels[name], length) for name in names}
         object.__setattr__(self, "spectra", spectra)
+        object.__setattr__(self, "length", length)
         object.__setattr__(
             self,
             "bins",
-            np.fft.rfftfreq(len(material.mono_mix), 1.0 / material.fs),
+            np.fft.rfftfreq(length, 1.0 / material.fs),
         )
-        object.__setattr__(
-            self, "before_db", mean_spectrum(material.mono_mix, material.fs)[1]
-        )
+        object.__setattr__(self, "before_db", mean_spectrum(mix, material.fs)[1])
+
+
+def _restoration_mix(
+    material: Material, playback: PlaybackParams
+) -> tuple[np.ndarray, dict[str, float]]:
+    """The mix a counterfactual restoration is re-summed into, and each channel's weight in it.
+
+    `material.mono_mix` carries §2's fixed weights. The deficit a restoration reads is a
+    question about the sub feed the playback model describes, so when that model weights the
+    LFE against the mains differently, the mix is rebuilt from the channels at the model's
+    gains. Only the ratio matters — the deficit is read against the mix's own plateau, so a
+    common gain cancels — and at §2's ratio the stored mix is used exactly as it stands.
+    """
+    stored_ratio_db = 20.0 * math.log10(LFE_GAIN / MAIN_GAIN)
+    if math.isclose(
+        playback.lfe_gain_db - playback.main_gain_db, stored_ratio_db, abs_tol=1e-9
+    ):
+        return material.mono_mix, {
+            name: LFE_GAIN if name == "LFE" else MAIN_GAIN for name in material.channels
+        }
+    gains = {
+        name: 10.0
+        ** ((playback.lfe_gain_db if name == "LFE" else playback.main_gain_db) / 20.0)
+        for name in material.channels
+    }
+    mix = np.zeros_like(material.mono_mix, dtype=np.float64)
+    for name, samples in material.channels.items():
+        mix += gains[name] * samples
+    return mix, gains
 
 
 def counterfactual_target(
@@ -845,10 +1241,10 @@ def counterfactual_target(
     a channel 23 dB under the mains contributes nothing to the sum until it is restored, and
     a target computed on the channel alone would not know that.
     """
-    restoration = restoration or _Restoration(material, diagnosis)
+    restoration = restoration or _Restoration(material, diagnosis, params.playback)
     freqs = diagnosis.freqs
-    restored = material.mono_mix.copy()
-    for name in diagnosis.filtered_channels:
+    restored = restoration.mix.copy()
+    for name in restoration.names:
         samples = material.channels[name]
         response = diagnosis.channels[name].response_db
         boost = np.where(
@@ -874,28 +1270,18 @@ def counterfactual_target(
         spectrum = restoration.spectra[name]
         gain = np.interp(restoration.bins, freqs, boost, left=boost[0], right=0.0)
         gain[~unexcluded(restoration.bins, params.exclude_bands_hz)] = 0.0
-        lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=len(samples))
-        mix_gain = LFE_GAIN if name == "LFE" else MAIN_GAIN
-        restored = restored + mix_gain * (lifted - samples)
+        lifted = np.fft.irfft(spectrum * 10.0 ** (gain / 20.0), n=restoration.length)[
+            : len(samples)
+        ]
+        restored = restored + restoration.gains[name] * (lifted - samples)
 
     before = restoration.before_db
     grid, deficit = supported_mix_change(
-        material.mono_mix, restored, material.fs, params.confidence_z
+        restoration.mix, restored, material.fs, params.confidence_z
     )
     deficit[~unexcluded(grid, params.exclude_bands_hz)] = 0.0
     target = np.interp(DESIGN_GRID, grid, deficit, left=deficit[0], right=0.0)
     target = smooth_unexcluded(target, DESIGN_GRID, params.exclude_bands_hz, 9)
-    # Terminated where this title's own restored deficit closes, and tapered, exactly as
-    # `flatten` is — `_deficit_anchor` and `_taper` carry the reasoning for both halves of that.
-    #
-    # It used to be `target[DESIGN_GRID > share_band_hz[1]] = 0.0`, a hard zero at 35 Hz.
-    # `DiagnoseParams.share_band_hz`'s own docstring says "Only the shares use this", and §13.5
-    # keeps it as a survivor precisely because a *cross-channel comparison* needs one yardstick;
-    # nothing licensed it to decide where a correction ends. The cost was not theoretical: it
-    # made this whole strategy incapable on any title whose knee sits above 35 Hz, which is
-    # Blazing Saddles at 44.4 Hz and Alien at 34.4-48.1 Hz — two of the three titles that
-    # abstain. Their counterfactual candidates are not marginal but wrecked, a -39.7 dB hole at
-    # 40 Hz and cliffs relocated to 23-37 Hz, because the deficit was cut off mid-knee.
     _, plateau_hz = plateau_reference(
         before, grid, params.diagnose, params.exclude_bands_hz
     )
@@ -908,35 +1294,16 @@ def counterfactual_target(
 def _fit_all(
     proposals: list[Proposal], params: PipelineParams
 ) -> list[tuple[list[BiquadSpec], float]]:
-    """Fit every proposal that needs fitting, in one escalation.
+    """Fit all proposed targets under a shared section escalation.
 
-    One call rather than one per proposal, because the section budget is escalated and a
-    target escalating alone leaves most of the machine idle: its first tier is two tasks for
-    seven workers. Together, a tier is every undecided proposal's tier at once.
-
-    **Placement is discovered per target, not asserted.** This used to hand every proposal of
-    every title the literal `(5.0, 40.0)`, which hard-bounds each section's centre frequency —
-    while `correction_band_hz`, written for exactly this and already used by `design.py`,
-    derives the span from where the target actually asks for something. The 40 Hz ceiling was
-    §2.1's move in the place it costs most: measured across the eight titles on hand, every
-    title whose `flatten` target fits under it accepts a filter, and every title whose target
-    reaches past it has its sections pinned against it — 38.8, 39.8, 37.6 and 37.2 Hz on
-    Alien, Blazing Saddles, Nocturnal Animals and Tron — and none of those four accepts
-    `flatten`. Blazing Saddles is the clearest: its target peaks at 33.6 dB at 38.9 Hz and
-    still asks 23 dB at 50 Hz, all of it above the ceiling, so four sections piled into
-    29-40 Hz including a -14.7 dB cancelling term and the residual landed at 2.27 dB. The
-    derived band is 22-50 Hz on the five titles that already work, inside the old bound, so
-    this is inert where the pipeline succeeds.
+    Derive each target's placement span from its active correction, expand the
+    scored band to cover those spans, and return the fitted cascades in order.
     """
     placements = [
         correction_band_hz(p.target_db, DESIGN_GRID, params.lowest_frequency_hz)
         for p in proposals
     ]
-    # "Evaluate wide, place narrow" is the rule `_fit_structure` states, so the band the
-    # residual is scored over must contain every band a section may be placed in. With a
-    # placement ceiling fixed at 40 Hz that was true by inspection; with a derived one it has
-    # to be arranged, and Alien's target already reaches 199 Hz against this 200. Inert on all
-    # eight titles measured — it prevents a section being placed where nothing scores it.
+    # Score every frequency at which a section can be placed.
     score_high = max(params.residual_band_hz[1], *(high for _, high in placements))
     return fit_minimal_biquads_all(
         [
@@ -955,24 +1322,41 @@ def _fit_all(
     )
 
 
-def run(
+@dataclass(frozen=True, slots=True)
+class Analysed:
+    """Everything `run` knows before any strategy proposes a target.
+
+    `params` is the run's effective configuration — exclusions merged into every stage — so a
+    caller holding this cannot accidentally judge against a different contract than the one
+    the analysis used. `blockers` non-empty means the run abstains without proposing anything.
+    """
+
+    params: PipelineParams
+    identify_params: IdentifyParams
+    diagnosis: Diagnosis
+    envelopes: Envelopes
+    identification: Identification | None
+    limitations: tuple[str, ...]
+    blockers: tuple[str, ...]
+    mix_reference_db: float = math.nan
+    mix_plateau_hz: tuple[float, float] = (math.nan, math.nan)
+    judged_band_hz: tuple[float, float] | None = None
+
+
+def analyse(
     material: Material,
     params: PipelineParams | None = None,
-    cache_path: Path | None = None,
+    cache_path: "Path | cache.Store | None" = None,
     fresh: bool = False,
-) -> Report:
-    """Diagnose, propose, fit, judge.
+    timings: Timings | None = None,
+) -> Analysed:
+    """Diagnose, extract and identify (from the stage cache when valid), then list blockers.
 
-    `cache_path` is where stages that do not change are kept so they need not be repeated —
-    the analysis, and any strategy that declares `cache_modules`. `fresh` recomputes and
-    overwrites them.
-
-    Reading is on by default, which is safe because of how the key is built rather than
-    because caching is usually fine: a stage is reused only when the material's own samples,
-    the parameters it was given and the sources of every module it can reach all still match.
-    A silently stale hit is not a thing that can happen; a *miss* is, and `cache.load` says
-    which of the three moved.
+    The first half of `run`, separable so a regression probe can read the decisions that
+    precede fitting — plateau, floors, judged band, evidence ceiling — without paying for a fit.
     """
+    timings = timings or Timings()
+    store = _usable(cache.as_store(cache_path))
     params = params or PipelineParams()
     # One effective exclusion contract at every stage, including directly configured omissions.
     bands = tuple(
@@ -999,8 +1383,6 @@ def run(
         raise ValueError(
             f"unknown strategy {sorted(unknown)!r}; have {', '.join(sorted(STRATEGIES))}"
         )
-    timings = Timings()
-    FIT_STATS.reset()
     logger.info("=" * 80)
     logger.info(f"Material: {material}")
 
@@ -1015,7 +1397,7 @@ def run(
 
     analysis_key = (
         None
-        if cache_path is None
+        if store is None
         else cache.key_for(
             "analysis",
             cache.ANALYSIS_MODULES,
@@ -1025,11 +1407,7 @@ def run(
             identify_params,
         )
     )
-    stored = (
-        None
-        if cache_path is None or fresh
-        else cache.load(cache_path, "analysis", analysis_key)
-    )
+    stored = None if store is None or fresh else store.load("analysis", analysis_key)
 
     logger.info("=" * 80)
     logger.info("Per-channel decomposition")
@@ -1057,9 +1435,8 @@ def run(
                 identification = identify_rolloff(envelopes, identify_params)
             except ValueError as unusable:
                 logger.warning(f"Sum-based identification unavailable: {unusable}")
-        if cache_path is not None:
-            cache.store(
-                cache_path,
+        if store is not None:
+            store.store(
                 "analysis",
                 analysis_key,
                 cache.analysis_to_json(
@@ -1077,7 +1454,7 @@ def run(
     )
     blockers = []
     mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
-    mix_level, _ = plateau_reference(
+    mix_level, region = plateau_reference(
         mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
     )
     if not math.isfinite(mix_level):
@@ -1093,16 +1470,48 @@ def run(
         blockers.append("no qualifying loud events; restoration withheld")
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
+    judged = None
     if math.isfinite(mix_level):
-        _, region = plateau_reference(
-            mix_response, mix_freqs, params.diagnose, params.exclude_bands_hz
-        )
         limitations.append(
             f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
             f"median {mix_level:.6f} dB; shared by targets and verification"
         )
+        # A BEQ acts on the sub feed. A reference that starts above the band the sub plays is
+        # not a bass passband, so a deficit read against it is the shape of whatever carries
+        # the mix up there — typically a dialogue-led mix with no authored bass, where the
+        # centre carries the plateau and the LFE is empty — not a rolloff to restore.
+        # Only when nothing in the sub band tracks the programme, though: a filter can slope
+        # a real bass passband away until the only flat region left is above the sub band
+        # (Black Bag with LR4 @ 30 injected — plateau 50-83 Hz gone, content tracking to
+        # 9 Hz), and that low end is content to restore, not an absence of bass. NaN means
+        # every band tracked.
+        sub_edge = min(
+            corner
+            for corner in (params.playback.crossover_hz, params.playback.bus_lowpass_hz)
+            if corner is not None
+        )
+        if region[0] >= sub_edge and diagnosis.noise_floor_hz >= sub_edge:
+            blockers.append(
+                "no usable contiguous mix plateau in the band the sub plays: the mix's only "
+                f"flat region is {region[0]:.1f}-{region[1]:.1f} Hz, above the "
+                f"{sub_edge:g} Hz sub-feed low-pass, and nothing below it tracks the "
+                f"programme (tracking stops at {diagnosis.noise_floor_hz:.1f} Hz), so there "
+                "is no bass passband to restore towards; restoration withheld"
+            )
+        texture = passband_ripple_db(material, params, diagnosis.noise_floor_hz)
+        low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+        if texture is not None and low_end is not None:
+            ripple, (edge_low, edge_high) = texture
+            deepest = float(np.max(low_end))
+            if deepest <= ripple:
+                blockers.append(
+                    "within the programme's own ripple: the low end's deepest shortfall "
+                    f"({deepest:.1f} dB) is no larger than the {ripple:.1f} dB crest-to-trough "
+                    f"swing of the passband above it ({edge_low:.0f}-{edge_high:.0f} Hz), "
+                    "so it is texture, not a missing low end; restoration withheld"
+                )
     if math.isfinite(mix_level):
-        judged = judged_band_hz(material, diagnosis, params)
+        judged = judged_band_hz(material, diagnosis, params, envelopes)
         if any(a <= judged[1] and b >= judged[0] for a, b in bands):
             blockers.append(
                 "exclusions fragment the judged band; contiguous verification unavailable"
@@ -1121,18 +1530,35 @@ def run(
     limitations.extend(blockers)
     for note in limitations:
         logger.info(note)
-    if blockers:
-        return Report(
-            material,
-            diagnosis,
-            identification,
-            [],
-            timings,
-            FIT_STATS,
-            accept=params.accept,
-            evidence_notes=tuple(limitations),
-        )
+    return Analysed(
+        params=params,
+        identify_params=identify_params,
+        diagnosis=diagnosis,
+        envelopes=envelopes,
+        identification=identification,
+        limitations=tuple(limitations),
+        blockers=tuple(blockers),
+        mix_reference_db=mix_level,
+        mix_plateau_hz=region,
+        judged_band_hz=judged,
+    )
 
+
+def propose(
+    material: Material,
+    analysed: Analysed,
+    cache_path: "Path | cache.Store | None" = None,
+    fresh: bool = False,
+    timings: Timings | None = None,
+) -> list[Proposal]:
+    """Every selected strategy's proposals, each carrying the notes on what bound its target."""
+    timings = timings or Timings()
+    store = _usable(cache.as_store(cache_path))
+    params = analysed.params
+    diagnosis = analysed.diagnosis
+    envelopes = analysed.envelopes
+    identification = analysed.identification
+    identify_params = analysed.identify_params
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
     proposals: list[Proposal] = []
@@ -1144,7 +1570,7 @@ def run(
             )
         key = (
             None
-            if cache_path is None or strategy.cache_modules is None
+            if store is None or strategy.cache_modules is None
             else cache.key_for(
                 name,
                 strategy.cache_modules,
@@ -1152,10 +1578,10 @@ def run(
                 params.diagnose,
                 params.extraction,
                 identify_params,
-                strategy.effective_params(params),
+                strategy.cache_config(params),
             )
         )
-        held = None if key is None or fresh else cache.load(cache_path, name, key)
+        held = None if key is None or fresh else store.load(name, key)
         if held is not None:
             with timings.stage(f"target/{name} (cached)"):
                 produced = cache.proposals_from_json(held, Proposal)
@@ -1171,17 +1597,72 @@ def run(
                     for p in produced
                 ]
             if key is not None:
-                cache.store(cache_path, name, key, cache.proposals_to_json(produced))
+                store.store(name, key, cache.proposals_to_json(produced))
         logger.info(f"  {name}: {len(produced)} proposal(s)")
-        proposals.extend(
-            dataclasses.replace(p, notes=tuple(dict.fromkeys((*p.notes, *limitations))))
-            for p in produced
+        # a proposal's notes are what bound *its* target; the run's limitations live once, on
+        # `Report.evidence_notes`, and the designer response joins the two itself
+        proposals.extend(produced)
+    return proposals
+
+
+def run(
+    material: Material,
+    params: PipelineParams | None = None,
+    cache_path: "Path | cache.Store | None" = None,
+    fresh: bool = False,
+) -> Report:
+    """Run diagnosis, evidence-priced target strategies, fitting and acceptance.
+
+    Refuse proposals when programme coverage or spectral evidence is missing.
+    Cache reusable analysis by material, parameters and source hashes; publish
+    each fitted cascade before verifying it on the modelled sub feed.
+    """
+    timings = Timings()
+    FIT_STATS.reset()
+    # checked once, so a build that cannot key a stage warns once, not per stage
+    cache_path = _usable(cache.as_store(cache_path))
+    analysed = analyse(material, params, cache_path, fresh, timings)
+    params = analysed.params
+    diagnosis = analysed.diagnosis
+    envelopes = analysed.envelopes
+    identification = analysed.identification
+    if analysed.blockers:
+        return Report(
+            material,
+            diagnosis,
+            identification,
+            [],
+            timings.finish(),
+            dataclasses.replace(FIT_STATS),
+            accept=params.accept,
+            evidence_notes=analysed.limitations,
+            mix_reference_db=analysed.mix_reference_db,
+            mix_plateau_hz=analysed.mix_plateau_hz,
+            judged_band_hz=analysed.judged_band_hz,
+            blockers=analysed.blockers,
+        )
+    proposals = propose(material, analysed, cache_path, fresh, timings)
+    if not proposals:
+        # the reason to abstain, said as one: no strategy found anything worth correcting
+        within = (
+            "nothing worth correcting: no strategy's evidence-priced target departs from the "
+            f"goal by more than {params.accept.goal_tolerance_db:g} dB"
+        )
+        return Report(
+            material,
+            diagnosis,
+            identification,
+            [],
+            timings.finish(),
+            dataclasses.replace(FIT_STATS),
+            accept=params.accept,
+            evidence_notes=(*analysed.limitations, within),
+            mix_reference_db=analysed.mix_reference_db,
+            mix_plateau_hz=analysed.mix_plateau_hz,
+            judged_band_hz=analysed.judged_band_hz,
+            blockers=(within,),
         )
 
-    # Every proposal that needs a fit goes into one escalation, so a section tier is as wide
-    # as the run rather than as wide as one target. That costs the per-proposal breakdown this
-    # stage used to carry in `Timings`; `fit_minimal_biquads_all` logs each proposal's own
-    # CPU-seconds instead, which is the more useful of the two now that they overlap.
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
         results = _fit_all(needs_fitting, params) if needs_fitting else []
@@ -1194,6 +1675,8 @@ def run(
     )
 
     candidates: list[Candidate] = []
+    evidence_ceiling = contrast_ceiling_db(analysed.envelopes, params)
+    ceiling = evidence_ceiling if params.judge_from_content_edge else None
     for proposal in proposals:
         if proposal.filters is not None:
             filters, error = proposal.filters, proposal.residual_db
@@ -1213,8 +1696,24 @@ def run(
                     unpriced_target=proposal.unpriced_target_db,
                     method=proposal.method,
                     effective_params=proposal.effective_params,
+                    judged_band=analysed.judged_band_hz,
+                    ceiling_db=ceiling,
+                    timings=timings,
                 )
             )
+        candidates[-1] = dataclasses.replace(
+            candidates[-1],
+            evidence_excess=evidence_excess(
+                candidates[-1].filters,
+                params.realisation,
+                evidence_ceiling,
+                (
+                    float(analysed.envelopes.freqs[0]),
+                    float(analysed.envelopes.freqs[-1]),
+                ),
+                params.exclude_bands_hz,
+            ),
+        )
 
     candidates = [
         dataclasses.replace(
@@ -1231,10 +1730,14 @@ def run(
         diagnosis=diagnosis,
         identification=identification,
         candidates=candidates,
-        timings=timings,
-        fit_stats=FIT_STATS,
+        timings=timings.finish(),
+        # a copy: the next run resets the process-wide counter, and a report is kept
+        fit_stats=dataclasses.replace(FIT_STATS),
         accept=params.accept,
-        evidence_notes=tuple(limitations),
+        evidence_notes=analysed.limitations,
+        mix_reference_db=analysed.mix_reference_db,
+        mix_plateau_hz=analysed.mix_plateau_hz,
+        judged_band_hz=analysed.judged_band_hz,
     )
 
 
@@ -1245,7 +1748,11 @@ def measure_headroom(
     *,
     sub_samples: np.ndarray | None = None,
 ) -> Headroom:
-    """Measure clipping on a declared sub-feed model; missing information stays unavailable."""
+    """Measure peak clipping after the published cascade on the sub feed.
+
+    Apply the quantised device transfer to the bass-managed waveform and
+    report the non-positive gain offset needed to keep its peak below full scale.
+    """
     sub = (
         sub_samples
         if sub_samples is not None
@@ -1283,56 +1790,116 @@ def required_gain_reduction_db(
 
 
 def judged_band_hz(
-    material: Material, diagnosis: Diagnosis, params: PipelineParams
+    material: Material,
+    diagnosis: Diagnosis,
+    params: PipelineParams,
+    envelopes=None,
 ) -> tuple[float, float]:
-    """The band R1 is measured over, with its bottom taken from the evidence.
+    """Set one verification band from mix evidence for all candidates.
 
-    §6.2 has said since it was written that `verify_band_hz` "should be derived, not defaulted",
-    and the bottom edge is the half that can be: `diagnose` measures where programme-correlated
-    content stops, and below that there is nothing a correction could have got right. Leaving it
-    at 5.0 Hz set `flatten` against itself — the target is deliberately held flat below the noise
-    floor, on evidence, and acceptance then failed the candidate for not having corrected there.
-    Nocturnal Animals is the case: its `flatten` candidate reads +2.84 dB/oct and -3.4 dB over
-    5-45 Hz against limits of 2.0 and -3.0, and +0.97 and -1.9 over its own 19.8-45 Hz, which is
-    the same filter judged where its material exists.
-
-    **The top edge extends to cover the correction, and never contracts.** Replacing it with the
-    mix plateau's lower edge was tried and breaks title 1: its plateau begins at 13.9 Hz, the band
-    becomes 5-20.8 Hz and its accepted filter fails, because a correction acts above where the
-    deficit closes as well as below it. Taking the *wider* of the nominal edge and where the mix's
-    own deficit closes has neither problem — it leaves every title whose correction is contained
-    in 5-45 Hz exactly as it was, and it rescues the one where the nominal band excluded most of
-    where the filter works. Blazing Saddles is that title: content only above 33.7 Hz and a
-    deficit reaching to ~99 Hz, so the nominal band left 0.42 of an octave to read a slope over
-    and its tilt measured -7.32 dB/oct to 45 Hz against -0.02 to 80. Extended, it has 1.6 octaves
-    and a verdict that means something.
-
-    Per-title, from the mix, rather than per-candidate from the cascade — candidates have to be
-    judged over one band or their statistics are not comparable.
+    Start no lower than the mix tracking floor; extend the upper edge to the
+    first settled end of its plateau-relative deficit. A shared band keeps
+    candidate shape measurements comparable. With `judge_from_content_edge` and the
+    envelopes to measure it from, start no lower than the content edge either.
     """
-    low, high = params.verify_band_hz
+    low = params.verify_floor_hz
     floor = diagnosis.noise_floor_hz
     if not math.isnan(floor):
         low = max(low, floor)
-    # The mix's own deficit, exactly as `flatten` measures it, and terminated the same way.
-    # Taking the *highest* frequency still short of the plateau is wrong and was tried: a deficit
-    # measured against a plateau level necessarily returns above the plateau's top, so it put the
-    # band's edge at 340-400 Hz and every title read as uncorrected. `_deficit_anchor` scans
-    # upward from the bottom and stops where the deficit first stays shut, which is the question.
-    freqs, response = mean_spectrum(material.mono_mix, material.fs)
-    level, plateau_hz = plateau_reference(
-        response, freqs, params.diagnose, params.exclude_bands_hz
-    )
-    if not math.isfinite(level):
+    measured = _flat_deficit(material, params)
+    if measured is None:
         raise ValueError("no usable contiguous mix plateau")
-    levelled = response - level
-    deficit = smooth_unexcluded(
-        np.maximum(-levelled, 0.0), freqs, params.exclude_bands_hz, 15
+    top = _judged_top_hz(measured[-1], params, floor)
+    if params.judge_from_content_edge and envelopes is not None:
+        edge = content_edge_hz(material, diagnosis, envelopes, params, (low, top))
+        if edge > low:
+            low = edge
+            top = min(
+                max(top, low * 2.0**params.accept.min_judge_octaves),
+                float(DESIGN_GRID[-1]),
+            )
+    return low, top
+
+
+def contrast_ceiling_db(envelopes, params: PipelineParams) -> np.ndarray:
+    """The boost the title's own loud-quiet contrast licenses, on the design grid.
+
+    Missing or excluded bins license zero. What `priced_by_evidence` clips every target to.
+    """
+    ceiling = np.interp(
+        DESIGN_GRID,
+        envelopes.freqs,
+        envelopes.boost_ceiling(params.confidence_z),
+        left=0.0,
+        right=0.0,
     )
-    on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
-    return low, min(
-        max(high, _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)),
-        float(DESIGN_GRID[-1]),
+    ceiling[~unexcluded(DESIGN_GRID, params.exclude_bands_hz)] = 0.0
+    return ceiling
+
+
+def content_edge_hz(
+    material: Material,
+    diagnosis: Diagnosis,
+    envelopes,
+    params: PipelineParams,
+    band_hz: tuple[float, float],
+) -> float:
+    """Lowest frequency, down from the top of the band, where contrast licenses the deficit.
+
+    Below it the correction is bounded by contrast rather than by what is missing: the
+    programme is drowning in the quiet floor, and a correct correction falls into that floor
+    with it, however steeply. The band's own lower edge when contrast licenses the deficit
+    all the way down to it.
+    """
+    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    if deficit is None:
+        return band_hz[0]
+    held, _ = _held_below_floor(deficit, diagnosis.noise_floor_hz)
+    licensed = contrast_ceiling_db(envelopes, params) >= (
+        held - params.accept.decision_quantum_db
+    )
+    inside = (DESIGN_GRID >= band_hz[0]) & (DESIGN_GRID <= band_hz[1])
+    index = int(np.flatnonzero(inside)[-1])
+    while index >= 0 and inside[index] and licensed[index]:
+        index -= 1
+    if index < 0 or not inside[index]:
+        # licensed all the way down: the band's own edge stands, not the grid bin above it
+        return band_hz[0]
+    return float(DESIGN_GRID[index + 1])
+
+
+def _within_ceiling(
+    verdict: Verdict,
+    correction: Correction,
+    ceiling_db: np.ndarray,
+    params: PipelineParams,
+) -> Verdict:
+    """Below the judged band, a cascade may boost no more than contrast licenses.
+
+    With `judge_from_content_edge` the shape clauses are silent below the content edge, so
+    this is what stops a cascade lifting the quiet floor there. From the bottom of the design
+    range: under it the ceiling reads zero only because nothing was measured.
+    """
+    below = (correction.freqs >= params.lowest_frequency_hz) & (
+        correction.freqs < correction.band_hz[0]
+    )
+    if not below.any():
+        return verdict
+    gain = (correction.after_db - correction.before_db)[below]
+    allowed = np.interp(correction.freqs[below], DESIGN_GRID, ceiling_db)
+    excess = gain - allowed
+    worst = int(np.argmax(excess))
+    if excess[worst] <= params.accept.level_tolerance_db:
+        return verdict
+    return dataclasses.replace(
+        verdict,
+        passed=False,
+        failures=[
+            *verdict.failures,
+            f"boosts {correction.freqs[below][worst]:.1f} Hz by {gain[worst]:.1f} dB "
+            f"where contrast licenses {allowed[worst]:.1f} — lifting the quiet floor, "
+            "not content",
+        ],
     )
 
 
@@ -1348,40 +1915,60 @@ def _judge(
     unpriced_target: np.ndarray | None = None,
     method: DesignMethod | None = None,
     effective_params: str | None = None,
+    judged_band: tuple[float, float] | None = None,
+    ceiling_db: np.ndarray | None = None,
+    timings: Timings | None = None,
 ) -> Candidate:
-    """`target` is the priced target the fitter was handed, or `None` for a candidate with
-    none (a caller-supplied cascade) — passed through to `verify`/`assess` so intent (§14.2) can
-    fall back to the house curve rather than to an all-zero target, which is a different claim.
+    """Publish, verify and assess one proposed cascade.
+
+    Round its parameters, apply the quantised device response to the sub feed,
+    measure headroom, then test the corrected curve against both the priced
+    target and material-based safeguards.
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
-    sub = bass_managed_sum(material, playback=params.playback)
+    timings = timings or Timings()
+    with timings.detail("judge.sub_feed"):
+        sub = bass_managed_sum(material, playback=params.playback)
     if sub is None:
         raise ValueError("playback verification unavailable: no channel decomposition")
-    correction = verify(
-        filters,
-        sub,
-        float(material.fs),
-        band_hz=judged_band_hz(material, diagnosis, params),
-        diagnose_params=params.diagnose,
-        exclude_bands_hz=params.exclude_bands_hz,
-        accept_params=params.accept,
-        realisation=params.realisation,
-        priced_target_db=target,
-        reference_samples=material.mono_mix,
-        playback_model=params.playback.description(),
-    )
-    headroom = measure_headroom(material, filters, params, sub_samples=sub)
-    verdict = assess(
-        filters,
-        correction,
-        diagnosis.noise_floor_hz,
-        params.accept,
-        params.realisation,
-        filter_floor_hz=diagnosis.filter_floor_hz,
-        required_offset_db=headroom.offset_db,
-        target_db=target,
-    )
+    with timings.detail("judge.verify"):
+        correction = verify(
+            filters,
+            sub,
+            float(material.fs),
+            # the same for every candidate, so `run` passes the one `analyse` found
+            band_hz=judged_band or judged_band_hz(material, diagnosis, params),
+            diagnose_params=params.diagnose,
+            exclude_bands_hz=params.exclude_bands_hz,
+            accept_params=params.accept,
+            realisation=params.realisation,
+            priced_target_db=target,
+            reference_samples=material.mono_mix,
+            playback_model=params.playback.description(),
+        )
+    with timings.detail("judge.headroom"):
+        headroom = measure_headroom(material, filters, params, sub_samples=sub)
+    with timings.detail("judge.assess"):
+        verdict = assess(
+            filters,
+            correction,
+            diagnosis.noise_floor_hz,
+            params.accept,
+            params.realisation,
+            filter_floor_hz=diagnosis.filter_floor_hz,
+            required_offset_db=headroom.offset_db,
+            target_db=target,
+            # the band `_fit_all` let this target's sections be placed in: a section is credited
+            # for work the fitter asked of it, not only for work inside the judged band
+            contribution_band_hz=(
+                None
+                if target is None
+                else correction_band_hz(target, DESIGN_GRID, params.lowest_frequency_hz)
+            ),
+        )
+    if ceiling_db is not None:
+        verdict = _within_ceiling(verdict, correction, ceiling_db, params)
     verdict.notes.append(
         f"verification transfer: published quantised device at {params.realisation.fs:g} Hz; "
         f"sub output from {material.fs:g} Hz extraction, relative to unchanged playback baseline; "
@@ -1389,7 +1976,6 @@ def _judge(
     )
     verdict.notes.append(headroom.summary())
     verdict.notes.append(headroom.assumptions())
-    verdict.notes.extend(target_notes)
     logger.info(f"  {label}: {verdict}")
     for note in target_notes:
         logger.info(f"    {note}")

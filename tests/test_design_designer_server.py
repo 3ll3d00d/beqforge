@@ -14,8 +14,10 @@ much longer material; this is neither). Still real: injected via `beqforge.harne
 recipe `beqforge.harness.evidence_cases` uses for its own validated positives.
 """
 
+import base64
 import http.client
 import json
+import logging
 import threading
 
 import numpy as np
@@ -50,6 +52,12 @@ def server():
     finally:
         httpd.shutdown()
         thread.join(timeout=5)
+
+
+DESIGN_TIMEOUT_S = 900.0
+"""For a request that runs a real design. A guard against a hang, not a speed test: a cold
+request here takes 15-40 s on a 16-core desktop, and GitHub's Linux runner is about 4.5x
+slower (this file took 9 minutes there against 2 locally) — 120 s timed out on 2026-09-30."""
 
 
 def _request(address, method: str, path: str, body=None, timeout: float = 30.0):
@@ -140,7 +148,7 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
 def test_health_check(server) -> None:
     status, body = _request(server, "GET", "/health")
     assert status == 200
-    assert body == {"status": "ok"}
+    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": False}
 
 
 def test_unknown_get_path_is_404(server) -> None:
@@ -167,6 +175,19 @@ def test_request_missing_a_required_field_is_400(server) -> None:
     assert "error" in body
 
 
+def test_channel_length_mismatch_is_a_bad_request(server) -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros(8)),
+        "channels": {"L": _ndarray_to_json(np.zeros(5))},
+    }
+    status, response = _request(server, "POST", DESIGN_PATH, body=body)
+    assert status == 400
+    assert "channel 'L' has 5 samples; mono_mix has 8" in response["error"]
+
+
 def test_declines_over_a_real_connection_with_no_channels(server) -> None:
     status, body = _request(server, "POST", DESIGN_PATH, body=_no_evidence_request())
     assert status == 200
@@ -181,7 +202,11 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     replying (`ContractViolation`'s docstring), not just this test's own assertions.
     """
     status, body = _request(
-        server, "POST", DESIGN_PATH, body=_known_filter_request(), timeout=60.0
+        server,
+        "POST",
+        DESIGN_PATH,
+        body=_known_filter_request(),
+        timeout=DESIGN_TIMEOUT_S,
     )
     assert status == 200
     assert body["contract_version"] == "1.0"
@@ -195,3 +220,244 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     assert candidate["mv_adjust_db"] > 0.0  # a boost was actually proposed
 
     validate_response(_response_from_json(body))  # must not raise
+
+
+def _serve(monkeypatch, params: PipelineParams, cache):
+    """A server of its own, with its own settings — `_Handler`'s are class attributes, so
+    these are restored when the test ends and the module's shared server is unaffected."""
+    monkeypatch.setattr(_Handler, "params", params)
+    monkeypatch.setattr(_Handler, "cache", cache)
+    httpd = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, thread
+
+
+def _stop(httpd, thread) -> None:
+    httpd.shutdown()
+    thread.join(timeout=5)
+    httpd.server_close()
+
+
+def _reused(caplog) -> set[str]:
+    return {
+        r.message.split(":")[0].strip()
+        for r in caplog.records
+        if "reused from" in r.message
+    }
+
+
+BOTH = ("flatten", "parametric")
+
+
+def test_a_repeat_request_reuses_every_stage_and_answers_the_same(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    """R2a: `--cache-dir` — the second request for a title skips its analysis."""
+    from beqforge.cache import DirStore
+
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
+    )
+    try:
+        request = _known_filter_request()
+        first = _request(
+            httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+        )
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            second = _request(
+                httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+            )
+    finally:
+        _stop(httpd, thread)
+    assert first == second
+    assert _reused(caplog) == {"analysis", "parametric"}
+    assert list((tmp_path / "analysis").iterdir())
+
+
+def test_another_server_setting_reuses_the_analysis_only(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    from beqforge.accept import AcceptParams
+    from beqforge.cache import DirStore
+
+    request = _known_filter_request()
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
+    )
+    try:
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
+    finally:
+        _stop(httpd, thread)
+    tilted = PipelineParams(
+        strategies=BOTH, accept=AcceptParams(target_tilt_db_per_octave=1.0)
+    )
+    httpd, thread = _serve(monkeypatch, tilted, DirStore(tmp_path))
+    caplog.clear()
+    try:
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            _request(
+                httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S
+            )
+    finally:
+        _stop(httpd, thread)
+    assert _reused(caplog) == {"analysis"}
+    # both configurations' parametric entries kept side by side
+    assert len(list((tmp_path / "parametric").iterdir())) == 2
+
+
+def test_bass_management_alone_reuses_the_analysis(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    from beqforge.cache import DirStore
+
+    request = _known_filter_request()
+    httpd, thread = _serve(
+        monkeypatch, PipelineParams(strategies=("flatten",)), DirStore(tmp_path)
+    )
+    try:
+        _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
+        managed = {
+            **request,
+            "bass_management": {
+                "lpf_fs": 100.0,
+                "lpf_position": "Before",
+                "headroom_type": "WCS",
+                "clip_before": False,
+                "clip_after": False,
+            },
+        }
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="beqforge.cache"):
+            status, _ = _request(
+                httpd.server_address, "POST", DESIGN_PATH, managed, DESIGN_TIMEOUT_S
+            )
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert "analysis" in _reused(caplog)
+
+
+def test_without_a_cache_dir_nothing_is_written(monkeypatch, tmp_path) -> None:
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    try:
+        status, _ = _request(
+            httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
+        )
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert not list(tmp_path.iterdir())
+
+
+def _by_reference(request: dict, root) -> dict:
+    """The same request, its arrays written to float64 WAVs under `root` and sent by path.
+
+    float64 WAV so the file holds the inline values exactly: the two requests must be the
+    same request, not merely close.
+    """
+    from scipy.io import wavfile
+
+    from beqforge.reference import digest
+
+    def decode(encoded):
+        return np.frombuffer(base64.b64decode(encoded["data_base64"]), dtype="<f8")
+
+    (root / "t_1").mkdir(exist_ok=True)
+    mono = decode(request["mono_mix"])
+    wavfile.write(root / "t_1" / "mono.wav", request["fs"], mono)
+    names = list(request["channels"])
+    columns = np.column_stack([decode(request["channels"][n]) for n in names])
+    wavfile.write(root / "t_1" / "multichannel.wav", request["fs"], columns)
+
+    def ref(path, channel, values):
+        return {
+            "dtype": "float64",
+            "shape": [len(values)],
+            "file": {"path": f"t_1/{path}", "channel": channel},
+            "sha256": digest(values),
+        }
+
+    return {
+        **request,
+        "contract_version": "1.2",
+        "mono_mix": ref("mono.wav", 0, mono),
+        "channels": {
+            n: ref("multichannel.wav", i, columns[:, i]) for i, n in enumerate(names)
+        },
+    }
+
+
+def test_health_says_whether_references_are_accepted(monkeypatch, tmp_path) -> None:
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", tmp_path)
+    try:
+        status, body = _request(httpd.server_address, "GET", "/health")
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": True}
+
+
+def test_a_request_by_reference_answers_as_the_same_request_inline(
+    monkeypatch, tmp_path
+) -> None:
+    """R2b over a real socket: same audio by path, same response."""
+    inline = {**_known_filter_request(), "contract_version": "1.2"}
+    by_reference = _by_reference(inline, tmp_path)
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", tmp_path.resolve())
+    try:
+        first = _request(
+            httpd.server_address, "POST", DESIGN_PATH, inline, DESIGN_TIMEOUT_S
+        )
+        second = _request(
+            httpd.server_address, "POST", DESIGN_PATH, by_reference, DESIGN_TIMEOUT_S
+        )
+    finally:
+        _stop(httpd, thread)
+    assert first[0] == second[0] == 200
+    assert first[1] == second[1]
+
+
+def test_a_reference_without_a_shared_root_is_422_naming_the_array(
+    monkeypatch, tmp_path
+) -> None:
+    by_reference = _by_reference(_known_filter_request(duration_s=20.0), tmp_path)
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    try:
+        status, body = _request(httpd.server_address, "POST", DESIGN_PATH, by_reference)
+    finally:
+        _stop(httpd, thread)
+    assert status == 422
+    assert body["array"] == "mono_mix"
+    assert "no shared root" in body["reason"]
+
+
+def test_an_escaping_path_is_422_and_both_forms_is_400(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    by_reference = _by_reference(_known_filter_request(duration_s=20.0), root)
+    escaping = {
+        **by_reference,
+        "channels": {
+            "LFE": {
+                **by_reference["channels"]["LFE"],
+                "file": {"path": "../outside.wav", "channel": 0},
+            }
+        },
+    }
+    both = {
+        **by_reference,
+        "mono_mix": {**by_reference["mono_mix"], "data_base64": "AAAA"},
+    }
+    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    monkeypatch.setattr(_Handler, "shared_root", root.resolve())
+    try:
+        escaped = _request(httpd.server_address, "POST", DESIGN_PATH, escaping)
+        doubled = _request(httpd.server_address, "POST", DESIGN_PATH, both)
+    finally:
+        _stop(httpd, thread)
+    assert escaped[0] == 422 and escaped[1]["array"] == "LFE"
+    assert doubled[0] == 400

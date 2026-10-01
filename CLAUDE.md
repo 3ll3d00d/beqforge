@@ -7,6 +7,10 @@
 * Read `AGENTS.md` above before touching pipeline code — the strategies/evidence-pricing rules,
   "never trust a residual", and "never calibrate against the catalogue" are what most often send
   you down a wrong turn here.
+* Before committing any change under `beqforge/`, follow AGENTS.md's "Regression checking": probe
+  snapshot before and after, real runs only for the titles the probe names, the synthetic
+  protocol for anything that can change a decision, and the outcome written into
+  `TODO.md` and the completed evidence under `plans/`. Don't substitute a full nine-title rerun, and don't skip it.
 * Don't run `uv run python tools/design_beq.py` casually against real material — a run is
   40-80 s a title. Wrap any timed run in `systemd-inhibit` (see AGENTS.md's "Waiting on a long
   run") and use the background-task workflow rather than a foreground `sleep` loop.

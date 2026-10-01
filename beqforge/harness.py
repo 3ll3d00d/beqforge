@@ -284,3 +284,174 @@ def score_evidence_case(case: EvidenceCase, report, params) -> dict:
         float(np.max(actual[noisy])) if noisy.any() else 0.0
     )
     return result
+
+
+CORPUS_SHAPES = (
+    "broadband",
+    "sparse_dialogue",
+    "varying_source",
+    "rumble",
+    "stationary_noise",
+    "natural_droop",
+    "filtered",
+)
+"""The negative corpus's shapes (IMPROVEMENT_PLAN E2). All but `filtered` are negatives by
+provenance: nothing was removed, so the correct answer is to abstain. `natural_droop` is the
+hard one — a source recorded rolled off is observationally a filtered one — so it is
+reported apart from the gate (E6). `filtered` carries an injected high-pass: the positives
+the false-accept rate is traded against (A1)."""
+
+CORPUS_GATED = (
+    "broadband",
+    "sparse_dialogue",
+    "varying_source",
+    "rumble",
+    "stationary_noise",
+)
+"""The negatives the gate is taken over — every shape a correct pipeline can tell apart."""
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusCase:
+    """One corpus title: a mains and an LFE channel, and the truth about them.
+
+    Two channels rather than `EvidenceCase`'s LFE alone, so `counterfactual`'s channel
+    restoration and the per-channel diagnosis see a mix rather than a single signal.
+    """
+
+    name: str
+    shape: str
+    seed: int
+    fs: int
+    content: dict[str, np.ndarray]
+    """What the programme is, per channel, before any injection and without noise."""
+
+    noise: dict[str, np.ndarray]
+    injected: HighPass | None = None
+    """Applied to every channel of the observed signal; None for a negative."""
+
+    @property
+    def negative(self) -> bool:
+        return self.injected is None
+
+    def observed(self) -> dict[str, np.ndarray]:
+        return {
+            name: (
+                samples
+                if self.injected is None
+                else apply_high_pass(samples, self.injected, self.fs)
+            )
+            + self.noise[name]
+            for name, samples in self.content.items()
+        }
+
+    def material(self):
+        from beqforge.material import LFE_GAIN, MAIN_GAIN, Material
+
+        channels = self.observed()
+        mix = sum(
+            (LFE_GAIN if name == "LFE" else MAIN_GAIN) * samples
+            for name, samples in channels.items()
+        )
+        return Material(self.name, self.fs, mix, channels, "complete_programme")
+
+    def evidence_case(self) -> EvidenceCase:
+        """The same truth in the shape `score_evidence_case` reads (mix-weighted)."""
+        from beqforge.material import LFE_GAIN, MAIN_GAIN
+
+        def mixed(parts: dict[str, np.ndarray]) -> np.ndarray:
+            return sum(
+                (LFE_GAIN if name == "LFE" else MAIN_GAIN) * samples
+                for name, samples in parts.items()
+            )
+
+        observed = mixed({n: self.observed()[n] - self.noise[n] for n in self.content})
+        return EvidenceCase(
+            self.name,
+            mixed(self.content),
+            observed,
+            mixed(self.noise),
+            self.fs,
+            self.injected,
+        )
+
+
+def _random_high_pass(rng: np.random.Generator) -> HighPass:
+    """A plausible mastering or recording rolloff: 15-40 Hz, order 2-4, BW or LR."""
+    alignment = (
+        Alignment.LINKWITZ_RILEY if rng.random() < 0.5 else Alignment.BUTTERWORTH
+    )
+    order = (
+        int(rng.choice((2, 4)))
+        if alignment == Alignment.LINKWITZ_RILEY
+        else int(rng.integers(2, 5))
+    )
+    return HighPass(
+        alignment, order, float(np.exp(rng.uniform(np.log(15), np.log(40))))
+    )
+
+
+def corpus_case(shape: str, seed: int, duration_s: float = 240.0) -> CorpusCase:
+    """One reproducible corpus title: its shape, and every parameter drawn from its seed."""
+    if shape not in CORPUS_SHAPES:
+        raise ValueError(f"unknown corpus shape {shape!r}; have {CORPUS_SHAPES}")
+    fs = 1000
+    rng = np.random.default_rng((seed, CORPUS_SHAPES.index(shape)))
+    n = int(duration_s * fs)
+
+    def programme(**overrides) -> np.ndarray:
+        drawn = {
+            "event_rate_hz": float(rng.uniform(0.04, 0.12)),
+            "event_level_spread_db": float(rng.uniform(12.0, 24.0)),
+            "floor_db": float(rng.uniform(-70.0, -50.0)),
+        }
+        profile = SyntheticProfile(duration_s=duration_s, **{**drawn, **overrides})
+        return synthesise(profile, fs, int(rng.integers(1 << 31))) * 0.3
+
+    content: dict[str, np.ndarray]
+    injected = None
+    if shape == "stationary_noise":
+        corner = float(rng.uniform(15.0, 40.0))
+        sos = signal.butter(4, corner, btype="high", fs=fs, output="sos")
+        content = {
+            name: signal.sosfilt(sos, rng.standard_normal(n)) * 0.01
+            for name in ("L", "LFE")
+        }
+    elif shape == "sparse_dialogue":
+        content = {
+            name: programme(
+                event_rate_hz=float(rng.uniform(0.003, 0.01)),
+                floor_db=float(rng.uniform(-30.0, -15.0)),
+                event_level_spread_db=3.0,
+            )
+            for name in ("L", "LFE")
+        }
+    elif shape == "rumble":
+        content = {
+            "L": programme(),
+            "LFE": programme(
+                rumble_db=float(rng.uniform(-40.0, -20.0)),
+                rumble_hz=float(rng.uniform(8.0, 20.0)),
+            ),
+        }
+    elif shape == "varying_source":
+        content = {}
+        for name in ("L", "LFE"):
+            source = programme()
+            low = signal.sosfilt(signal.butter(2, 35, fs=fs, output="sos"), source)
+            # bass emphasis that tracks scene loudness: no single fixed filter removes it
+            level = np.convolve(np.abs(source), np.ones(fs) / fs, mode="same")
+            loud = level > np.percentile(level, 90)
+            content[name] = (
+                source + np.where(loud, float(rng.uniform(2.0, 6.0)), 0.0) * low
+            )
+    else:
+        content = {"L": programme(), "LFE": programme()}
+        if shape == "natural_droop":
+            droop = _random_high_pass(rng)
+            content = {n: apply_high_pass(s, droop, fs) for n, s in content.items()}
+        elif shape == "filtered":
+            injected = _random_high_pass(rng)
+
+    noise = {name: rng.standard_normal(n) * 1e-5 for name in content}
+    return CorpusCase(f"{shape}/{seed}", shape, seed, fs, content, noise, injected)

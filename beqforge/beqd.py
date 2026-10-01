@@ -19,8 +19,8 @@ package = false`, and it would drag PyQt6 behind it — so the schema is reprodu
 What goes in: one signal per contributing channel carrying that channel's own measured curves,
 so the underlying signal is there to look at, and one signal per candidate carrying the mono
 mix with that candidate's cascade attached. The rejected candidates are included on purpose —
-on the fourth title every candidate was rejected, and those five cascades are exactly what a
-person would want to put on screen together.
+when every candidate is rejected, the cascades that were tried are exactly what a person
+would want to put on screen together.
 """
 
 import gzip
@@ -177,7 +177,17 @@ def export(path: Path | str, record: dict[str, Any]) -> Path:
                     "beqforge": {
                         "accepted": bool(verdict["passed"]),
                         "failures": verdict["failures"],
-                        "notes": verdict["notes"] + candidate["target_notes"],
+                        # records written before the run's limitations moved to
+                        # `evidence_notes` repeat them in every candidate; keep one of each
+                        "notes": list(
+                            dict.fromkeys(
+                                (
+                                    *verdict["notes"],
+                                    *candidate["target_notes"],
+                                    *record.get("evidence_notes", ()),
+                                )
+                            )
+                        ),
                         "mv_adjust_db": candidate["mv_adjust_db"],
                     },
                 },

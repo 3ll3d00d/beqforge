@@ -7,6 +7,7 @@ answer and must not move for a change claimed to be output-preserving.
 
 import gzip
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -17,6 +18,12 @@ def load(p):
     with gzip.open(p, "rt", encoding="utf-8") as h:
         d = json.load(h)
     return {k: v for k, v in d.items() if k not in IGNORE_TOP}
+
+
+def _is_nan(value) -> bool:
+    # a record stores NaN for every unmeasured bin, and NaN != NaN — without this, two
+    # identical records differ in thousands of places
+    return isinstance(value, float) and math.isnan(value)
 
 
 def walk(a, b, path=""):
@@ -36,7 +43,7 @@ def walk(a, b, path=""):
             return [f"{path}: length {len(a)} -> {len(b)}"]
         for i, (x, y) in enumerate(zip(a, b)):
             out += walk(x, y, f"{path}[{i}]")
-    elif a != b:
+    elif a != b and not (_is_nan(a) and _is_nan(b)):
         out.append(f"{path}: {a!r} -> {b!r}")
     return out
 
