@@ -117,7 +117,9 @@ class Minidsp:
 
     def load(self, case: dict) -> dict:
         route = self.profile.route(case["route"], case["channel"], case["rate"])
-        exact = np.asarray(case["exact_sos"], dtype=float).reshape(-1, 6)
+        exact = np.asarray(
+            case.get("transport_sos", case["exact_sos"]), dtype=float
+        ).reshape(-1, 6)
         if len(exact) > route.sections:
             raise ValueError("cascade exceeds selected route capacity")
         # Transport is round-trip binary64 decimal; the float32 storage model is
@@ -209,7 +211,9 @@ class CamillaFile:
     def load(self, case: dict) -> dict:
         if case["rate"] != self.rate:
             raise ValueError("CamillaDSP internal rate mismatch")
-        self.sos = np.asarray(case["exact_sos"], dtype=float).reshape(-1, 6)
+        self.sos = np.asarray(
+            case.get("transport_sos", case["exact_sos"]), dtype=float
+        ).reshape(-1, 6)
         if not stable(self.sos):
             raise ValueError("unstable CamillaDSP cascade")
         filters, names = camilla_filters(self.sos)
@@ -373,7 +377,7 @@ class CamillaLive:
     def load(self, case: dict) -> dict:
         if case["rate"] != self.rate:
             raise ValueError("CamillaDSP rate mismatch")
-        sos = np.asarray(case["exact_sos"]).reshape(-1, 6)
+        sos = np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6)
         if not stable(sos):
             raise ValueError("unstable cascade")
         config = copy.deepcopy(self.template)

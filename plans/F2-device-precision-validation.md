@@ -604,3 +604,27 @@ sensitive pilot cascades at 96 kHz. Recovered valid-bin error against independen
 predictions was below 1e-6 dB (observed approximately 9.15e-9 dB). This validates this binary's
 file-processing control only; its live path, other builds and the miniDSP remain unmeasured.
 The helper was downloaded into scratch space, not vendored or installed globally. Ruff passes.
+
+### 5. Frozen catalogue import and offline reports
+
+Added an explicit local ezbeq `database.json` importer, using the schema and feedback convention
+in the sibling ezbeq implementation. Snapshot bytes/revision/attribution/completeness are
+identified; content-derived IDs are labelled when no published ID/digest exists. Published
+parameters/order/counts, volume adjustment and supplied rate-specific coefficients are retained.
+Exactly identical ordered cascades can share a case while every source version remains in the
+inventory. Capacity, malformed/missing Q, instability and presently unsupported channel-specific
+schemas remain explicit unsupported outcomes. There is no fetch/refit/truncation or guessed
+channel applicability. Multi-channel schema support remains a follow-up rather than a claim.
+
+Offline analysis preserves individual native-bin signed exact, sent and candidate-stored errors,
+phase limitations, uncertainty/masks, excursions, worst frequency and log-weighted RMS without
+bridging invalid gaps. Bracketing identities normalise the bench without fitting away gain.
+Qualification arrays are hashed, carried with the run and applied to its valid masks; engine/build
+changes invalidate qualification. Reports include published filter tables, JSON and discrepancy
+plots. Catalogue aggregation separates entry and unique-cascade weighting, and comparison retains
+all reloads/levels and unmatched-case counts rather than treating repeats as new devices.
+
+Validation: twenty-five F2 tests passed, including full numerical run → offline report → ZIP,
+source coefficients/signs, capacities, dedup/order, masked gaps and catalogue/reload weighting.
+Ruff passed. Uncertainty is currently identity-repeatability plus bounded inversion bias; broader
+qualification and population/error-model claims remain open. Nothing under `beqforge/` changed.

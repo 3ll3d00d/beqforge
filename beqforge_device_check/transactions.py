@@ -14,7 +14,9 @@ from beqforge_device_check.coefficients import rounded, stable
 from beqforge_device_check.evidence import (
     append,
     atomic_arrays,
+    atomic_bytes,
     atomic_json,
+    file_hash,
     register,
     run_lock,
 )
@@ -59,7 +61,10 @@ class Simulation:
     def load(self, case: dict) -> dict:
         if case["rate"] != self.rate:
             raise ValueError("simulation internal rate mismatch")
-        self.sos = rounded(np.asarray(case["exact_sos"]).reshape(-1, 6), self.model)
+        self.sos = rounded(
+            np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6),
+            self.model,
+        )
         if not stable(self.sos):
             raise ValueError("unstable simulation coefficients")
         return {
@@ -262,6 +267,12 @@ def qualify(
                 "results": results,
                 "scope": "identity repeatability only; convergence/direct-loopback/bypass still required",
                 "qualified": False,
+                "reference_files": {
+                    f"qualification-{level:g}.npz": file_hash(
+                        directory / "analysis" / f"qualification-{level:g}.npz"
+                    )
+                    for level in manifest["levels_dbfs"]
+                },
             }
             qualification["hash"] = digest(qualification)
             atomic_json(directory / "qualification.json", qualification)
@@ -305,6 +316,8 @@ def run(
             "live bench is not qualified: complete loopback/bypass/convergence checks"
         )
     settings = SweepSettings(**qualification["settings"])
+    if qualification["engine"] != engine.identify():
+        raise ValueError("qualification engine/build identity differs")
     if getattr(engine, "live", True) and not config.get(
         "electrical_bench_acknowledged"
     ):
@@ -342,6 +355,13 @@ def run(
         atomic_json(directory / "bench.json", config)
         atomic_json(directory / "manifest.json", manifest)
         atomic_json(directory / "qualification.json", qualification)
+        for name, expected_hash in qualification["reference_files"].items():
+            if Path(name).name != name:
+                raise ValueError("invalid qualification reference path")
+            path = qualification_dir / "analysis" / name
+            if file_hash(path) != expected_hash:
+                raise ValueError("qualification reference evidence changed")
+            atomic_bytes(directory / "analysis" / name, path.read_bytes())
         cases = {case["id"]: case for case in manifest["cases"]}
         try:
             for level in manifest["levels_dbfs"]:

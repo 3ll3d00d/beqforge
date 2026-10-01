@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from beqforge_device_check.analyse import analyse
 from beqforge_device_check.evidence import bundle, run_lock
 from beqforge_device_check.manifest import digest, generate
 from beqforge_device_check.measurement import SweepSettings
@@ -41,6 +42,10 @@ def test_transaction_restore_resume_and_offline_bundle(tmp_path, bench):
     assert summary["complete"] and summary["restored"]
     assert engine.snapshot() == state
     assert len(summary["completed"]) == 6
+    report = analyse(directory, directory)
+    assert len(report["results"]) == 6
+    assert max(item["exact"]["worst_db"] for item in report["results"]) < 0.002
+    assert (directory / "report.html").exists()
     resumed = run(
         config,
         manifest,

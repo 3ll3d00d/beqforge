@@ -133,13 +133,13 @@ def register(directory: Path) -> None:
         "report.html",
     ]
     files = [directory / name for name in names if (directory / name).is_file()]
-    for subdir in ("captures", "stimuli", "analysis", "transport"):
+    for subdir in ("captures", "stimuli", "analysis", "transport", "charts"):
         root = directory / subdir
         if root.is_dir():
             files.extend(
                 path
                 for path in root.iterdir()
-                if path.is_file() and path.suffix in (".npz", ".json", ".txt")
+                if path.is_file() and path.suffix in (".npz", ".json", ".txt", ".png")
             )
     atomic_json(
         directory / "files.json",
