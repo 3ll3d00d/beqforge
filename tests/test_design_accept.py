@@ -306,33 +306,20 @@ def test_a_correction_that_genuinely_stops_is_still_caught() -> None:
     assert 12.0 < corrected_extent_hz(stopping, AcceptParams()) < 16.0
 
 
-def test_a_correction_below_the_level_independence_floor_is_noted_not_failed() -> None:
-    """R2 is a confidence claim, not a bound.
-
-    Title 2's accepted design boosts through the region where the LFE's attenuation stops
-    being level-independent, and is right to — the content there is real, just reproduced
-    14 dB down. What was missing was anything in the output saying which part of a
-    correction rests on a measured filter and which part is shaping.
+def test_the_level_independence_floor_changes_no_verdict_and_writes_no_note() -> None:
+    """R2 is a diagnostic about filter identification, kept for the record — not a bound, and
+    not something to tell a reviewer. Whether to boost is a question of content (tracking and
+    contrast), not of whether a filter can be shown to have removed it.
     """
     flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
     shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
 
     silent = assess(shelf, flat, float("nan"))
-    noted = assess(shelf, flat, float("nan"), filter_floor_hz=19.5)
+    floored = assess(shelf, flat, float("nan"), filter_floor_hz=19.5)
 
-    assert not any("shaping" in n for n in silent.notes)
-    assert any("shaping" in n for n in noted.notes)
-    assert noted.passed == silent.passed, "R2 must not change the verdict"
-
-
-def test_a_correction_entirely_above_the_floor_is_not_noted() -> None:
-    """The note has to mean something, so it only fires where the boost actually is."""
-    flat = correction(lambda f: -12.0 + 6.0 * np.log2(f / 5.0), lambda f: 0.0)
-    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
-    assert not any(
-        "shaping" in n
-        for n in assess(shelf, flat, float("nan"), filter_floor_hz=3.5).notes
-    )
+    assert floored.passed == silent.passed
+    assert floored.notes == silent.notes
+    assert 0.0 < floored.shaping_fraction <= 1.0
 
 
 def test_flatness_does_not_re_charge_a_correction_for_its_tilt() -> None:
@@ -535,6 +522,39 @@ def test_a_section_must_earn_its_slot_inside_the_judged_band() -> None:
     assert "341" in earned[0] and "5-45 Hz" in earned[0], earned[0]
 
 
+def test_a_section_is_credited_across_the_band_it_was_placed_in() -> None:
+    """IMPROVEMENT_PLAN F3: the fitter and the judge must agree on where a section works.
+
+    `flatten` holds its boost flat below the tracking floor, so its target asks for shape
+    there and the fitter spends a section on it. Judged only over the judged band, which
+    starts at that floor, the section read as doing nothing — Black Bag's `flatten` candidate
+    was declined for a -2.2 dB peaking section at 13.9 Hz judged over 25-50 Hz. Credited over
+    the placement band the pipeline passes, it counts; a midrange section still does not.
+    """
+    judged = correction(lambda f: -13.0, lambda f: -1.5, band=(20.0, 45.0))
+    shaping_below = [
+        BiquadSpec("low_shelf", 30.0, 11.5, 0.73),
+        BiquadSpec("peaking_eq", 10.0, -2.2, 3.3),
+    ]
+    alone = assess(shaping_below, judged, noise_floor_hz=float("nan"))
+    assert any("peaking_eq at 10.0 Hz" in f for f in alone.failures), alone.failures
+
+    placed = assess(
+        shaping_below,
+        judged,
+        noise_floor_hz=float("nan"),
+        contribution_band_hz=(5.0, 120.0),
+    )
+    assert not any("earned its slot" in f for f in placed.failures), placed.failures
+
+    parked = shaping_below + [BiquadSpec("peaking_eq", 341.0, -1.7, 6.0)]
+    verdict = assess(
+        parked, judged, noise_floor_hz=float("nan"), contribution_band_hz=(5.0, 120.0)
+    )
+    earned = [f for f in verdict.failures if "earned its slot" in f]
+    assert len(earned) == 1 and "341" in earned[0], earned
+
+
 def test_boosting_below_the_noise_floor_is_caught() -> None:
     """The one clause that looks below where the judged band starts.
 
@@ -603,3 +623,23 @@ def test_device_stability_is_required_even_when_the_corrected_shape_passes(
         assert all("not stable" in failure for failure in verdict.failures)
     else:
         assert verdict.passed, verdict.failures
+
+
+def test_the_shaping_fraction_is_a_share_even_when_the_floor_gain_is_negative() -> None:
+    """A cascade dipping below 0 dB at the floor read 1.019 on Obsession — no share exceeds one."""
+    from beqforge import DESIGN_GRID
+    from beqforge.accept import shaping_fraction
+
+    full = np.where(DESIGN_GRID < 20.0, 28.0, -0.5)
+    assert shaping_fraction(full, DESIGN_GRID, 24.0) == pytest.approx(1.0)
+
+
+def test_a_tracking_floor_below_the_band_cannot_fail_the_extent() -> None:
+    """The extent is measured inside the judged band, so content "continuing" to a tracking
+    floor below the band's lower edge could never be reached — every candidate failed."""
+    good = correction(lambda f: -12.0, lambda f: 0.0, band=(5.0, 45.0))
+    shelf = [BiquadSpec("low_shelf", 20.0, 12.0, 0.7)]
+    below_band = assess(shelf, good, noise_floor_hz=4.05)
+    assert not any("corrected only down to" in f for f in below_band.failures), (
+        below_band.failures
+    )

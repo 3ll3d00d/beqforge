@@ -1,5 +1,7 @@
 """Exact publication precision, distinct from hypothetical drift samples."""
 
+import math
+
 from dataclasses import asdict
 import gzip
 import json
@@ -94,7 +96,7 @@ def test_export_round_trip_checks_declared_device(tmp_path, device):
 
 def test_fitter_fallback_keeps_failed_candidate_for_diagnosis():
     state = _Escalation(FitRequest(np.zeros_like(DESIGN_GRID)))
-    state.screened = [([FRAGILE], 0.1, False)]
+    state.screened = [([FRAGILE], 0.1, False, math.inf)]
     state.finish()
     assert state.answer == ([FRAGILE], 0.1)
     assert unstable_sections(state.answer[0], Realisation())

@@ -208,6 +208,35 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
         assert np.array_equal(alone, pooled), f"cap {cap}"
 
 
+def test_counterfactual_re_sums_under_the_playback_model(walled) -> None:
+    """IMPROVEMENT_PLAN T1: the restored mix is weighted the way the sub feed is judged.
+
+    It used to re-sum with the module constants whatever `--lfe-gain-db`/`--main-gain-db`
+    said, while verification and headroom used the playback model. A common gain cancels (the
+    deficit is plateau-relative), so only the LFE-to-mains ratio may move the target.
+    """
+    import dataclasses
+
+    from beqforge.diagnose import diagnose
+    from beqforge.pipeline import counterfactual_target
+
+    diagnosis = diagnose(walled)
+    if not diagnosis.filtered_channels:
+        pytest.skip("no channel is filtered, so there is nothing to restore")
+    params = PipelineParams()
+
+    def under(**gains) -> np.ndarray:
+        playback = dataclasses.replace(params.playback, **gains)
+        return counterfactual_target(
+            walled, diagnosis, 25.0, dataclasses.replace(params, playback=playback)
+        )
+
+    base = counterfactual_target(walled, diagnosis, 25.0, params)
+    assert np.array_equal(under(main_gain_db=-26.2, lfe_gain_db=-16.2), base)
+    louder_lfe = under(lfe_gain_db=-4.2)
+    assert np.max(np.abs(louder_lfe - base)) > 0.1
+
+
 def test_parametric_fits_from_the_same_seeds_as_every_other_candidate() -> None:
     """`design` inherited `fit_minimal_biquads`' own default and so fitted from three seeds.
 
@@ -303,15 +332,16 @@ def test_the_judged_band_starts_at_the_measured_noise_floor() -> None:
 
     # NaN means content was found all the way down, so the bottom does not move
     unfloored = replace(bare, noise_floor_hz=math.nan)
-    assert judged_band_hz(material, unfloored, params)[0] == params.verify_band_hz[0]
+    assert judged_band_hz(material, unfloored, params)[0] == params.verify_floor_hz
 
     # and a floor below the nominal bottom cannot widen the band past what was measured
     shallow = replace(bare, noise_floor_hz=2.0)
-    assert judged_band_hz(material, shallow, params)[0] == params.verify_band_hz[0]
+    assert judged_band_hz(material, shallow, params)[0] == params.verify_floor_hz
 
-    # the top edge never contracts below the nominal one
+    # the band is always at least min_judge_octaves wide, whatever the anchor
     for d in (floored, unfloored, shallow):
-        assert judged_band_hz(material, d, params)[1] >= params.verify_band_hz[1]
+        low, high = judged_band_hz(material, d, params)
+        assert high >= low * 2.0**params.accept.min_judge_octaves - 1e-9
 
 
 def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
@@ -332,11 +362,194 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
     live = np.flatnonzero(target > 1e-9)
     assert live.size, "the fixture's LFE is high-passed; there should be a deficit"
     # the old rule put the last live point exactly at the share band's top edge
-    assert DESIGN_GRID[live[-1]] != pytest.approx(
-        35.0, rel=0.02
-    )
+    assert DESIGN_GRID[live[-1]] != pytest.approx(35.0, rel=0.02)
     # tapered rather than cut: no single-point step at the top of the correction
     steps = np.abs(np.diff(target[: live[-1] + 1]))
     assert steps.max() < 1.0, (
         f"a step of {steps.max():.2f} dB is a cliff the fitter must chase"
     )
+
+
+def test_proposals_carry_their_own_notes_and_not_the_runs(walled) -> None:
+    """IMPROVEMENT_PLAN C2: a run's limitations are reported once, on the report.
+
+    Every proposal used to carry all of them too, so a candidate's printed notes, its `.beq`
+    export and the ledger each repeated the run's limitations once per candidate.
+    """
+    from beqforge.pipeline import analyse, propose
+
+    params = PipelineParams(strategies=("flatten",))
+    analysed = analyse(walled, params)
+    assert analysed.limitations, "the run should report its limitations somewhere"
+    for proposal in propose(walled, analysed):
+        assert not set(proposal.notes) & set(analysed.limitations), proposal.label
+
+
+def test_a_reference_above_the_sub_band_is_no_reference(walled) -> None:
+    """A mix whose only flat region starts above the sub-feed low-pass has no bass passband.
+
+    Dossier 137: the centre carries 74% of a plateau at 143-200 Hz and the LFE is 98% digital
+    silence. Measured against that plateau the whole sub band reads as a deficit, and the run
+    declined only because the judged band collapsed to 0.12 octaves — the right answer for a
+    wrong reason. The reason is that the band a BEQ acts on has nothing to restore towards.
+
+    What the sub band holds there is low-level material unrelated to the programme, so the
+    fixture carries some: a noiseless stopband tracks the programme perfectly, which is
+    leakage the tracking test cannot tell from content, and not what Dossier looks like.
+    """
+    from scipy import signal
+
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    unrelated = signal.sosfilt(
+        signal.butter(8, 80.0, btype="low", fs=FS, output="sos"),
+        scened_noise(31, samples),
+    )
+    dialogue_led = material_from(
+        {"C": high_passed(scened_noise(23, samples), 120.0, order=8) + 0.3 * unrelated}
+    )
+    params = PipelineParams(strategies=("flatten",))
+    analysed = analyse(dialogue_led, params)
+    assert analysed.mix_plateau_hz[0] >= 80.0, analysed.mix_plateau_hz
+    assert analysed.diagnosis.noise_floor_hz >= 80.0, analysed.diagnosis.noise_floor_hz
+    assert any("in the band the sub plays" in b for b in analysed.blockers)
+
+    assert not any(
+        "in the band the sub plays" in b for b in analyse(walled, params).blockers
+    )
+
+
+def test_a_reference_above_the_sub_band_still_restores_content_that_tracks() -> None:
+    """A filter can slope a bass passband away until the only flat region is above the sub.
+
+    Black Bag with LR4 @ 30 injected: its 50-83 Hz plateau became a slope, the only flat
+    region left started above 80 Hz, and the sub-band blocker declined — although the mix
+    still tracks the programme down to 9 Hz. That low end is content to restore.
+    """
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    sloped = material_from(
+        {"C": high_passed(scened_noise(23, samples), 120.0, order=2)}
+    )
+    analysed = analyse(sloped, PipelineParams(strategies=("flatten",)))
+    assert analysed.mix_plateau_hz[0] >= 80.0, analysed.mix_plateau_hz
+    # NaN: every band tracked, which must count as content, not as nothing tracking
+    assert not analysed.diagnosis.noise_floor_hz >= 80.0
+    assert not any("in the band the sub plays" in b for b in analysed.blockers)
+
+
+@pytest.fixture(scope="module")
+def steep_into_noise():
+    """A 12th-order high-pass at 30 Hz, then a stationary floor 60 dB down — the shape of the
+    noise-floored steep injections (IMPROVEMENT_PLAN, steep filters)."""
+    samples = int(FS * 300.0)
+    programme = high_passed(scened_noise(23, samples), 30.0, order=12)
+    floor = 1e-3 * np.std(programme) * np.random.default_rng(5).standard_normal(
+        programme.size
+    )
+    return material_from({"L": programme + floor})
+
+
+def test_the_content_edge_is_opt_in(steep_into_noise) -> None:
+    """Off by default: the judged band is the tracking floor's, exactly as before.
+
+    On, it starts where contrast stops licensing the deficit — above the tracking floor on
+    a steep filter falling into a noise floor, and still below the filter's corner.
+    """
+    from beqforge.pipeline import analyse
+
+    default = analyse(steep_into_noise, PipelineParams(strategies=("flatten",)))
+    floor = default.diagnosis.noise_floor_hz
+    assert default.judged_band_hz[0] == pytest.approx(max(floor, 5.0))
+
+    opted = analyse(
+        steep_into_noise,
+        PipelineParams(strategies=("flatten",), judge_from_content_edge=True),
+    )
+    low, high = opted.judged_band_hz
+    assert floor < low < 30.0, (floor, low)
+    assert high >= low * 2.0 ** PipelineParams().accept.min_judge_octaves - 1e-9
+
+
+def test_the_content_edge_leaves_a_fully_licensed_band_alone(walled) -> None:
+    """Where contrast licenses the deficit all the way down, the band's own edge stands —
+    not the grid bin above it, which moved every real title's band by one bin."""
+    from beqforge.pipeline import analyse
+
+    default = analyse(walled, PipelineParams(strategies=("flatten",)))
+    opted = analyse(
+        walled, PipelineParams(strategies=("flatten",), judge_from_content_edge=True)
+    )
+    assert opted.judged_band_hz == default.judged_band_hz
+
+
+def test_below_the_judged_band_a_cascade_may_not_outboost_contrast() -> None:
+    """The guard that stands in for the shape clauses below the content edge.
+
+    Judged from the bottom of the design range: under it the ceiling reads zero only because
+    nothing was measured, and judging there rejected sound candidates on "boosts 0.2 Hz".
+    """
+    from types import SimpleNamespace
+
+    from beqforge.accept import Verdict
+    from beqforge.pipeline import _within_ceiling
+
+    params = PipelineParams()
+    freqs = np.geomspace(0.2, 100.0, 400)
+    before = np.zeros_like(freqs)
+    ceiling = np.where(DESIGN_GRID < 20.0, 2.0, 40.0)
+    passing = Verdict(True, [], [], 0.0, 0.0, 5.0, 0.0)
+
+    def judged(boost_below_edge: float):
+        after = np.where(freqs < 20.0, boost_below_edge, 10.0)
+        correction = SimpleNamespace(
+            freqs=freqs, before_db=before, after_db=after, band_hz=(20.0, 40.0)
+        )
+        return _within_ceiling(passing, correction, ceiling, params)
+
+    assert judged(2.0 + params.accept.level_tolerance_db - 0.1).passed
+    lifted = judged(12.0)
+    assert not lifted.passed
+    assert "lifting the quiet floor" in lifted.failures[-1]
+    assert float(lifted.failures[-1].split(" Hz")[0].split()[-1]) >= 5.0
+
+
+def test_the_goal_tilt_shapes_what_every_target_is_measured_against(walled) -> None:
+    """The preference dial generates: a rise asks for more below the knee, a rolloff less.
+
+    It used to be acceptance-only — asking for a rise discarded flat candidates rather than
+    producing rising ones.
+    """
+    import dataclasses
+
+    from beqforge.pipeline import _flat_deficit, _judged_top_hz, low_end_deficit_db
+
+    def asked(tilt: float) -> np.ndarray:
+        accept = dataclasses.replace(
+            PipelineParams().accept, target_tilt_db_per_octave=tilt
+        )
+        return low_end_deficit_db(walled, PipelineParams(accept=accept))
+
+    flat, rise, rolloff = asked(0.0), asked(2.0), asked(-2.0)
+    pivot = _judged_top_hz(
+        _flat_deficit(walled, PipelineParams())[-1], PipelineParams()
+    )
+    well_below = DESIGN_GRID < pivot / 4  # two octaves under the pivot: +/-4 dB of goal
+    assert np.all(rise[well_below] >= flat[well_below] + 3.0)
+    assert np.all(rolloff[well_below] <= flat[well_below])
+    assert np.array_equal(asked(0.0), flat)
+
+
+def test_a_low_end_within_the_goal_tolerance_is_left_alone(walled) -> None:
+    """The tolerance dial replaced an unstated 1 dB minimum, and says why it abstained."""
+    import dataclasses
+
+    from beqforge.designer import _decline_for_blockers
+
+    lenient = dataclasses.replace(PipelineParams().accept, goal_tolerance_db=100.0)
+    report = run(walled, PipelineParams(strategies=("flatten",), accept=lenient))
+    assert report.accepted is None and not report.candidates
+    assert report.blockers and "nothing worth correcting" in report.blockers[0]
+    assert _decline_for_blockers(report.blockers)[0] == "within_goal_tolerance"

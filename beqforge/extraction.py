@@ -21,6 +21,7 @@ correct answer, so the criterion is part of the abstain logic rather than a step
 """
 
 import logging
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -66,10 +67,11 @@ class ExtractionParams:
     scene_margin_db: float = 45.0
     """How far above the floor a frame must sit to count as content. Absolute, per §3.2.
 
-    Large, because sub-bass in a film has enormous dynamic range — 61 dB from p10 to p99 on the
-    first real title — and the genuine bass events are the top 1-3% of frames. At +12 dB, 62%
-    of frames qualified and the feature being looked for was diluted out of existence: a knee
-    at 20 Hz measured +10.9 dB above 40 Hz over the top 1% of frames and -2.5 dB over that 62%.
+    Large, because sub-bass in a film has enormous dynamic range — around 60 dB between the 10th
+    and 99th percentile of frame energy — and the genuine bass events are only the top 1-3% of
+    frames. With a small margin most frames qualify and the feature being looked for is diluted
+    out of existence: a knee that stands clearly above the passband over the loudest 1% of
+    frames can read as no knee at all over a majority of them.
 
     The dilution is worst on exactly the material §2.3 says matters most. §3.2 warns that
     *relative* selection manufactures false positives on a bass-light title; an absolute margin
@@ -102,19 +104,18 @@ class ExtractionParams:
     inside it" — §2.1's move stated outright, since it makes a title whose knee is higher
     unrepresentable rather than unusual. Above the band `margin_se_db` is `inf`, which by its own
     documented convention means *no restriction*, so the one mechanism that prices boost against
-    evidence was silent exactly where the titles that abstain ask for it: measured, three ask for
-    boost above 60 Hz, by 6.7, 3.9 and 1.5 dB.
+    evidence was silent exactly where the titles that abstain ask for it: in practice some titles ask
+    for several dB of boost above 60 Hz.
 
     Deriving the edge was tried before removing it, from the mix's own plateau, on the argument
     that above where the programme reaches level no strategy asks for boost. **That argument is
-    false and Alien says so**: its plateau begins at 49.7 Hz and `flatten` asks for up to 14.6 dB
-    above 40 Hz, out to 132 Hz. A derived edge resting on a premise the material contradicts is
+    false**: a mix whose plateau begins near 50 Hz has `flatten` asking for more than ten dB
+    above 40 Hz, out past 100 Hz. A derived edge resting on a premise the material contradicts is
     no better than the constant it replaced.
 
     So every bin is priced, and the question of where to stop does not arise. It is affordable
-    because the stage is not where the time is: pricing all 477 bins of the largest title on hand
-    costs 2.7 s against 0.6 s for the 57 the old band covered, inside a 60 s run whose fitter is
-    82% of it. `_block_bootstrap_se` chunks the one large allocation rather than sizing it by the
+    because the stage is not where the time is: pricing every bin costs a few seconds against
+    under one for the old band, inside a run whose fitter is most of the time. `_block_bootstrap_se` chunks the one large allocation rather than sizing it by the
     bin count, which keeps the memory flat as the bin count grows. This cap remains only so a
     profiling run can pin the cost; nothing in the pipeline sets it."""
 
@@ -223,9 +224,8 @@ class Envelopes:
     What identification fits, and what a human actually reads. §3.3 originally called for a
     high percentile and argued a mean is "dominated by quiet passages"; measured on real
     material that is backwards. The percentile of heavy scenes is dominated by the *loudest*
-    events, which are LFE-driven and carry whatever the author sculpted into them — on the
-    first title a narrow +14 dB feature at 20 Hz — and that drags the corner estimate up with
-    it. Averaging the whole runtime averages such features away.
+    events, which are LFE-driven and carry whatever the author sculpted into them — a narrow
+    feature in the LFE, say — and that drags the corner estimate up with it. Averaging the whole runtime averages such features away.
     """
 
     peak_db: np.ndarray
@@ -262,7 +262,10 @@ class Envelopes:
         return states
 
     def boost_ceiling(self, z: float) -> np.ndarray:
-        """Temporal-contrast allowance; absent evidence never supplies permission."""
+        """Allow peak–quiet contrast minus `z` bootstrap errors per supported bin.
+
+        A bin with no positive, finite evidence contributes zero to every target.
+        """
         supported = self.evidence_states(z) == "support"
         ceiling = np.zeros_like(self.freqs)
         ceiling[supported] = (
@@ -316,7 +319,12 @@ class Envelopes:
 def extract(
     samples: np.ndarray, fs: float, params: ExtractionParams | None = None
 ) -> Envelopes:
-    """Reduce a signal to the envelopes of §3.3 and the coherence weighting of §3.4."""
+    """Measure spectral shape and per-bin evidence for a correction.
+
+    Classify frames by energy relative to a low-percentile scene floor, then measure
+    peak and quiet spectra. Their contrast and block-bootstrap error set the boost
+    ceiling; partial level coherence checks whether bins track programme events.
+    """
     params = params or ExtractionParams()
     freqs, power = _spectrogram(samples, fs, params)
     in_scene_band = (freqs >= params.scene_band_hz[0]) & (
@@ -325,10 +333,20 @@ def extract(
     keep = unexcluded(freqs, params.exclude_bands_hz)
     in_scene_band &= keep
     band_energy_db = 10.0 * np.log10(power[in_scene_band].sum(axis=0) + 1e-300)
-
-    floor_db = float(np.percentile(band_energy_db, params.floor_percentile))
-    loud = band_energy_db >= floor_db + params.scene_margin_db
-    quiet = band_energy_db <= floor_db + params.quiet_margin_db
+    # Digital silence is the absence of programme, not a quiet scene. Classed as quiet, an
+    # all-zero frame sits at the 1e-300 floor (-3000 dB): with more than `floor_percentile`
+    # of them the floor lands there, every audible frame reads as loud, and the contrast runs
+    # to ~2,900 dB — seen on four of nine real titles' LFE and surround channels, where it
+    # left a channel's restoration bounded only by the cap (IMPROVEMENT_PLAN E8).
+    silent = ~(power.sum(axis=0) > 0)
+    audible = band_energy_db[~silent]
+    floor_db = (
+        float(np.percentile(audible, params.floor_percentile))
+        if audible.size
+        else math.inf
+    )
+    loud = (band_energy_db >= floor_db + params.scene_margin_db) & ~silent
+    quiet = (band_energy_db <= floor_db + params.quiet_margin_db) & ~silent
     logger.debug(
         f"floor {floor_db:.1f} dB, {loud.sum()} loud and {quiet.sum()} quiet "
         f"of {len(band_energy_db)} frames"
@@ -395,6 +413,7 @@ def extract(
 def _spectrogram(
     samples: np.ndarray, fs: float, params: ExtractionParams
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-frame STFT power used for scene and spectral measurements."""
     freqs, _, spectra = signal.stft(
         samples,
         fs=fs,
@@ -408,6 +427,7 @@ def _spectrogram(
 def _envelope_db(
     power: np.ndarray, frames: np.ndarray, percentile: float
 ) -> np.ndarray:
+    """Estimate each bin's selected-frame power percentile in dB."""
     if not frames.any():
         return np.full(power.shape[0], -np.inf)
     return 10.0 * np.log10(np.percentile(power[:, frames], percentile, axis=1) + 1e-300)
@@ -416,18 +436,11 @@ def _envelope_db(
 def _coherence(
     freqs: np.ndarray, power: np.ndarray, reference_band_hz: tuple[float, float]
 ) -> np.ndarray:
-    """Per-bin partial correlation of level against the reference band, holding the overall
-    programme level fixed.
+    """Measure each bin's level tracking beyond overall programme loudness.
 
-    The partial is what makes this a measurement rather than a tautology. Raw correlation
-    scores 0.5-0.9 at *every* frequency on real material, because every bin rises and falls
-    with the programme — it measures loud scenes against quiet ones, not whether a bin carries
-    event-related content. Regressing out the total level leaves only what co-varies with the
-    reference band beyond that common mode.
-
-    Correlated in dB rather than in power so that a single loud event cannot dominate the
-    statistic — the question is whether a bin rises and falls *with* the content, not whether
-    it happens to share one big transient.
+    Regress log power in the bin and reference band against total log power, then
+    correlate their residuals. This avoids treating every loud scene as evidence
+    that every frequency carries related content.
     """
     bins_db = 10.0 * np.log10(power + 1e-300)
     total_db = 10.0 * np.log10(power.sum(axis=0) + 1e-300)

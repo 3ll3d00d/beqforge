@@ -196,3 +196,21 @@ def test_legacy_record_requires_force_and_never_acquires_new_claims(
     assert "evidence_notes" not in drawn[0]
     assert "method" not in drawn[0]["candidates"][0]
     assert "effective_params" not in drawn[0]["candidates"][0]
+
+
+def test_revision_in_a_frozen_build_is_the_baked_stamp(tmp_path, monkeypatch):
+    """A frozen executable has no checkout and no sources; `beqforge.spec` bakes the revision."""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    baked = tmp_path / record.BUILD_REVISION_FILE
+    monkeypatch.setattr(record, "_baked_revision_path", lambda: baked)
+    assert record.revision() == "unknown (frozen build without BUILD_REVISION)"
+    baked.write_text("v1.2-3-gabc+src:def\n", encoding="utf-8")
+    assert record.revision() == "v1.2-3-gabc+src:def (frozen build)"
+
+
+def test_revision_never_raises_when_sources_are_unreadable(monkeypatch):
+    def unreadable():
+        raise FileNotFoundError("tools/design_beq.py")
+
+    monkeypatch.setattr(record, "_git_revision", unreadable)
+    assert record.revision() == "unknown (sources unreadable)"

@@ -250,3 +250,48 @@ def test_only_the_strategy_that_fits_declares_a_cache() -> None:
     assert STRATEGIES["parametric"].cache_modules == C.PARAMETRIC_MODULES
     assert STRATEGIES["flatten"].cache_modules is None
     assert STRATEGIES["counterfactual"].cache_modules is None
+
+
+def test_the_key_is_the_samples_not_the_name() -> None:
+    """R2a: a renamed or moved file, or a designer request, hits the same entry."""
+    base = material()
+    renamed = Material(
+        "another-name", base.fs, base.mono_mix, base.channels, base.coverage
+    )
+    assert C.material_fingerprint(renamed) == C.material_fingerprint(base)
+
+
+@pytest.mark.parametrize("change", ["fs", "coverage", "label", "sample"])
+def test_what_the_samples_are_still_moves_the_key(change) -> None:
+    base = material()
+    mix, channels = base.mono_mix.copy(), dict(base.channels)
+    fs, coverage = base.fs, base.coverage
+    if change == "fs":
+        fs = 2000
+    elif change == "coverage":
+        coverage = "excerpt"
+    elif change == "label":
+        channels = {"C": channels["LFE"]}
+    else:
+        mix[123] += 1e-12
+    moved = Material(base.name, fs, mix, channels, coverage)
+    assert C.material_fingerprint(moved) != C.material_fingerprint(base)
+
+
+def test_no_cached_stage_carries_the_material_name(tmp_path) -> None:
+    """What makes dropping the name from the key safe: nothing stored depends on it."""
+    from beqforge.pipeline import PipelineParams, analyse, propose
+
+    rng = np.random.default_rng(5)
+    t = np.arange(60_000) / 1000
+    programme = rng.standard_normal(t.size) * (1 + np.sin(2 * np.pi * t / 7))
+    named = Material(
+        "zz-unmistakable-title", 1000, programme, {"L": programme}, "complete_programme"
+    )
+    path = tmp_path / "c.json.gz"
+    analysed = analyse(named, PipelineParams(), path)
+    if not analysed.blockers:
+        propose(named, analysed, path)
+    import gzip
+
+    assert "zz-unmistakable-title" not in gzip.open(path, "rt").read()

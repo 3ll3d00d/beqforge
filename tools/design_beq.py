@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqforge.material import load  # noqa: E402
+from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
 from beqforge.pipeline import (  # noqa: E402
     STRATEGIES,
@@ -234,6 +235,12 @@ def show_cost(report: Report) -> None:
         share = 100.0 * seconds / total if total else 0.0
         bar = "#" * int(round(share / 2.0))
         print(f"  {label:<18s}{seconds:8.1f} s {share:5.1f}%  {bar}")
+    print(
+        f"\n  {report.timings.elapsed_s:.1f} s elapsed, "
+        f"{report.timings.unattributed_s:.1f} s outside any stage"
+    )
+    for label, seconds in sorted(report.timings.details.items()):
+        print(f"    {label:<18s}{seconds:8.1f} s")
     print(f"\n  fitting: {report.fit_stats}")
     print(
         "\n  Optimiser runs are seeds * M * (M + 1) / 2 per candidate, for M sections —\n"
@@ -290,6 +297,23 @@ def main() -> int:
         help="assumed sub output gain; full scale is 1",
     )
     parser.add_argument(
+        "--goal-tolerance",
+        type=float,
+        default=1.5,
+        metavar="DB",
+        help="how far from the goal a low end may sit and need no correction (default 1.5)",
+    )
+    parser.add_argument(
+        "--goal-tilt",
+        type=float,
+        default=0.0,
+        metavar="DB_PER_OCT",
+        help=(
+            "the low end asked for below the knee: 0 flat (default), positive a rise toward "
+            "the bottom, negative a gentle rolloff"
+        ),
+    )
+    parser.add_argument(
         "--sub-lowpass",
         default="crossover",
         metavar="HZ|off|crossover",
@@ -302,6 +326,15 @@ def main() -> int:
         action="append",
         metavar=("LOW", "HIGH"),
         help="authored feature to drop, in Hz; repeatable",
+    )
+    parser.add_argument(
+        "--content-edge",
+        action="store_true",
+        help=(
+            "opt-in: judge from the content edge, not the tracking floor — recovers steep "
+            "filters partway down to where the programme meets the noise, but can lift that "
+            "noise where loud scenes stand clear of it (IMPROVEMENT_PLAN, steep filters)"
+        ),
     )
     parser.add_argument(
         "--strategy",
@@ -398,6 +431,11 @@ def main() -> int:
         playback=playback,
         strategies=strategies,
         exclude_bands_hz=tuple(tuple(b) for b in (args.exclude or ())),  # type: ignore[misc]
+        judge_from_content_edge=args.content_edge,
+        accept=AcceptParams(
+            target_tilt_db_per_octave=args.goal_tilt,
+            goal_tolerance_db=args.goal_tolerance,
+        ),
     )
     material = load(args.material)
     if params.realisation.fs < material.fs:
@@ -453,4 +491,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows defaults a redirected/piped stdout to the system codepage rather than
+    # UTF-8, which crashes on any non-ASCII output; force UTF-8 so a print never dies
+    # on the encoding rather than the content.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())
