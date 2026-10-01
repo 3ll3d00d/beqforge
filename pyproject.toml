@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 beqforge = "beqforge.cli:main"
+beqforge-device-check = "beqforge_device_check.cli:main"
 
 [project.optional-dependencies]
 device-check = [
@@ -35,5 +36,5 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["beqforge", "tools"]
+packages = ["beqforge", "tools", "beqforge_device_check"]
 exclude = ["tools/experiments"]

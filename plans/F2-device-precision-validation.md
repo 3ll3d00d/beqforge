@@ -628,3 +628,20 @@ Validation: twenty-five F2 tests passed, including full numerical run → offlin
 source coefficients/signs, capacities, dedup/order, masked gaps and catalogue/reload weighting.
 Ruff passed. Uncertainty is currently identity-repeatability plus bounded inversion bias; broader
 qualification and population/error-model claims remain open. Nothing under `beqforge/` changed.
+
+### 6. Console workflow and reproducible pilot preview
+
+Added the separate `beqforge-device-check` entry point, guided setup, explicit device inventory,
+frozen pilot/matrix/catalogue planning, qualification, run/resume, offline analysis and ZIP
+export. `docs/device-check.md` documents the commands and the outstanding live qualification.
+Frozen stimulus levels account for the largest intermediate cascade response plus 6 dB margin;
+case identifiers include those levels. Camilla active parameter readback is correctly distinct
+from coefficient-bit readback. Existing designer defaults and runtime dependencies are unchanged.
+
+Validation: 661 tests passed, one skipped, with the real Camilla file-control test enabled;
+Ruff passed. The CLI self-test independently recovered identity, benign and sensitive transfers
+with worst valid-bin error approximately 6.7e-9 dB, completed numerical transactions, regenerated
+the offline report and exported its evidence. PortAudio discovery timed out after its bounded
+10-second subprocess on this host; this is recorded as a live-audio limitation. The repository's
+explicit test-package marker prevents optional dependency test packages shadowing its helpers.
+Live qualification remains incomplete: no miniDSP or audio interface measurement was performed.

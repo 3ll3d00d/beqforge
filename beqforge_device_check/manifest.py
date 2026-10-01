@@ -12,6 +12,7 @@ from beqforge_device_check import SCHEMA_VERSION
 from beqforge_device_check.coefficients import (
     coefficients,
     published,
+    response,
     rounded,
     settling_seconds,
     stable,
@@ -85,6 +86,44 @@ def make_case(
     return case
 
 
+def freeze_levels(manifest: dict) -> dict[str, str]:
+    worst = 0.0
+    remapping = {}
+    for case in manifest["cases"]:
+        if case["status"] != "planned":
+            continue
+        sos = np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6)
+        frequencies = np.geomspace(0.1, case["rate"] / 2 * 0.999, 8192)
+        peak = 0.0
+        for count in range(1, len(sos) + 1):
+            peak = max(
+                peak,
+                float(
+                    np.max(
+                        20
+                        * np.log10(
+                            np.abs(response(sos[:count], frequencies, case["rate"]))
+                        )
+                    )
+                ),
+            )
+        old_id = case["id"]
+        case["predicted_intermediate_peak_db"] = peak
+        case["id"] = digest({k: v for k, v in case.items() if k != "id"})
+        remapping[old_id] = case["id"]
+        worst = max(worst, peak)
+    reduction = max(0.0, worst + 6 - 30)
+    manifest["levels_dbfs"] = [-30 - reduction, -50 - reduction]
+    manifest["level_screen"] = {
+        "maximum_intermediate_gain_db": worst,
+        "nominal_levels_dbfs": [-30, -50],
+        "reduction_db": reduction,
+        "margin_db": 6,
+        "limitation": "sampled ideal transfer screen, not a proof of internal state headroom; capture clipping still aborts",
+    }
+    return remapping
+
+
 def generate(
     profile: DeviceProfile,
     *,
@@ -133,8 +172,6 @@ def generate(
         make_case(name, sections, profile, rate, route, channel)
         for name, sections in specs
     ]
-    order = [case["id"] for case in cases[1:] for _ in range(repeats)]
-    np.random.default_rng(seed).shuffle(order)
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "profile": profile.as_dict(),
@@ -144,10 +181,13 @@ def generate(
         "levels_dbfs": [-30.0, -50.0],
         "identity_repeats": 5,
         "cases": cases,
-        "order": order,
+        "order": [],
         "identity_bracket_every": 1,
         "protocol": "f2-electrical-v1",
     }
+    freeze_levels(manifest)
+    manifest["order"] = [case["id"] for case in cases[1:] for _ in range(repeats)]
+    np.random.default_rng(seed).shuffle(manifest["order"])
     manifest["hash"] = digest(manifest)
     return manifest
 

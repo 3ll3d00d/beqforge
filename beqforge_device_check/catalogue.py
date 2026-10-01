@@ -9,7 +9,7 @@ import numpy as np
 
 from beqforge import BiquadSpec
 from beqforge_device_check.coefficients import rounded, stable
-from beqforge_device_check.manifest import digest, generate, make_case
+from beqforge_device_check.manifest import digest, freeze_levels, generate, make_case
 from beqforge_device_check.profiles import DeviceProfile, finite
 
 TYPE_MAP = {
@@ -185,6 +185,10 @@ def import_snapshot(
             item.update({"status": "unsupported", "reason": str(error)})
         inventory.append(item)
     manifest["cases"] = cases
+    remapping = freeze_levels(manifest)
+    for item in inventory:
+        if item.get("case") in remapping:
+            item["case"] = remapping[item["case"]]
     manifest["order"] = [
         case["id"] for case in cases[1:] for _ in range(manifest["repeats"])
     ]

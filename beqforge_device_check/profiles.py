@@ -94,7 +94,7 @@ PROFILES = {
         "float64 (requires verified build)",
         "CamillaDSP documentation: default float64; verify installed build",
         (Route("filter", 1, 100),),
-        True,
+        False,
     ),
     "simulation-float64": DeviceProfile(
         "simulation-float64",
