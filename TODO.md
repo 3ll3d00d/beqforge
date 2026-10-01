@@ -1,218 +1,197 @@
-# TODO
+# Outstanding work
 
-Live backlog for `beqforge`. What's built and why lives in [AGENTS.md](AGENTS.md) (and
-[README.md](README.md) for day-to-day usage) — this is what's left, ordered by cost and
-confidence, not urgency. Reprioritise as new titles or new material change what's actually
-blocking, rather than working straight down the list on inertia.
+## Status and priority
 
-This replaces `AUTOMATED_DESIGN.md`, `PERFORMANCE.md` and `DESIGN_EVIDENCE.md` (retired
-September 2026, once their "how it works and why" content was folded into AGENTS.md). Full
-historical derivations, numbers and the play-by-play that produced the resolved items now in
-AGENTS.md remain in git history if a future decision needs to see the original working — but in
-the sibling `beqanalyser` repository this project was extracted from, not here: those files
-were never under `beqanalyser/design/` and so weren't carried over by the extraction.
-`git log --follow -- AUTOMATED_DESIGN.md` from before the retirement commit, there.
+The sole backlog and plan for outstanding work, reviewed 2026-09-30. Rows are in priority
+order; a blocked or parked item is not an instruction to start it. **Open** means actionable,
+**blocked** needs external evidence, and **parked** needs the stated trigger. Historical IDs
+are retained so records and code comments remain traceable. Completed items are in
+[implemented changes](plans/done-design-and-pipeline.md),
+[research decisions](plans/research-design-decisions.md), and
+[baseline evidence](plans/done-baseline-evidence.md). The
+[R2a implementation record](plans/R2a-server-stage-cache.md) is complete; R2b is complete too.
 
-## Automated design (`beqforge/`)
+| Priority | ID | Status | Work and condition |
+| --- | --- | --- | --- |
+| 1 | Residual (former TODO 5) | open | Reconcile reported target error with the fitter's accuracy-plus-drift objective and the upstream contract. |
+| 2 | E10 | parked | Predeclare a fresh content-goal validation protocol before changing a default or tuning tolerances. Prerequisite for priority 3. |
+| 3 | Steep filters | blocked | Decide `--content-edge`'s default from listening, real steep titles and coloured-noise evidence; keep default off meanwhile. |
+| 4 | F2 / device behaviour | blocked | Measure device arithmetic before relaxing `max_q = 6.0` or trusting extreme low-frequency sections. |
+| 5 | E1 | open | Add record-only held-out verification by scene; any gate is a separate decision. |
+| 6 | Validation coverage (former TODO 10) | blocked | Obtain missing real track shapes and paired releases; validate sparse material. |
+| 7 | E4 | parked | Investigate ceiling holes only if an unevenness failure or excess traces to unsupported isolated bins. |
+| 8 | F3 follow-up | parked | Try more sections only if a sound steep target demonstrably cannot be realised with four. |
+| 9 | F4 follow-up | parked | Judge alternative fits only if a usable alternative is lost before acceptance; account for extra judging cost. |
+| 10 | T2 | parked | Derive restoration caps only if a swept cap demonstrably binds a weak winner. |
+| 11 | Goal/corpus follow-ups | parked | Reconcile negative labels with requested goals; tilted passband reference only when a title needs it. |
+| 12 | Performance | parked | Measure repeated fit identities and analysis work before implementing further reuse. |
+| 13 | Identification | blocked | Generalise content model, fit band and uncertainty with a broader corpus; decide mixed-channel policy when needed. |
+| 14 | Authored features | parked | Automate manual exclusions when real examples support a detection rule. |
+| 15 | Dynamic processing (former TODO 11) | blocked | Scope compression/limiting detection and abstention on a suspected real title. |
+| 16 | Fraction dial (former TODO 7) | parked | Add a fraction of licensed restoration when a user/title needs it; goal tilt and tolerance already ship. |
+| 17 | Catalogue comparison (former TODO 8) | parked | Test the disagreement-detector hypothesis; authored filters remain comparisons, never calibration targets. |
+| 18 | Protective corner (former TODO 9) | parked | Expose `H_protect`'s corner when a non-default alignment is needed. |
+| 19 | Documentation citations | open | Remove or repoint orphan bare section references to retired design documents in comments/docstrings. |
+| 20 | Upstream integration | blocked | Confirm contract wording and batch bass-management propagation in beqdesigner. |
 
-### Resolved: the first real-title rerun since R1-R12 landed (16 September 2026)
+## Checks and scope
 
-Rerunning all eight titles surfaced two crashes and a genuine bug in R8's plateau discovery.
-Full before/after is on the published Correction Ledger artifact. All three, fixed:
+### Residual reporting
 
-* `tools/design_beq.py` computed a `relevant`-channels list using
-  `params.diagnose.min_passband_share`, a field R4/R5 deleted from `DiagnoseParams` — crashed
-  every run, `--charts` or not, since it also feeds the record's stored curves. Replaced with a
-  local, presentation-only `CHART_RELEVANCE_SHARE` constant; it does not feed any decision.
-* `tools/render_ledger.py`/`ledger_template.html` assumed every record has at least one
-  candidate (even a rejected one) to feature. R1's blockers can now stop a title before any
-  target is built at all, leaving `candidates: []` — a case eight-for-eight prior runs never
-  exercised. Both now render a "no candidate was ever constructed" state instead of crashing or
-  linking a 404 image.
-* **`plateau_reference`'s trend check read the wrong curve.** Region membership (the `within`
-  mask) is decided from `discovery`, the 11-point median-filtered curve, specifically to
-  "suppress estimator-bin scatter" (the function's own docstring) — but the width/slope
-  admission test that follows read the raw, unfiltered `curve` instead. On real material that
-  let ordinary bin-to-bin scatter reject a genuinely flat region: Tron's one candidate plateau
-  (25.5-55.9 Hz, 1.1 octaves — well past the 1/3-octave minimum) measured +3.0088 dB/octave on
-  the raw curve against the 3.0 limit, and +2.9228 on the very discovery curve `within` had
-  already used to select it. Fixed by reading `discovery` for the slope too
-  (`beqforge/diagnose.py`), so region selection and region validation are now
-  consistent; regression test in `tests/test_design_references.py` reproduces it with a few
-  synthetic estimator-bin spikes rather than needing real material. **Tron now recovers a
-  filter** (`flatten`, 85% of the deficit, evidence score 0.95). Confirmed against all eight
-  titles that no previously-accepting title's plateau region or level moved.
+`Candidate.fit_error_db` reaches the response's `residual_db`. For fitted candidates it is
+normally the larger of target error and exact-coefficient quantisation change; after pruning
+it can be pure target error. The contract defines residual as target error. Check upstream
+wording on non-parametric candidates before settling field availability. Separating reporting
+from the escalation objective may be possible; changing what `residual_target_db` compares
+against is a decision change and needs the full regression workflow.
 
-**Correction to the entry above: "Test 71 genuinely has no flat region" was wrong.** A human
-looking at the spectrum sees it immediately — a clear plateau, a peak just below it in
-frequency, then a rolloff — and the first fix's own diagnosis confirmed a real, wide (0.74-1.33
-octave, depending how far it's trimmed) flat region exists at 24-63 Hz. What actually happened:
-the one connected within-tolerance region (22.46-41.66 Hz) merged the peak's falling edge with
-the genuinely flat stretch beside it, and the *whole region's* least-squares slope — -4.83
-dB/octave — failed the 3.0 limit even though the flat part alone reads -1.99. That's a second,
-distinct bug, now fixed: **`plateau_reference` tested each connected region as a single
-all-or-nothing block instead of allowing a locally bad edge to be trimmed off.** A peak sitting
-close enough in level to a real plateau to fall in the same tolerance band will always produce
-this shape — the plateau does not stop being real because a peak sits next to it.
+### Fresh validation protocol and steep-filter policy
 
-Fixed with `_trim_to_flat_subwindow` (`beqforge/diagnose.py`): before rejecting a
-region outright, trim one point at a time from whichever end currently reduces the remaining
-slope's magnitude more, stopping the moment the remainder is flat enough (or the width floor is
-hit). A heuristic — it does not search every possible sub-window, so a region with the bad
-influence spread through its middle rather than at an edge could still be missed — but it
-targets exactly the failure found. Regression test in `tests/test_design_references.py` pins it
-against the exact real Test 71 values (a direct test of the trim function, since reproducing
-the failure through the full percentile pipeline synthetically turned out to depend on fine
-bin-to-bin proportions that were impractical to fake convincingly). **Test 71 now recovers a
-filter** (`flatten`, 93% of the deficit, evidence score 0.94) with a corrected curve that does
-what a human would expect: the rolloff below the peak is lifted to meet the plateau, which is
-left nearly untouched. Confirmed against all eight titles that no other title's plateau region
-moved from this second fix.
+The legacy corpus is development evidence after repeated tuning, not a held-out estimate.
+Version a new protocol without editing old results. Predeclare coloured, nonstationary and
+correlated noise, finite stopbands, limited programme, sparse/continuous bass, channel
+cancellation and partially filtered channels; partition seeds and source titles (variants of
+one title are not independent), goal settings, failure classes and sample sizes. Preserve
+legacy counts. Once holdouts inform tuning, reserve a new holdout.
 
-**Two titles still correctly abstain, for reasons unrelated to either bug above:**
-* **Blazing Saddles** finds a plateau (122.5-200 Hz) but still abstains — for a completely
-  separate reason, "no qualifying loud events" (`extract`'s scene selection finds zero loud
-  frames in 89 minutes). Plausible explanation: this is a mono-only extraction (`--mono-only`,
-  a single downmixed channel), and summing a strong isolated LFE wall into dialogue/effects
-  dilutes exactly the temporal peak-quiet contrast the scene detector looks for — not
-  investigated further here; flagged as a real, separate limitation of mono-only material worth
-  a second look if it recurs on other mono-only titles.
-* **Nocturnal Animals** abstains on the `min_judge_octaves` guard (judged band collapsed to 0.5
-  octaves under the tighter, more accurate boundary) — this looks like the guard correctly
-  doing its job on a title that was always borderline (its own calibration used exactly this
-  title).
+`--content-edge` recovers 17/18 noise-floored steep injections against 2 with the default, but
+can lift noise where loud events clear a floor that dominates the average. Listen to the
+Hulk BW16 @ 30 Hz, −80 dB variant (+16.8 dB noise lift), and the −40 dB-floor case whose
+corrected noise lies 28 dB below the plateau. Obtain real steep titles such as Master and
+Commander, Kingdom of Heaven DC, Hunger Games: Songbirds & Snakes, Nobody, Wreck-It Ralph,
+Battleship, Mad Max 2 and Midnight Run. Test codec-like/coloured floors and declare each
+recipe's truth band instead of a fixed 60 Hz top. Review shape-clause failures that discard
+the closest-to-truth candidate in both modes. A default change requires E10 first.
 
-**Current picture: 6 of 8 titles accept** (Alien, Test2 71, Test3 71, Test4 71, Test 71, Tron),
-two abstain for the two distinct and separately-verified reasons above. Alien and Test4 71's
-*selected* candidate shuffled between near-tied `counterfactual` boost-cap variants and
-`flatten` across these reruns (e.g. Alien: 35dB → 25dB → 45dB) without their plateau or
-evidence numbers changing — a symptom of the already-documented over-100%-recovery/near-tie
-issue in "Do next" item 1 below, not a new defect from either fix here.
+### Device behaviour and held-out verification
 
-### Do next — cheap: replaces a known-wrong constant with a measurement `diagnose` already makes
+F2 requires real-device measurements of internal word length, recursive rounding noise and
+limit cycles; coefficient quantisation alone does not model them. Compare sections at
+Q 5.2–6.0 with unconstrained fits before deciding the limit.
 
-1. **Derive `restore_caps_db` (currently a sweep of 25/35/45/50 dB) from `filter_floor_hz`
-   instead.** `diagnose` already computes each filtered channel's attenuation at its own
-   level-independence floor; nothing consults it. Every derived cap measured so far sits
-   *below* the smallest swept constant, meaning every `counterfactual` candidate produced to
-   date has already inverted past the point R2 says it is still safe to call a filter.
-2. **Replace `knee_slope_db_per_octave` (14.0) with per-channel R2.**
-   `diagnose.stratified_response` already measures the property (filter vs. natural envelope)
-   the slope threshold is a poor proxy for; running it per audible channel removes a threshold
-   known to misclassify — it must catch a real 15.9 dB/octave filter and spare a natural
-   13.5 dB/octave channel, a 2.4 dB/octave margin a 2nd-order Butterworth sits inside of.
+E1: derive evidence, reference, target and cascade from separated scene blocks, evaluate the
+fixed correction on the other fold, then swap. Guard filter/window edges so an event does not
+cross folds; do not concatenate excerpts and call them complete programmes. Scene-specific
+bass is content, so do not demand flatness in every scene. Report first: an overfit target
+should fail out of sample, with fewer corpus false accepts and no lost true positives before
+considering a gate.
 
-### Do soon — bounded, improves reliability of what's already shipped
+### Parked decision changes and watch cases
 
-3. **A smooth pole-radius penalty for the fitter/judge drift disagreement.** `_fit_structure`
-   minimises drift at exact coefficients; `assess` measures the p90 across publication
-   rounding, so the optimiser can settle on a cascade that measures robust and is not (poles
-   near z=1 at 96 kHz). The cheap remedy (jittered evaluations inside the cost function) was
-   tried and measured worse on every axis; the smooth one (penalise pole radius directly) has
-   not been tried at all.
-4. **`max_q = 6.0` contradicts the documented argument against constraining Q.** Q is
-   downstream of the target; a Q rule penalises the correct inversion of a steep filter, and
-   it's near-binding in practice — one title produced sections at Q 5.2–6.0. Either relax it
-   or write down why it's needed after all.
-5. **Reconcile `fit_error_db`/`residual_db` being reported for every candidate**, including
-   `parametric`'s non-`fitted` ones. Useful in practice — it's how three abstaining titles
-   were shown to be under-corrected by their *target* rather than by the fitter — but this was
-   never reconciled with the external `designer-interface.md` contract's older wording that
-   `non_parametric` candidates should leave it `None`. Check whether that wording has since
-   been revised before treating this as settled either way.
-6. **`Candidate.confidence` doesn't reorder `Report.accepted`.** The external contract wants
-   candidates ranked by confidence; `Report.accepted` still selects by departure from the
-   requested shape. Current reading: *don't* reorder — a scalar score overruling the
-   acceptance model reintroduces the aggregate-blindness the evidence policy exists to defeat
-   — but that should be a written decision, not a permanently open question.
+E4's proposed running-minimum ceiling must never license gain unsupported by the raw ceiling.
+F3's fifth section moved no verdict when tried; fit cost grows with section budget. F4's two
+fitter-selection spikes were rejected: acceptance judges something different from residual.
+A follow-up would carry several publishable fits through `_judge`, then select by verdict.
+T2's cap sweep did not explain weak winners. Revisit only with a binding example.
 
-### Backlog — real, but nothing on hand is asking for it yet
+Watch near-texture-blocker cases: Black Bag (1.08×), Bugonia (1.09×), Incredible Hulk (1.01×).
+Obsession has a narrow level-dependent band ending its level-independence run; decide whether
+its omission from the response matters if a reviewer needs it. T8's point floor agrees with
+the modal resampled floor on tested titles; revisit only if they disagree. T7's floor and
+1024/4096-sample resolution review found no verdict depending on it; revisit with injected
+floor evidence. Reopen E7 only if the plateau rule changes.
 
-7. **A fraction dial, and a house curve reaching target construction.** The still-unbuilt half
-   of the partial-correction work (steps 1–5 are built — see AGENTS.md). No title tried has
-   asked for anything but flat, so there's nothing to size this against yet.
-8. **Catalogue comparison / disagreement detector.** Not started. Hypothesis to test first:
-   38% of authored corrections demand ≥24 dB/octave, a single low shelf can't sustain that
-   below its knee, and 92% of authored responses *are* a single low shelf — so a meaningful
-   share of existing filters may under-correct in the octave below the corner. Not a score:
-   where the tool and an author differ substantially, look at the case.
-9. **Expose `H_protect`'s default corner as a parameter.** Cheap, but nothing requires it
-   until someone actually wants a non-default alignment.
+### Performance and remaining product questions
 
-### Blocked on data — don't schedule engineering time against these
+Measure identical numerical fit requests before gathering parametric targets into `_fit_all`
+and deduplicating. Identity includes target, grid, score/placement bands, bounds, seeds and
+realisation; preserving each strategy's scoring matters. Only then consider a bounded atomic
+cross-run fit cache keyed on that identity, implementation and library versions, honouring
+`--fresh`/`--no-cache`; never cache verdicts or headroom. Check repeated `mean_spectrum`,
+`plateau_reference`, `_flat_deficit`, `supported_mix_change` and counterfactual-cap blocks
+without merging different estimators. More seeds, warm starts or reparameterisation need a
+measured missed usable fit. Precision/budget trades measured around 1.4× carry a quality cost
+and were not adopted. Headroom acceleration and stage timing already ship (C4/C5).
 
-10. **Does the guard generalise to real sparse material?** The item that most matters for
-    trusting the acceptance model on a title unlike the eight on hand. Proven synthetically
-    and on two titles with a measured floor at the *edge* of the content band; none of the
-    eight has a floor sitting *inside* it, which is the case the guard exists for. Watch for
-    the right material rather than manufacturing another synthetic case — that's how the
-    guard's evidence got this far without settling the question.
-11. **Dynamic processing (compression/limiting) detection + an abstain path.** No linear
-    filter inverts a non-LTI system. Unscoped — worth designing the day a title is actually
-    suspected of this, not speculatively before then.
-12. **Reconcile time-frequency resolution.** `extraction.frame_samples` is 1024 (1.02 s,
-    0.98 Hz bins); `diagnose.WELCH_NPERSEG`/`charts.NPERSEG` are 4096 (4.1 s, 0.24 Hz).
-    Nothing reconciles them today. Low urgency until a title's verdict is shown to actually
-    depend on which is right.
+Identification still needs a generalisable `N(f)` model/fit band and a specified uncertainty
+method. Scene segmentation must be evaluated against false positives, not one title. There
+is no policy for `channel_scope="mixed"`; automatic authored-feature exclusions remain
+manual via `--exclude`. `parametric` stays on by default and does win titles.
 
-### Open questions specific to the parametric/identification path
+Catalogue disagreement is an untested hypothesis: steep authored corrections may be
+under-realised by single shelves. Look at disagreements rather than treating them as scores.
+Dynamic processing needs a real suspected case before designing its tripwire.
 
-Deprioritised: `flatten` and `counterfactual` have produced every accepted filter so far;
-`parametric` has never won.
+Upstream: confirm the adopted clipping-cost field, request bass management and device
+realisation, ordinal confidence, non-parametric residuals and decline/report rules in the
+external contract. Thread batch bass management through beqdesigner's `_design` so
+`gain_reduction_db` reflects the listener's crossover. This repo cannot close those checks
+without upstream evidence; by-reference support on both sides is already complete.
 
-* What `N(f)` form and fit band generalise past one title — needs a corpus, not more analysis
-  of one file.
-* Scene segmentation algorithm and the absolute margin for it — currently a hand-picked
-  constant; should be calibrated on the synthetic harness against a false-positive rate, per
-  the "no per-title decision from outside that title" principle.
-* Uncertainty quantification method for `identify` is unnamed (bootstrap over frames? profile
-  likelihood? something else?).
-* Automatic detection of an authored feature (e.g. a narrow LFE hump) that should be excluded
-  before fitting — currently only reachable via `--exclude`, by hand.
-* What to do when `channel_scope` reports `"mixed"` (per-channel diagnostics disagree) — the
-  field exists to carry the finding; there's no policy for it yet.
+## Validation material and completion rules
 
-### Known contradictions / rough edges in the current implementation
+Every decision change follows [AGENTS.md](AGENTS.md)'s regression workflow. Write its outcome
+in the appropriate completed/research record in `plans/`, and remove or update its status row
+here in the same commit. Preserve baseline records; scratch check runs must not overwrite them.
 
-* Everything in "Do soon" above (items 4–6).
-* `charts.py`'s `peak` curve is a per-bin maximum over frames — biased +9.3 dB on stationary
-  noise for a two-hour title, by construction (max of chi-squared-2 samples). Deliberate,
-  because it's what lets a chart be read against a published catalogue one — a high
-  percentile (99.9th) would remove the bias and break that comparison. Not affecting any
-  decision path: `extraction.py`'s peak envelope is a 95th-percentile, not a maximum.
-* Cosmetic, low priority: many docstrings/comments across `beqforge/` and `tests/`
-  still cite bare section numbers (`§2.1`, `§14.2`, ...) left over from the retired
-  `AUTOMATED_DESIGN.md`. Only references naming the file by name were repointed when it was
-  removed; the bare numbers don't point anywhere now. Harmless — each citation sits next to a
-  self-contained explanation — but worth a pass to either drop them or repoint them at AGENTS.md.
 
-### Standing validation-gap caveats (not action items — just don't forget them)
+The tracks need to be real audio because the risk being tested is the tool meeting material it
+has not seen (Validation coverage: "watch for the right material rather than manufacturing another synthetic
+case"). What they need to give is *known structure*, so the tracks below are described by the
+failure they provoke, not by title. Each must be a complete programme (the tool abstains on an
+excerpt), with an explicit channel layout so `extract` accepts it.
 
-* **Sparse real-programme generalisation is unvalidated.** The predeclared synthetic
-  protocol (results retained in `evidence_validation.json`) falsified the old "temporal
-  contrast proves restoration" reading, but it did not — and cannot — establish safe
-  automatic restoration of arbitrary real source material. A naturally coloured source can be
-  observationally identical to a mastered one; no threshold or parametric gate resolves that
-  without additional information (e.g. a reference release).
-* **Never calibrate a designer threshold against the catalogue's authored `mvAdjust`
-  values.** They measure the wrong quantity (cascade peak magnitude) and are close to
-  *inverted* against actual sub-feed clipping cost — a gate built and calibrated against them
-  had to be withdrawn. See AGENTS.md's "Publication, playback and verification" for the
-  quantity that actually matters.
+### Per-track metadata to record
 
-### Performance
+Layout and LFE presence; source codec and bit depth; whether it is a complete programme;
+runtime; whether it is believed filtered, unfiltered or unknown, and how that was established.
+The last matters most: a belief with no independent source is not ground truth.
 
-* Remaining budget/precision trades: ~1.4x more with a real quality cost, not adopted.
-* Further algorithmic ideas beyond what's already been measured and rejected (see AGENTS.md's
-  Performance notes for the list of what not to retry) — not started, no specific plan yet.
+### The shapes
 
-## External follow-up (not this repo's to fix, but worth tracking)
+| Shape | What it provokes | Items exercised |
+| --- | --- | --- |
+| **Paired releases of one mix** (an original and a remaster, or a lossless and a lossy release of the same soundtrack) | The only real ground truth for a mastering change: the difference between the two is the filter. Also codec-only variants for noise-floor and ceiling robustness. | E1, E2, E6, A1 |
+| **Bass-rich, high-dynamic-range modern mix with full LFE** | The positive control: large events, quiet passages, a clean floor. Every change must keep it working. | all (regression) |
+| **Bass-light, dialogue-driven drama** | The sparse case the guard exists for; few independent loud events, so wide standard errors. Best if its tracking floor sits *inside* the content band. | E2, E4, T7, Validation coverage |
+| **Old or upmixed mix** (mono or stereo origin, no real LFE) | Natural droop that looks like a mastered rolloff; no LFE channel, so `counterfactual` has nothing to do. | E2, E6, T3 |
+| **Concert or music film** | Continuous bass with no quiet frames, so the quiet-frame assumption fails and contrast is near zero everywhere. | E4, E5, T5 |
+| **Heavily compressed or limited mix** (loudness-war, trailer-style) | A non-LTI process no linear filter inverts (Dynamic processing). Not a target, a tripwire: the tool should abstain or say so. | E2, E6 |
+| **Noise-dominated location recording** (documentary, stationary rumble) | Stationary noise at low frequency; the ceiling must license nothing there. | E2, E4, E5 |
+| **Strongly rippled or humped bass** (a 40-80 Hz hump, or a mid-bass shelf above the sub) | Plateau choice and the anchor: a wide hump can win "widest first" and a wobbly plateau can drag the anchor. | T4, T5 |
+| **Authored LFE feature** (a narrow hump in the LFE) and **LFE lowpass variation** (different lowpass corners across releases) | The `--exclude` path, and whether a channel is judged filtered. | T3, T2 |
+| **Layout variety** (2.0, 5.1, 7.1, and a bed from an object mix) | Downmix weights, the LFE gain assumption, and the `"mixed"` channel-scope case with no policy. | T1, Identification |
+| **Infrasound-rich mix** (content below 10 Hz) | The 5 Hz placement floor and the flat hold below the noise floor. | E5, T7 |
+| **Long and short programmes of similar character** | How the standard errors and the ceiling scale with the number of independent events. | E4, E2 |
 
-* A set of six proposals were sent upstream to the `designer-interface.md` contract in the
-  sibling `beqdesigner` repo: a clipping-cost headroom field (not the cascade's peak
-  magnitude), passing the sub-feed/bass-management config as an input, passing the target
-  device's coefficient format and rate as an input, `confidence` as an ordinal in v1 rather
-  than an uncalibratable probability, allowing `residual_db` for `non_parametric` methods, and
-  a stated rule for what the designer may decline versus must report. All six are already
-  adopted **internally** here (see AGENTS.md). Confirm the upstream contract document gets
-  amended to match — this repo doesn't own that file, so can't close this on its own.
+Aim for at least two real examples of each shape; a single example cannot separate a track's
+quirk from the shape's.
+
+### Variants generated from each real track
+
+The real tracks supply content; the harness (`beqforge/harness.py`) supplies ground truth by
+transforming them. For each track that is believed unfiltered (or as close as can be
+established):
+
+1. **As-is** — the baseline record.
+2. **Injected known rolloff:** vary corner (roughly 15-40 Hz), order (2-4) and family
+   (Butterworth and Linkwitz-Riley). Ground truth for recovery, and the source of the positive
+   side of every false-accept/true-positive curve (A1).
+3. **Injected natural droop:** the same transform applied identically to *every* channel, which
+   is observationally the same as a mix that was recorded that way. It is the hard negative:
+   the tool should be seen to accept or abstain here, and the rate written down (E6).
+4. **Added noise at a stated SNR:** steady rumble and broadband, to test the ceiling and floor.
+5. **Excerpted:** 20% and 50% of the programme, which must abstain.
+6. **Re-encoded:** through the codecs a release would use, for noise-floor stability.
+7. **Non-default playback model:** different `--main-gain-db`, `--lfe-gain-db` and
+   `--crossover` on the same track (T1).
+
+Each variant is a separate `.npz` under `data/`, which stays gitignored, and each gets its own
+run record. The variant recipe (seed, transform, parameters) is what should be committed, so
+they are reproducible without committing audio.
+
+### What to measure on every track
+
+* Accepted or abstained, which strategy won, and the section count and filter.
+* `recovered_fraction`, `shaping_fraction`, `correction_support_score`, and the note that the
+  ceiling bound.
+* Plateau region and level, deficit anchor, noise floor and judged band, so T4-T7 can be read
+  straight from the records.
+* The held-out verdict (once E1 exists) and the false-accept and true-positive tallies by shape.
+
+### Definition of enough
+
+A change to decision logic is not trusted until it has run on at least the positive control, one
+sparse track, one natural-droop variant and one paired-release track, and its effect on each is
+recorded in the relevant completed/research document under `plans/`. A change that only speeds a run up needs `compare_records.py` to show the
+records are identical apart from the fingerprint and timings.

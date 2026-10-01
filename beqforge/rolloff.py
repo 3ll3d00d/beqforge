@@ -67,11 +67,10 @@ def fit_rolloff(
     band_hz: tuple[float, float] | None = None,
     corner_bounds_hz: tuple[float, float] = (4.0, 120.0),
 ) -> RolloffFit:
-    """Fit the rolloff model to a magnitude response.
+    """Estimate corner, asymptotic slope and knee width of attenuation.
 
-    `corner_bounds_hz` spans the full plausible range rather than a catalogue-derived window
-    (§2.1); it exists to keep the optimiser numerically sane, not to encode a prior about
-    where corners live. A rolloff outside it should be reported, not defined away.
+    Fit the soft-hinge response from several bounded starting points and keep
+    the lowest residual. These parameters describe a possible parametric inverse.
     """
     freqs = np.asarray(freqs, dtype=np.float64)
     mask = (
@@ -119,22 +118,11 @@ def identify(
     knee_tolerance: float = 0.1,
     max_residual_db: float | None = None,
 ) -> HighPass | None:
-    """Map a fit back to a named high-pass, or None if it matches none of them.
+    """Recognise a fitted Butterworth or Linkwitz-Riley high-pass.
 
-    Returning None is a real outcome, not a failure — it says the rolloff is not a Butterworth
-    or Linkwitz-Riley, which is exactly what the caller needs to know before taking the
-    closed-form inversion path (§5). Nothing downstream may assume an alignment this did not
-    find.
-
-    The knee tolerance is the load-bearing one and is deliberately tight. A 2nd-order Bessel
-    fits at an implied order of 2.13 and a knee of 2.39 against Linkwitz-Riley's 2.0 — close
-    enough to pass a loose gate, and wrong. Slope alone cannot catch it; only the knee can.
-
-    `max_residual_db` additionally requires the fit to have been good. Left None by default
-    because the right value depends on how noisy the estimate was, which the caller knows and
-    this function does not: on a clean response a representable rolloff fits to ~1e-5 dB, but
-    on real content the residual carries content variance too. Detection on real material is
-    the model comparison of §3.6, not an absolute threshold here.
+    Match implied order and knee to a named alignment within tolerance; require
+    the optional residual limit when supplied. Unknown shapes cannot take the
+    closed-form shelf inversion path.
     """
     if max_residual_db is not None and fit.residual_db > max_residual_db:
         return None

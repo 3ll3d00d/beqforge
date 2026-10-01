@@ -150,6 +150,33 @@ def test_request_from_json_round_trips_channels_and_bass_management() -> None:
     assert request.bass_management["lpf_fs"] == 80.0
 
 
+def test_request_from_json_rejects_channel_length_mismatch() -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros(8)),
+        "channels": {"L": _ndarray_to_json(np.zeros(5))},
+    }
+    with pytest.raises(ValueError, match=r"channel 'L' has 5 samples; mono_mix has 8"):
+        request_from_json(body)
+
+
+def test_request_from_json_rejects_non_1d_and_non_finite_audio() -> None:
+    body = {
+        "contract_version": "1.0",
+        "fs": 1000,
+        "coverage": "complete_programme",
+        "mono_mix": _ndarray_to_json(np.zeros((2, 3))),
+    }
+    with pytest.raises(ValueError, match="mono_mix must be a 1-D"):
+        request_from_json(body)
+
+    body["mono_mix"] = _ndarray_to_json(np.array([0.0, np.inf]))
+    with pytest.raises(ValueError, match="mono_mix must contain only finite"):
+        request_from_json(body)
+
+
 def test_request_from_json_leaves_absent_fields_none() -> None:
     body = {
         "contract_version": "1.0",
@@ -401,7 +428,7 @@ def test_decline_for_no_passing_candidate_lists_failures() -> None:
 def test_design_returns_a_single_candidate_when_one_is_accepted(monkeypatch) -> None:
     accepted = _candidate()
     report = _report([accepted])
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -420,7 +447,7 @@ def test_design_declines_when_no_candidate_was_built(monkeypatch) -> None:
     report = _report(
         [], evidence_notes=("no usable contiguous mix plateau; restoration withheld",)
     )
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -438,7 +465,7 @@ def test_design_declines_when_nothing_passed_acceptance(monkeypatch) -> None:
         _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
     )
     report = _report([failing])
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version=CONTRACT_VERSION,
@@ -456,7 +483,7 @@ def test_design_turns_on_gain_reduction_only_with_bass_management(monkeypatch) -
     report = _report([accepted])
     seen_params = {}
 
-    def fake_run(material, params):
+    def fake_run(material, params, **_):
         seen_params["playback"] = params.playback
         return report
 
@@ -484,7 +511,7 @@ def test_design_echoes_the_request_contract_version(monkeypatch) -> None:
     report = _report(
         [], evidence_notes=("no qualifying loud events; restoration withheld",)
     )
-    monkeypatch.setattr("beqforge.designer.run", lambda material, params: report)
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
 
     request = DesignRequest(
         contract_version="1.0",
@@ -513,3 +540,290 @@ def test_design_declines_with_no_channel_decomposition() -> None:
     response = design(request)
     assert response.candidates is None
     assert response.decline_reason == "channel_evidence_unavailable"
+
+
+# ---- provenance (IMPROVEMENT_PLAN R1) --------------------------------------
+
+
+def _small_request(mono_mix: np.ndarray | None = None) -> DesignRequest:
+    return DesignRequest(
+        contract_version=CONTRACT_VERSION,
+        fs=1000,
+        mono_mix=np.zeros(10) if mono_mix is None else mono_mix,
+        coverage="complete_programme",
+    )
+
+
+def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None:
+    report = _report([_candidate()])
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
+    monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
+    commentary = design(_small_request()).candidates[0].commentary
+    assert commentary["beqforge_revision"] == "abc123+src:def456"
+    # the plain-language account leads, before the notes and parameters that qualify it
+    assert list(commentary)[:4] == ["found", "correction", "clipping", "alternatives"]
+    assert commentary["strategy"] == "flatten"  # added to, not replaced
+    assert "run_record" not in commentary  # nothing asked for one
+
+
+def test_a_decline_names_the_build_that_made_it(monkeypatch) -> None:
+    failing = dataclasses.replace(
+        _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
+    )
+    monkeypatch.setattr(
+        "beqforge.designer.run", lambda material, params, **_: _report([failing])
+    )
+    monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
+    response = design(_small_request())
+    assert response.decline_message.startswith("flatten: overshoot")
+    assert response.decline_message.endswith("[beqforge_revision: abc123+src:def456]")
+    assert " | found: reference:" in response.decline_message
+    validate_response(response)
+
+
+def test_a_request_writes_a_replayable_record_named_by_its_audio(tmp_path) -> None:
+    """The fast no-channels abstention, through the real pipeline and the real writer."""
+    from beqforge import record
+
+    mono = np.random.default_rng(0).normal(scale=0.05, size=1000 * 60)
+    request = _small_request(mono_mix=mono)
+    response = design(request, record_dir=tmp_path)
+    assert response.decline_reason == "channel_evidence_unavailable"
+
+    written = list(tmp_path.glob("designer-*.run.json.gz"))
+    assert len(written) == 1
+    assert f"run_record: {written[0]}" in response.decline_message
+    document = record.read(written[0])
+    fingerprint = record.Fingerprint.from_json(document["fingerprint"])
+    assert fingerprint.material_path == ""
+    assert fingerprint.material_sha256.startswith(written[0].name[9:25])
+    assert fingerprint.revision == record.revision()
+    assert record.stale_against(fingerprint) == []
+
+    # the same request is the same file; a different mix is a different one
+    design(request, record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 1
+    design(_small_request(mono_mix=mono * 0.5), record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 2
+
+
+def test_an_unwritable_record_dir_does_not_fail_the_design(tmp_path) -> None:
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory")
+    mono = np.random.default_rng(0).normal(scale=0.05, size=1000 * 60)
+    response = design(_small_request(mono_mix=mono), record_dir=blocked)
+    assert response.decline_reason == "channel_evidence_unavailable"
+    assert "run_record: not written" in response.decline_message
+
+
+def test_the_response_joins_candidate_and_run_notes_once() -> None:
+    """The contract has no run-level field, so the candidate's commentary carries both."""
+    candidate = dataclasses.replace(
+        _candidate(), target_notes=("boost cap binds", "shared")
+    )
+    mapped = _to_design_candidate(
+        candidate,
+        PipelineParams(),
+        report_gain_reduction=False,
+        run_notes=("shared", "mix reference"),
+    )
+    assert mapped.commentary["target_notes"] == "boost cap binds; shared; mix reference"
+
+
+def test_the_judges_own_notes_reach_the_response() -> None:
+    """IMPROVEMENT_PLAN E6: a correction resting below the level-invariance floor says so."""
+    shaping = (
+        "13.1 dB of the correction is claimed below 22.7 Hz, where the attenuation stops "
+        "being level-invariant; this shaping diagnostic does not identify the cause (R2)"
+    )
+    candidate = _candidate()
+    candidate.verdict.notes.append(shaping)
+    mapped = _to_design_candidate(
+        candidate, PipelineParams(), report_gain_reduction=False
+    )
+    assert shaping in mapped.commentary["verdict_notes"]
+
+
+def test_the_response_says_the_fractions_in_words_not_bare_numbers(monkeypatch) -> None:
+    """'Recovered fraction 0.981' meant nothing to a reviewer; the sentence has to carry it."""
+    monkeypatch.setattr(
+        "beqforge.designer.run", lambda material, params, **_: _report([_candidate()])
+    )
+    commentary = design(_small_request()).candidates[0].commentary
+    assert "recovered_fraction" not in commentary
+    assert "shaping_fraction" not in commentary
+
+
+def test_the_clipping_line_says_whether_to_turn_the_sub_down() -> None:
+    """Headroom is reported, never gated; the line has to say what to do and on what model."""
+    import dataclasses as dc
+
+    from beqforge import explain
+
+    clean = dc.replace(_headroom(0.0), peak=0.42)
+    clips = dc.replace(_headroom(-1.29), peak=1.16)
+    quiet = dc.replace(_candidate(), headroom=clean)
+    loud = dc.replace(_candidate(), headroom=clips)
+
+    text = explain.clipping(quiet, from_request=False)
+    assert "the assumed bass management (LR4 crossover at 80 Hz" in text
+    assert "42% of full scale" in text and "does not clip" in text
+
+    text = explain.clipping(loud, from_request=True)
+    assert text.startswith("with your bass management")
+    assert "turn the sub channel down by 1.3 dB to avoid clipping" in text
+
+    unmeasured = dc.replace(
+        _candidate(), headroom=_headroom(0.0, "no channel decomposition")
+    )
+    assert explain.clipping(unmeasured, from_request=False) == (
+        "clipping: not measured (no channel decomposition)"
+    )
+
+
+# ---- 1.1: rejected designs, for review only ---------------------------------
+
+
+def _failing(label: str, *failures: str, confidence: float = 0.8) -> Candidate:
+    return dataclasses.replace(
+        _candidate(label, passed=False, confidence=confidence),
+        verdict=_verdict(False, list(failures)),
+    )
+
+
+def _design_with(monkeypatch, report: Report) -> DesignResponse:
+    monkeypatch.setattr("beqforge.designer.run", lambda material, params, **_: report)
+    return design(
+        DesignRequest(
+            contract_version=CONTRACT_VERSION,
+            fs=1000,
+            mono_mix=np.zeros(10),
+            coverage="complete_programme",
+        )
+    )
+
+
+def test_an_accepted_answer_carries_the_designs_that_failed(monkeypatch) -> None:
+    """Beside the answer, not in `candidates`: only `candidates[0]` is ever acted on."""
+    response = _design_with(
+        monkeypatch,
+        _report([_candidate(), _failing("counterfactual/25dB", "introduces a cliff")]),
+    )
+    validate_response(response)
+    assert [c.commentary["strategy"] for c in response.candidates] == ["flatten"]
+    assert response.candidates[0].rejection_reasons is None
+    (rejected,) = response.rejected
+    assert rejected.commentary["strategy"] == "counterfactual/25dB"
+    assert rejected.rejection_reasons == ["introduces a cliff"]
+    # the reviewer reads what it would have done beside why it was refused
+    assert "section(s)" in rejected.commentary["correction"]
+    assert "clipping" in rejected.commentary
+
+
+def test_a_decline_carries_its_rejected_designs_nearest_to_acceptable_first(
+    monkeypatch,
+) -> None:
+    response = _design_with(
+        monkeypatch,
+        _report(
+            [
+                _failing("flatten", "tilt", "cliff", "extent"),
+                _failing("parametric", "cliff"),
+            ]
+        ),
+    )
+    validate_response(response)
+    assert response.decline_reason == "no_publishable_candidate"
+    assert response.candidates is None
+    assert [c.commentary["strategy"] for c in response.rejected] == [
+        "parametric",
+        "flatten",
+    ]
+
+
+def test_only_loadable_rejections_are_returned(monkeypatch) -> None:
+    """A passing loser was not rejected; a design with no sections cannot be loaded."""
+    empty = dataclasses.replace(_failing("counterfactual/35dB", "unstable"), filters=[])
+    response = _design_with(
+        monkeypatch, _report([_candidate(), _candidate("parametric"), empty])
+    )
+    assert response.rejected is None
+    assert "rejected" not in response_to_json(response)
+
+
+def test_a_decline_before_any_design_has_nothing_rejected(monkeypatch) -> None:
+    response = _design_with(
+        monkeypatch, _report([], evidence_notes=("no usable contiguous mix plateau",))
+    )
+    assert response.rejected is None
+
+
+def test_rejected_designs_reach_the_wire_and_a_1_0_body_is_unchanged() -> None:
+    plain = DesignResponse(contract_version="1.0", candidates=[_valid_candidate()])
+    body = response_to_json(plain)
+    assert "rejected" not in body
+    assert "rejection_reasons" not in body["candidates"][0]
+
+    declined = DesignResponse(
+        contract_version="1.1",
+        decline_reason="no_publishable_candidate",
+        rejected=[_valid_candidate(rejection_reasons=["cliff", "tilt"])],
+    )
+    body = response_to_json(declined)
+    assert body["decline_reason"] == "no_publishable_candidate"
+    assert body["rejected"][0]["rejection_reasons"] == ["cliff", "tilt"]
+    assert body["rejected"][0]["filters"][0]["type"] == "low_shelf"
+
+
+@pytest.mark.parametrize(
+    "rejected, message",
+    [
+        ([], "empty list"),
+        ([_valid_candidate()], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=[])], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=[""])], "rejection_reasons"),
+        ([_valid_candidate(rejection_reasons=["x"], filters=[])], r"rejected\[0\]"),
+        (
+            [
+                _valid_candidate(
+                    rejection_reasons=["x"],
+                    filters=[BiquadSpec("high_pass", 20.0, 0.0, 0.7)],
+                )
+            ],
+            r"rejected\[0\]\.filters\[0\]",
+        ),
+    ],
+)
+def test_validate_response_rejects_a_malformed_rejected_list(rejected, message) -> None:
+    for shape in (
+        dict(candidates=[_valid_candidate()]),
+        dict(decline_reason="no_publishable_candidate"),
+    ):
+        with pytest.raises(ContractViolation, match=message):
+            validate_response(
+                DesignResponse(contract_version="1.1", rejected=rejected, **shape)
+            )
+
+
+def test_validate_response_refuses_reasons_on_a_candidate() -> None:
+    with pytest.raises(ContractViolation, match="belongs in rejected"):
+        validate_response(
+            DesignResponse(
+                contract_version="1.1",
+                candidates=[_valid_candidate(rejection_reasons=["cliff"])],
+            )
+        )
+
+
+def test_rejected_designs_are_exempt_from_the_confidence_order() -> None:
+    """Confidence measures evidence, not a pass: a refused design may score higher."""
+    validate_response(
+        DesignResponse(
+            contract_version="1.1",
+            candidates=[_valid_candidate(confidence=0.3)],
+            rejected=[
+                _valid_candidate(confidence=0.5, rejection_reasons=["cliff"]),
+                _valid_candidate(confidence=0.9, rejection_reasons=["tilt"]),
+            ],
+        )
+    )

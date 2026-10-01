@@ -12,14 +12,27 @@ fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's 
 packaging failure mode and the one platform difference (Windows defaults to 'spawn', which
 re-execs the frozen binary itself) that cannot be verified by only checking `--help` or
 `/health`. Exits non-zero and says why on any failure.
+
+The request is then sent a second time: the server runs with `--cache-dir`, and the second
+answer must be identical and must have come from the stage cache — the proof that a frozen
+build can key the cache at all (IMPROVEMENT_PLAN R2a; before, `digest_of` read sources the
+executable does not ship). The server refuses the cache unless every cached stage's baked
+digest is present, so a hit on the analysis covers them all.
+
+Last, the same audio is sent by reference (contract 1.2): written to float64 WAVs under the
+server's `--shared-root` and named by path with each column's SHA-256. The answer must be the
+same again — the proof that WAV decoding and the path checks work inside the executable.
 """
 
 import argparse
 import base64
+import gzip
 import http.client
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -82,6 +95,41 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
     }
 
 
+def _by_reference(root: Path) -> dict:
+    """`_known_filter_request`, its arrays in float64 WAVs under `root`, sent by path.
+
+    float64 so the files hold the inline values exactly; the digest is of the decoded column.
+    """
+    import hashlib
+
+    from scipy.io import wavfile
+
+    request = _known_filter_request()
+
+    def decode(encoded: dict) -> np.ndarray:
+        return np.frombuffer(base64.b64decode(encoded["data_base64"]), dtype="<f8")
+
+    def reference(name: str, values: np.ndarray) -> dict:
+        wavfile.write(root / name, request["fs"], values)
+        return {
+            "dtype": "float64",
+            "shape": [len(values)],
+            "file": {"path": name, "channel": 0},
+            "sha256": hashlib.sha256(
+                np.ascontiguousarray(values, dtype="<f8").tobytes()
+            ).hexdigest(),
+        }
+
+    return {
+        **request,
+        "mono_mix": reference("mono.wav", decode(request["mono_mix"])),
+        "channels": {
+            name: reference(f"{name}.wav", decode(encoded))
+            for name, encoded in request["channels"].items()
+        },
+    }
+
+
 def _wait_for_health(port: int, deadline: float) -> bool:
     while time.time() < deadline:
         try:
@@ -89,9 +137,10 @@ def _wait_for_health(port: int, deadline: float) -> bool:
             try:
                 conn.request("GET", "/health")
                 response = conn.getresponse()
-                if response.status == 200 and json.loads(response.read()) == {
-                    "status": "ok"
-                }:
+                if (
+                    response.status == 200
+                    and json.loads(response.read()).get("status") == "ok"
+                ):
                     return True
             finally:
                 conn.close()
@@ -107,14 +156,19 @@ def main() -> int:
         "executable", type=Path, help="path to the built beqforge binary"
     )
     parser.add_argument("--port", type=int, default=8423)
-    parser.add_argument("--startup-timeout", type=float, default=20.0)
-    parser.add_argument("--request-timeout", type=float, default=90.0)
+    # guards against a hang, not speed limits: CI runners are several times slower than a
+    # desktop, and a onefile build unpacks itself before it can answer /health
+    parser.add_argument("--startup-timeout", type=float, default=60.0)
+    parser.add_argument("--request-timeout", type=float, default=600.0)
     args = parser.parse_args()
 
     if not args.executable.exists():
         print(f"FAIL: {args.executable} does not exist", file=sys.stderr)
         return 1
 
+    records = Path(tempfile.mkdtemp(prefix="beqforge-smoke-"))
+    stages = Path(tempfile.mkdtemp(prefix="beqforge-smoke-cache-"))
+    shared = Path(tempfile.mkdtemp(prefix="beqforge-smoke-shared-"))
     proc = subprocess.Popen(
         [
             str(args.executable),
@@ -123,6 +177,12 @@ def main() -> int:
             str(args.port),
             "--strategy",
             "flatten",
+            "--record-dir",
+            str(records),
+            "--cache-dir",
+            str(stages),
+            "--shared-root",
+            str(shared),
             "--quiet",
         ]
     )
@@ -150,6 +210,60 @@ def main() -> int:
             f"OK: accepted a real candidate (method={candidate['method']!r}, "
             f"confidence={candidate['confidence']:.2f})"
         )
+        # a frozen build has no git checkout and no sources: the revision must be the one
+        # beqforge.spec baked in, and writing a record must not need either
+        commentary = candidate.get("commentary") or {}
+        build = commentary.get("beqforge_revision", "")
+        if not build.endswith("(frozen build)") or build.startswith("unknown"):
+            print(f"FAIL: no baked build revision, got {build!r}", file=sys.stderr)
+            return 1
+        print(f"OK: build revision {build!r}")
+        written = Path(commentary.get("run_record", ""))
+        if not written.is_file():
+            print(
+                f"FAIL: no run record written, got {commentary.get('run_record')!r}",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"OK: run record {written.name}")
+
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", args.port, timeout=args.request_timeout
+        )
+        try:
+            again_status, again = _post(conn, "/design", _known_filter_request())
+        finally:
+            conn.close()
+        if again_status != 200 or again != body:
+            print("FAIL: the repeat request answered differently", file=sys.stderr)
+            return 1
+        with gzip.open(written, "rt", encoding="utf-8") as handle:
+            stages_run = [name for name, _ in json.load(handle)["timings"]["stages"]]
+        if "analysis/cached" not in stages_run:
+            print(
+                f"FAIL: the repeat request did not reuse the analysis: {stages_run}",
+                file=sys.stderr,
+            )
+            return 1
+        if not any(stages.rglob("*.json.gz")):
+            print(f"FAIL: nothing cached in {stages}", file=sys.stderr)
+            return 1
+        print("OK: repeat request answered the same, from the stage cache")
+
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", args.port, timeout=args.request_timeout
+        )
+        try:
+            ref_status, by_ref = _post(conn, "/design", _by_reference(shared))
+        finally:
+            conn.close()
+        if ref_status != 200 or by_ref != body:
+            print(
+                f"FAIL: the request by reference answered differently: {ref_status} {by_ref}",
+                file=sys.stderr,
+            )
+            return 1
+        print("OK: the same audio by reference answered the same")
         return 0
     finally:
         proc.terminate()
@@ -158,6 +272,9 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        shutil.rmtree(records, ignore_errors=True)
+        shutil.rmtree(stages, ignore_errors=True)
+        shutil.rmtree(shared, ignore_errors=True)
 
 
 if __name__ == "__main__":

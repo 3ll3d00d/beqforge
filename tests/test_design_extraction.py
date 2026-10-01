@@ -181,3 +181,27 @@ def test_chunking_the_bootstrap_cannot_change_what_it_returns() -> None:
     finally:
         extraction._BOOTSTRAP_ELEMENTS = original
     assert np.array_equal(whole.margin_se_db, chunked.margin_se_db)
+
+
+def test_digital_silence_is_absent_programme_not_a_quiet_scene() -> None:
+    """IMPROVEMENT_PLAN E8: an LFE that is exact zeros two-thirds of the time.
+
+    Classed as quiet, the zero frames sat at the 1e-300 floor: past `floor_percentile` of them
+    the scene floor itself landed at about -3000 dB, every audible frame read as loud, and the
+    peak-to-quiet contrast came out near 2,900 dB — measured on real LFE and surround channels.
+    """
+    samples = synthesise(SyntheticProfile(duration_s=600.0), FS, seed=11)
+    silenced = samples.copy()
+    blocks = silenced.reshape(-1, int(30 * FS))
+    blocks[::3] = 0.0
+    blocks[1::3] = 0.0
+    silenced = blocks.ravel()
+
+    envelopes = extract(silenced, FS)
+    measured = envelopes.margin_db[np.isfinite(envelopes.margin_db)]
+    assert measured.size and np.median(measured) < 200.0, np.median(measured)
+    assert envelopes.loud_frames < envelopes.total_frames / 3
+    assert envelopes.quiet_frames > 0
+
+    everything = extract(np.zeros_like(samples), FS)
+    assert everything.loud_frames == 0 and everything.quiet_frames == 0

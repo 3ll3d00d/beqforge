@@ -49,7 +49,7 @@ def device_error_db(
     is not the one the optimiser produced. Measured at the device's rate, where the rounding
     happens, then resampled onto the analysis axis.
 
-    Measured across the eight titles this runs 0.08 to 1.41 dB. Two things worth knowing about
+    Over real material this runs from under a tenth of a dB to a little over one. Two things worth knowing about
     its size: a 32-bit float device is no better than 5.23 fixed point here, because the
     coefficients that matter sit near |a1| = 2 where both formats have the same 1.19e-7 absolute
     step; and the mechanism is not pole radius — one step moves that by 0.03% of its margin —
@@ -114,21 +114,55 @@ def waveform_peak(samples: np.ndarray) -> float:
     Sixteen-fold sampling bounds sinusoidal peak-grid loss at Nyquist to 0.042 dB; dedicated
     device-rate simulations separately exercise multitone/transient peak error. Headroom is
     an output, never an acceptance gate.
+
+    Blocks that provably cannot hold the peak are not interpolated (IMPROVEMENT_PLAN C4).
+    Every interpolated value is a weighted sum of the input samples within the kernel's
+    reach, so no block can exceed its largest input sample times the kernel's largest
+    polyphase gain. Taking blocks loudest first, a block whose bound is already below the peak
+    found is skipped. The answer is bit-identical to interpolating everything: the same
+    per-block computation, and a maximum does not depend on order. It was 82% of judging.
     """
     factor, half_width, block = 16, 48, 65536
     kernel = signal.firwin(
         2 * half_width * factor + 1, 1 / factor, window=("kaiser", 10)
     )
-    peak = 0.0
+    # `resample_poly` scales the kernel by `factor`; each output phase uses every
+    # `factor`-th tap. A hair of margin for the rounding in the sums it bounds.
+    gain = float(
+        max(np.sum(np.abs(factor * kernel[p::factor])) for p in range(factor))
+    ) * (1.0 + 1e-9)
+    spans = []
     for start in range(0, len(samples), block):
         end = min(start + block, len(samples))
         left, right = max(0, start - half_width), min(len(samples), end + half_width)
+        reach = float(np.max(np.abs(samples[left:right]))) if right > left else 0.0
+        spans.append((reach, start, end, left, right))
+    peak = 0.0
+    for reach, start, end, left, right in sorted(spans, key=lambda s: -s[0]):
+        if reach * gain < peak:
+            break
         interpolated = signal.resample_poly(
             samples[left:right], factor, 1, window=kernel
         )
         retained = interpolated[(start - left) * factor : (end - left) * factor]
         peak = max(peak, float(np.max(np.abs(retained))))
     return peak
+
+
+def house_curve_db(
+    freqs: np.ndarray, pivot_hz: float, tilt_db_per_octave: float
+) -> np.ndarray:
+    """The goal below the knee, in dB re the plateau: 0 at and above `pivot_hz`, then sloping.
+
+    **Positive tilt rises toward the bottom** (the audio convention of
+    `AcceptParams.target_tilt_db_per_octave`); negative is a gentle rolloff; zero is flat and
+    identically zero. One definition for both halves: the target a strategy builds
+    (`pipeline.low_end_deficit_db`) and the shape a result is judged and ranked against
+    (`Correction.requested_db`), pivoting at the same point — the top of the judged band.
+    """
+    freqs = np.asarray(freqs, dtype=float)
+    rise = tilt_db_per_octave * np.log2(pivot_hz / np.maximum(freqs, 1e-9))
+    return np.where(freqs < pivot_hz, rise, 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,9 +220,7 @@ class Correction:
         Zero tilt gives a flat request, which is what every clause compared against before this
         existed, so `requested_db(0.0)` is identically zero and nothing changes.
         """
-        top = self.band_hz[1]
-        rise = target_tilt_db_per_octave * np.log2(top / np.maximum(self.freqs, 1e-9))
-        return np.where(self.freqs < top, rise, 0.0)
+        return house_curve_db(self.freqs, self.band_hz[1], target_tilt_db_per_octave)
 
     def requested_level_db(self, target_tilt_db_per_octave: float = 0.0) -> float:
         """Mean of the requested shape over the judged band — what `level_db` is compared to.
@@ -207,11 +239,10 @@ class Correction:
     ) -> np.ndarray:
         """What the correction was actually asked to achieve (AGENTS.md, "judged against intent").
 
-        `before_db + priced_target_db`, plus the house curve on top of it (inert while
-        nothing builds a house curve into a target — `target_tilt_db_per_octave` defaults to
-        0.0 and `priced_by_evidence` never adds one — but stated once here rather than left to
-        be got right twice when §14.4 wires it in). `priced_target_db` is on `DESIGN_GRID` and
-        is interpolated onto `self.freqs`.
+        `before_db + priced_target_db`. The house curve is *not* added on top: targets are built
+        against it (`pipeline.low_end_deficit_db`), so a priced target already carries whatever
+        of the goal the evidence licensed, and adding it again would ask for the goal twice.
+        `priced_target_db` is on `DESIGN_GRID` and is interpolated onto `self.freqs`.
 
         `priced_target_db is None` means no strategy built a target for this candidate.
         A caller-supplied cascade may have none; intent then falls back to the house curve
@@ -219,14 +250,9 @@ class Correction:
         wrong: zero added to `before_db` is not "no intent", it is "intent to leave the input
         exactly as it was", which is not what a candidate with no target is claiming.
         """
-        house = self.requested_db(target_tilt_db_per_octave)
         if priced_target_db is None:
-            return house
-        return (
-            self.before_db
-            + np.interp(self.freqs, DESIGN_GRID, priced_target_db)
-            + house
-        )
+            return self.requested_db(target_tilt_db_per_octave)
+        return self.before_db + np.interp(self.freqs, DESIGN_GRID, priced_target_db)
 
     def intent_level_db(
         self,
@@ -273,10 +299,11 @@ class Correction:
         One physical quantity in dB rather than a weighted combination of the clauses'
         statistics, which is what makes it comparable without a constant to argue about: level,
         tilt and wobble are all departures from this same line, and this measures all three at
-        once in the unit they are already in. Ranking on `wobble_db` alone decided on 0.08-0.23
-        dB of a quantity whose own scatter is 3-14 dB, and was blind to level — on title 3 it
-        preferred a candidate sitting +3.70 dB above plateau to one at -0.36 because its wobble
-        was 0.09 dB lower. The same two score 4.27 and 1.54 here.
+        once in the unit they are already in. Ranking on `wobble_db` alone decided on differences of a
+        fraction of a dB in a quantity whose own scatter is several dB, and was blind to level —
+        it could prefer a candidate sitting nearly 4 dB above plateau to one a third of a dB
+        below it because its wobble was a hair lower. Departure from the requested shape scores
+        those two very differently, and correctly.
 
         Measured against the request rather than against flat, so the ranking cannot quietly
         reimpose flat on a run that asked for a house curve. At 0.0 the two are identical.
@@ -356,7 +383,7 @@ class Correction:
         roughness = self.wobble_db(self.before_db)
         if wobble > roughness + spread_margin_db:
             found.append(
-                f"corrected low end wobbles {wobble:.1f} dB over "
+                f"corrected low end is uneven: {wobble:.1f} dB of ripple about its trend over "
                 f"{self.band_hz[0]:.0f}-{self.band_hz[1]:.0f} Hz against {roughness:.1f} dB "
                 "in the material; expected flat"
             )
@@ -392,44 +419,11 @@ def verify(
     reference_samples: np.ndarray | None = None,
     playback_model: str | None = None,
 ) -> Correction:
-    """Apply `filters` to `samples` and measure the corrected low end.
+    """Apply the published device response and measure the corrected sub spectrum.
 
-    The band has to be wide enough to see a slope. An earlier default of 5-16 Hz was not: two
-    designs measured +0.17 and +0.05 dB/octave there and looked identical in shape, while over
-    5-45 Hz they separate to -1.17 and +0.10 — one rising into the bottom, the other flat. A
-    window narrower than the shape being judged reads a step as a slope and a slope as nothing.
-
-    `exclude_bands_hz` drops authored emphasis, which is content: correcting a hump at 20 Hz is
-    not the job and including it would penalise a correct filter.
-
-    The reference used to be a single fixed point, `before`/`after` each anchored to their own
-    value at 40 Hz — a fixed point that was long known to be wrong before it was fixed. On Predator that single point sits on the
-    shoulder of a local bump 1.7-2.3 dB above the mix's own plateau, which read as `level_db`
-    running 4 dB under reference when the corrected curve was in fact flat within 2 dB of it —
-    a shape that passed R1 everywhere else and failed only because the ruler had a bump in it.
-    `plateau_reference` is the fix already used for exactly this on `flatten`'s own target and
-    on every per-channel reference in `diagnose`; verification judging the result by a
-    different rule than construction judged the target was the gap, not two separate bugs.
-    One reference, from `before` alone so a filter cannot move its own goalposts, applied to
-    both curves so what's compared is how far `after` closed on where `before` already stood.
-
-    With `reference_samples`, `samples` is the post-bass-management sub feed and the reference
-    is the aligned full-band programme used to construct targets. The fixed baseline is
-    PSD(sub_before) - PSD(programme_before), measured before correction: it includes the
-    model's crossover and coherent channel sum, not a target or fitted cascade. Sub spectra
-    are judged relative to this unchanged baseline and the programme's own plateau. Thus
-    independent wrong-filter checks retain the same house/material meaning, and a crossover
-    does not become a deficit. Raw playback spectra and the baseline remain in Correction.
-    This describes the sub output, not the combined sub-plus-mains acoustic response.
-
-    The corrected waveform uses the device-rate complex response, including publication
-    rounding and coefficient quantisation, on the band-limited extracted signal. Magnitude
-    and phase therefore include the full rate difference. An unstable publication retains
-    only a frequency-response diagnostic for rejection; it has no finite waveform/headroom.
-
-    `priced_target_db` is the evidence-priced target the fitter was handed, if any (§14.2) — on
-    `DESIGN_GRID`, `None` for a caller-supplied candidate with no target. Only reaches
-    `Correction.concerns`'s smoke test here; `assess` takes it directly.
+    Use the quantised complex transfer on the extracted waveform, then compare
+    before and after against one programme plateau and an unchanged playback
+    baseline. The resulting curve feeds the independent acceptance checks.
     """
     if any(a <= band_hz[1] and b >= band_hz[0] for a, b in exclude_bands_hz):
         raise ValueError(
@@ -486,6 +480,7 @@ def verify(
 
 
 def _mean_db(samples: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
+    """Measure the waveform's Welch mean spectrum for before/after comparison."""
     freqs, power = signal.welch(samples, fs=fs, nperseg=4096, noverlap=2048)
     keep = freqs > 0
     return freqs[keep], 10.0 * np.log10(power[keep] + 1e-300)

@@ -119,14 +119,11 @@ def bass_managed_sum(
     *,
     playback: PlaybackParams | None = None,
 ) -> np.ndarray | None:
-    """Sub output under the declared model, in units where a peak of 1 is full scale.
+    """Model the post bass-management sub feed used for playback checks.
 
-    The positional crossover is retained for callers of the original model. `playback`
-    supplies the complete configuration when given. Defaults reproduce the historical
-    mains-LR4/sum/bus-LR4 arrangement and -20.2/-10.2 dB gains. Those are assumptions, not
-    calibrated receiver levels. Bass-management filters run at the extraction sample rate;
-    BEQ verification separately applies the declared device's published realisation.
-    Missing channel decomposition cannot establish this signal and returns None.
+    Low-pass and weight the mains, add the weighted LFE, then apply the bus
+    low-pass and gain. This waveform is the basis for corrected-spectrum and
+    clipping measurements; absent channel signals leave it unavailable.
     """
     if not material.channels:
         return None

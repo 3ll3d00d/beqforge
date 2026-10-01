@@ -48,6 +48,9 @@ def test_nondefault_shared_settings_reach_both_fit_paths(monkeypatch):
         return [BiquadSpec("low_shelf", 20.0, 3.0, 0.707)], 0.1
 
     monkeypatch.setattr(D, "fit_minimal_biquads", fit)
+    # white noise sits within a few dB of its own plateau, so the measured-deficit cap would
+    # bind before the contrast ceiling this test reads confidence_z off (6 - 2.5 * 1 = 3.5)
+    monkeypatch.setattr(pipeline, "low_end_deficit_db", lambda *a, **k: None)
     (proposal,) = pipeline.parametric_targets(*inputs(), params)
     effective = pipeline.STRATEGIES["parametric"].effective_params(params)
     assert effective.max_boost_db == 12.0
@@ -92,6 +95,19 @@ def test_nondefault_shared_settings_reach_both_fit_paths(monkeypatch):
         {"max_sections": 2},
         {"realisation": Realisation(fs=48000)},
         {"accept": replace(pipeline.PipelineParams().accept, max_drift_db=4.5)},
+        # read by the deficit, pricing and goal-tolerance steps, not by the fit (C3)
+        {
+            "accept": replace(
+                pipeline.PipelineParams().accept, target_tilt_db_per_octave=1.0
+            )
+        },
+        {"accept": replace(pipeline.PipelineParams().accept, goal_tolerance_db=3.0)},
+        {"accept": replace(pipeline.PipelineParams().accept, min_judge_octaves=1.5)},
+        {"verify_floor_hz": 8.0},
+        {"flatten_settled_octaves": 0.5},
+        {"flatten_deficit_floor_db": 1.0},
+        {"flatten_taper_ratio": 1.5},
+        {"exclude_bands_hz": ((30.0, 32.0),)},
     ],
 )
 def test_consumed_settings_change_the_strategy_key(changed):
@@ -102,15 +118,31 @@ def test_consumed_settings_change_the_strategy_key(changed):
         "parametric",
         strategy.cache_modules,
         material,
-        strategy.effective_params(params),
+        strategy.cache_config(params),
     )
     second = cache.key_for(
         "parametric",
         strategy.cache_modules,
         material,
-        strategy.effective_params(replace(params, **changed)),
+        strategy.cache_config(replace(params, **changed)),
     )
     assert first != second
+
+
+def test_acceptance_only_settings_keep_the_strategy_key():
+    """A judging tolerance the derivation never reads must not drop a parametric fit."""
+    params = pipeline.PipelineParams()
+    strategy = pipeline.STRATEGIES["parametric"]
+    changed = replace(
+        params,
+        accept=replace(params.accept, level_tolerance_db=4.0),
+        restore_caps_db=(30.0,),
+    )
+    assert repr(strategy.cache_config(params)) == repr(strategy.cache_config(changed))
+
+
+def test_parametric_modules_include_the_goal_curve():
+    assert "verify.py" in cache.PARAMETRIC_MODULES
 
 
 def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
@@ -138,6 +170,9 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
         return real_design(*args, **kwargs)
 
     monkeypatch.setattr(pipeline, "design", design)
+    # white noise is all texture, so the ripple blocker would (rightly) stop the run before
+    # the stage this test is about — caching — is ever reached
+    monkeypatch.setattr(pipeline, "passband_ripple_db", lambda *a, **k: None)
     params = pipeline.PipelineParams(
         strategies=("parametric",), max_sections=1, confidence_z=2.0, fit_seeds=(3,)
     )
@@ -166,6 +201,32 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
     assert record._candidate(moved.candidates[0]) == record._candidate(
         fresh.candidates[0]
     )
+
+
+@pytest.mark.parametrize(
+    "accept_change",
+    [{"target_tilt_db_per_octave": 3.0}, {"goal_tolerance_db": 50.0}],
+)
+def test_goal_change_is_not_served_the_old_goals_proposal(
+    tmp_path, monkeypatch, accept_change
+):
+    """C3: a warm run after a goal dial moves must equal a fresh run at the new setting."""
+    material, diagnosis, envelopes, identification = inputs()
+    monkeypatch.setattr(pipeline, "diagnose", lambda *a: diagnosis)
+    monkeypatch.setattr(pipeline, "extract", lambda *a: envelopes)
+    monkeypatch.setattr(pipeline, "identify_rolloff", lambda *a: identification)
+    monkeypatch.setattr(pipeline, "passband_ripple_db", lambda *a, **k: None)
+    params = pipeline.PipelineParams(
+        strategies=("parametric",), max_sections=1, confidence_z=2.0
+    )
+    path = tmp_path / "stages.json.gz"
+    pipeline.run(material, params, cache_path=path)
+    changed = replace(params, accept=replace(params.accept, **accept_change))
+    warm = pipeline.run(material, changed, cache_path=path)
+    fresh = pipeline.run(material, changed)
+    assert [record._candidate(c) for c in warm.candidates] == [
+        record._candidate(c) for c in fresh.candidates
+    ]
 
 
 def test_partial_parametric_intent_is_judged_without_weakening_wrong_filter_checks(

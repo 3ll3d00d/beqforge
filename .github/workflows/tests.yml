@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # brew's and choco's default ffmpeg both lack the libsoxr resampler tools/extract.py
+      # prefers, unlike Ubuntu's apt package — but extract.py now detects that at runtime and
+      # falls back to ffmpeg's default resampler, so any ordinary ffmpeg install is fine here.
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg

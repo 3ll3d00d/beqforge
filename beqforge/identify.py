@@ -55,10 +55,9 @@ class IdentifyParams:
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Bands to drop before fitting, for narrow authored features that are content, not shape.
 
-    The first real title carries a +14 dB feature about a third of an octave wide at 20 Hz in
-    its LFE channel. It is not a rolloff and it is not natural envelope; a robust loss does not
-    reject it because it is too broad to look like an outlier, and left in it drags the corner
-    from 13 Hz to 20."""
+    An LFE channel can carry a feature of ten-odd dB about a third of an octave wide. It is not a
+    rolloff and it is not natural envelope; a robust loss does not reject it because it is too
+    broad to look like an outlier, and left in it drags the fitted corner upward by several Hz."""
 
     envelope_order: int = 1
     """Polynomial order of `N(f)` in log-frequency.
@@ -153,7 +152,12 @@ class Identification:
 def identify_rolloff(
     envelopes: Envelopes, params: IdentifyParams | None = None
 ) -> Identification:
-    """Fit `N + A` to the extracted envelope and compare it against `N` alone."""
+    """Test whether attenuation improves on a smooth-content explanation.
+
+    Fit a smooth natural spectrum `N` and a joint `N + A` rolloff model to
+    unexcluded bins in the fit band. The result informs diagnosis and the parametric proposal;
+    it does not license boost by itself.
+    """
     params = params or IdentifyParams()
     freqs, values, weights = _fit_inputs(envelopes, params)
     if len(freqs) < 3 * (params.envelope_order + 4):
@@ -188,11 +192,7 @@ def identify_rolloff(
 def _fit_inputs(
     envelopes: Envelopes, params: IdentifyParams
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Bins worth fitting, and how much each is worth.
-
-    Weighting is the coherence of §3.4 rather than any absolute noise-floor threshold: where
-    coherence collapses the weight goes to zero on its own.
-    """
+    """Select unexcluded mean-spectrum bins with uniform fit weights."""
     band = (envelopes.freqs >= params.fit_band_hz[0]) & (
         envelopes.freqs <= params.fit_band_hz[1]
     )
@@ -242,11 +242,10 @@ def _fit_two_part(
 ) -> tuple[RolloffFit, np.ndarray]:
     """Fit `N + A` together under a robust loss.
 
-    Robust because real content is not smooth. The first title tried carries a narrow ~+8 dB
-    resonance at 20 Hz, about a third of an octave wide, sitting on an otherwise unremarkable
-    envelope. A low-order `N` cannot represent a feature that narrow, so under least squares
-    the attenuation term absorbs it: the corner is dragged up to 18.5 Hz and the knee pegs at
-    its bound, sharper than any physical filter. A soft-L1 loss treats the resonance as the
+    Robust because real content is not smooth. A mix may carry a narrow resonance, about a third of an octave
+    wide, on an otherwise unremarkable envelope. A low-order `N` cannot represent a feature that
+    narrow, so under least squares the attenuation term absorbs it: the corner is dragged up
+    and the knee pegs at its bound, sharper than any physical filter. A soft-L1 loss treats the resonance as the
     outlier it is and leaves the broad shape to be measured.
 
     All parameters are fitted jointly, from several starts, because `N` and `A` trade against

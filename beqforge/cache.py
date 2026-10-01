@@ -6,12 +6,8 @@ model read those and decide what to do about them. Only the last of those change
 acceptance model is being worked on, and only the fitter changes while the fitter is. Anything
 upstream of the edit is being recomputed for nothing.
 
-Measured across the four titles, at 1,586 s of pipeline time:
-
-    target/parametric   403.2 s   25.4%
-    diagnose etc.       116.9 s    7.4%
-    ---------------------------------
-    cacheable           520.1 s   32.8%
+Measured over a set of real titles, the cacheable stages were about a third of pipeline time:
+`parametric` roughly a quarter, `diagnose`/`extract`/`identify` most of the rest.
 
 `parametric` is the expensive one and the one that least needs repeating. What it contributes
 is a *diagnosis* — does this look like a deliberate rolloff, and of what alignment and order —
@@ -41,9 +37,13 @@ import hashlib
 import json
 import logging
 import math
+import os
+import sys
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -79,6 +79,7 @@ PARAMETRIC_MODULES = ANALYSIS_MODULES + (
     "design.py",
     "filters.py",
     "pipeline.py",
+    "verify.py",
 )
 """What a parametric proposal is computed by — the analysis, plus the inversion and the fit.
 
@@ -90,6 +91,9 @@ the RBJ arithmetic or fitting changes.
 `pipeline.py` is here because `parametric_targets` lives in it and builds the `DesignParams`.
 It over-invalidates — editing `counterfactual_target` drops a parametric proposal that did not
 depend on it — and that is the right direction to be wrong in.
+
+`verify.py` is here because the deficit a parametric target is capped at is measured against
+`verify.house_curve_db`, the goal below the knee (IMPROVEMENT_PLAN C3).
 """
 
 
@@ -97,14 +101,60 @@ def _package_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def digest_of(modules: tuple[str, ...]) -> str:
-    """SHA-256 over the named sources, first 12 hex. Paths are package-root relative."""
+STAGE_DIGESTS_FILE = "STAGE_DIGESTS.json"
+"""Written beside the package by `beqforge.spec`: each cached stage's module digest, baked."""
+
+
+class CacheUnavailable(RuntimeError):
+    """No trustworthy digest of the code a stage depends on, so no key: run uncached."""
+
+
+def _module_set_name(modules: tuple[str, ...]) -> str:
+    return "\0".join(modules)
+
+
+def _digest_sources(modules: tuple[str, ...]) -> str:
     root = _package_root()
     digest = hashlib.sha256()
     for name in modules:
         digest.update(name.encode("utf-8"))
         digest.update((root / name).read_bytes())
     return digest.hexdigest()[:12]
+
+
+def bake_digests(module_sets: list[tuple[str, ...]]) -> dict[str, str]:
+    """What `beqforge.spec` writes to `STAGE_DIGESTS_FILE`, from the tree being built."""
+    return {_module_set_name(m): _digest_sources(m) for m in module_sets}
+
+
+def _baked_digests_path() -> Path:
+    return _package_root() / STAGE_DIGESTS_FILE
+
+
+def digest_of(modules: tuple[str, ...]) -> str:
+    """SHA-256 over the named sources, first 12 hex. Paths are package-root relative.
+
+    A frozen build ships bytecode, not sources, so it reads the digests `beqforge.spec` baked
+    from the tree it was built from — identical to these by construction. Without them it
+    raises `CacheUnavailable` rather than keying on nothing: before this the packaged
+    `beqforge design` failed on its default cache with `FileNotFoundError` (IMPROVEMENT_PLAN
+    R2a, step 3).
+    """
+    if not getattr(sys, "frozen", False):
+        return _digest_sources(modules)
+    try:
+        baked = json.loads(_baked_digests_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as missing:
+        raise CacheUnavailable(
+            f"frozen build without {STAGE_DIGESTS_FILE}; stage cache disabled"
+        ) from missing
+    try:
+        return baked[_module_set_name(modules)]
+    except KeyError:
+        raise CacheUnavailable(
+            f"{STAGE_DIGESTS_FILE} has no digest for {', '.join(modules)}; "
+            "stage cache disabled"
+        ) from None
 
 
 def material_fingerprint(material: Material) -> str:
@@ -115,9 +165,12 @@ def material_fingerprint(material: Material) -> str:
     stage describes, and a `Material` need not have come from a file at all — the harness
     builds them and so do the tests. Hashing 488 MB costs 0.25 s against the 21-100 s a hit
     saves, so the exact answer is affordable and the cheap one is not worth its risk.
+
+    The samples, not what they are called. No stage stores anything that depends on the
+    material's name, so hashing it only stopped a renamed or moved file hitting — and every
+    designer request is named "designer-request", whatever it carries (IMPROVEMENT_PLAN R2a).
     """
     digest = hashlib.sha256()
-    digest.update(material.name.encode("utf-8"))
     digest.update(str(material.fs).encode("utf-8"))
     digest.update(str(material.coverage).encode("utf-8"))
     digest.update(memoryview(np.ascontiguousarray(material.mono_mix, dtype="<f8")))
@@ -197,7 +250,6 @@ def _channel(channel: ChannelDiagnosis) -> dict[str, Any]:
         "level_spread_db": _pack(channel.level_spread_db),
         "contrast_db": _pack(channel.contrast_db),
         "contrast_se_db": _pack(channel.contrast_se_db),
-
         "max_slope_db_per_octave": _num(channel.max_slope_db_per_octave),
         "max_slope_hz": _num(channel.max_slope_hz),
         "passband_share": _num(channel.passband_share),
@@ -216,7 +268,6 @@ def _channel_back(raw: dict[str, Any]) -> ChannelDiagnosis:
         level_spread_db=_unpack(raw.get("level_spread_db")),
         contrast_db=_unpack(raw.get("contrast_db")),
         contrast_se_db=_unpack(raw.get("contrast_se_db")),
-
         max_slope_db_per_octave=_back(raw["max_slope_db_per_octave"]),
         max_slope_hz=_back(raw["max_slope_hz"]),
         passband_share=_back(raw["passband_share"]),
@@ -381,7 +432,75 @@ def proposals_from_json(raw: list[dict[str, Any]], factory) -> list:
     ]
 
 
-# --- the file -----------------------------------------------------------------------------
+# --- the stores ---------------------------------------------------------------------------
+
+
+class Store(Protocol):
+    """Where stages are kept. `load` returns the payload or None, and never raises."""
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None: ...
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None: ...
+
+
+def _umask() -> int:
+    current = os.umask(0)
+    os.umask(current)
+    return current
+
+
+REPLACE_RETRY_S = (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
+"""Waits between attempts to rename over an entry another process has open (Windows only)."""
+
+
+def _replace(temporary: str, path: Path) -> bool:
+    """Rename `temporary` over `path`; False if a reader kept it open throughout.
+
+    Windows refuses to replace a file any process has open, so a reader mid-load makes the
+    rename fail with `PermissionError` (CI, 2026-09-30). Readers hold an entry only while
+    they decompress it, so wait and retry. If it is still held after the last wait, give up:
+    the entry already there is the same payload or a stale one, so skipping costs at most a
+    recompute, never a wrong answer — and a cache must not fail the run it serves.
+    """
+    for wait in (*REPLACE_RETRY_S, None):
+        try:
+            os.replace(temporary, path)
+            return True
+        except PermissionError:
+            if wait is None:
+                return False
+            time.sleep(wait)
+    return False
+
+
+def _write_atomic(path: Path, document: Any) -> bool:
+    """Write to a temporary name beside `path`, fsync, then rename over it.
+
+    A reader sees the old file or the new one, never a partial one (IMPROVEMENT_PLAN R2a): a
+    rename within one directory is atomic, and the fsync makes sure what is renamed is on disk.
+    Returns False, having written nothing, when the rename could not be made (`_replace`).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        # `mkstemp` makes the file private (0600); a cache shared between processes, possibly
+        # under different users, needs the mode an ordinary file would get here
+        os.chmod(temporary, 0o666 & ~_umask())
+        with os.fdopen(fd, "wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb") as zipped:
+                zipped.write(json.dumps(document).encode("utf-8"))
+            raw.flush()
+            os.fsync(raw.fileno())
+        if _replace(temporary, path):
+            return True
+        logger.warning(f"  could not replace {path}: held open by another process")
+        Path(temporary).unlink(missing_ok=True)
+        return False
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _read_document(path: Path) -> dict[str, Any]:
@@ -393,39 +512,102 @@ def _read_document(path: Path) -> dict[str, Any]:
         return {}
 
 
+@dataclass(frozen=True, slots=True)
+class FileStore:
+    """One file per title, every stage in it — the CLI's layout, beside the material.
+
+    Writing a stage reads the file, adds the stage and replaces the file atomically. Two
+    writers on one title can still lose a stage (last one wins): that costs a recompute, never
+    a wrong answer, so it is documented rather than locked.
+    """
+
+    path: Path
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None:
+        if not self.path.is_file():
+            return None
+        entry = _read_document(self.path).get(stage)
+        if not entry:
+            return None
+        stored = entry.get("key", {})
+        moved = [name for name, value in key.items() if stored.get(name) != value]
+        if moved:
+            logger.info(
+                f"  {stage}: cache stale ({', '.join(moved)} differ); recomputing"
+            )
+            return None
+        logger.info(f"  {stage}: reused from {self.path}")
+        return entry["payload"]
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
+        document = _read_document(self.path) if self.path.is_file() else {}
+        document[stage] = {"key": key, "payload": payload}
+        if not _write_atomic(self.path, document):
+            return
+        logger.info(
+            f"  {stage}: cached to {self.path} ({self.path.stat().st_size / 1e6:.1f} MB)"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DirStore:
+    """One file per entry under a directory: `<root>/<stage>/<sha256 of the key>.json.gz`.
+
+    For the designer server, whose requests have no path to sit beside, and for several
+    processes sharing one directory. The name is the key, so different configurations sit
+    side by side — a server restarted with another goal dial does not evict the first one's
+    entries. An entry is never rewritten with different content: two writers of one key write
+    the same payload, so replacing an existing entry is harmless. `load` still compares the
+    stored key, as a guard against a corrupt file or a hash collision. Never evicts.
+    """
+
+    root: Path
+
+    def entry(self, stage: str, key: dict[str, Any]) -> Path:
+        canonical = json.dumps(key, sort_keys=True, separators=(",", ":"))
+        name = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return self.root / stage / f"{name}.json.gz"
+
+    def load(self, stage: str, key: dict[str, Any]) -> Any | None:
+        path = self.entry(stage, key)
+        if not path.is_file():
+            logger.info(f"  {stage}: no entry in {self.root}")
+            return None
+        document = _read_document(path)
+        if document.get("key") != key:
+            logger.info(f"  {stage}: entry in {self.root} unreadable or not this key")
+            return None
+        logger.info(f"  {stage}: reused from {path}")
+        return document["payload"]
+
+    def store(self, stage: str, key: dict[str, Any], payload: Any) -> None:
+        path = self.entry(stage, key)
+        if not _write_atomic(path, {"key": key, "payload": payload}):
+            return
+        logger.info(f"  {stage}: cached to {path} ({path.stat().st_size / 1e6:.1f} MB)")
+
+
+def as_store(cache: "Path | str | Store | None") -> Store | None:
+    """A path is today's per-title file; a store is used as it is; None is no cache."""
+    if cache is None:
+        return None
+    if isinstance(cache, (str, Path)):
+        return FileStore(Path(cache))
+    return cache
+
+
 def load(path: Path | str | None, stage: str, key: dict[str, Any]) -> Any | None:
-    """The stored payload for `stage`, or None with the reason logged.
+    """The stored payload for `stage` in a per-title file, or None with the reason logged.
 
     A miss is never an error. The reason is logged at INFO, because "why did that take a
     hundred seconds again" is a question a run should answer without being asked twice.
     """
-    if path is None:
-        return None
-    path = Path(path)
-    if not path.is_file():
-        return None
-    entry = _read_document(path).get(stage)
-    if not entry:
-        return None
-    stored = entry.get("key", {})
-    moved = [name for name, value in key.items() if stored.get(name) != value]
-    if moved:
-        logger.info(f"  {stage}: cache stale ({', '.join(moved)} differ); recomputing")
-        return None
-    logger.info(f"  {stage}: reused from {path}")
-    return entry["payload"]
+    return None if path is None else FileStore(Path(path)).load(stage, key)
 
 
 def store(
     path: Path | str | None, stage: str, key: dict[str, Any], payload: Any
 ) -> None:
-    """Write one stage, leaving the others in the file alone."""
-    if path is None:
-        return
-    path = Path(path)
-    document = _read_document(path) if path.is_file() else {}
-    document[stage] = {"key": key, "payload": payload}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt", encoding="utf-8") as handle:
-        json.dump(document, handle)
-    logger.info(f"  {stage}: cached to {path} ({path.stat().st_size / 1e6:.1f} MB)")
+    """Write one stage to a per-title file, leaving the others in it alone."""
+    if path is not None:
+        FileStore(Path(path)).store(stage, key, payload)

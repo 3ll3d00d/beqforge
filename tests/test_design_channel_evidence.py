@@ -54,9 +54,12 @@ def test_mix_floor_is_measured_on_mix_not_walled_lfe():
     params = DiagnoseParams()
     _, plateau = plateau_reference(result.mix_db, result.freqs, params)
     axis, strata = stratified_response(material.mono_mix, 1000, params, plateau)
-    expected = np.interp(
-        result.freqs, axis, np.ptp(np.vstack(list(strata.values())), axis=0)
-    )
+    from beqforge.diagnose import smooth_unexcluded
+
+    # the spread is taken on each stratum smoothed as the deficit is (one noisy bin must not
+    # end the level-invariance run) — measured on the mix, which is what this test is about
+    smoothed = [smooth_unexcluded(v, axis, (), 15) for v in strata.values()]
+    expected = np.interp(result.freqs, axis, np.ptp(np.vstack(smoothed), axis=0))
     np.testing.assert_allclose(result.level_spread_db, expected)
     # Full-range mains supply real power below the LFE wall, whatever old-band dominance.
     bottom = (result.freqs > 5) & (result.freqs < 8)
