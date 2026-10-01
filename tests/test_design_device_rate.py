@@ -161,6 +161,52 @@ def test_peak_interpolation_is_independent_of_block_boundaries():
     assert peaks[0] == pytest.approx(peaks[1], abs=1e-12)
 
 
+def _peak_of_everything(samples: np.ndarray) -> float:
+    """`waveform_peak` before C4: every block interpolated, none skipped."""
+    factor, half_width, block = 16, 48, 65536
+    kernel = signal.firwin(
+        2 * half_width * factor + 1, 1 / factor, window=("kaiser", 10)
+    )
+    peak = 0.0
+    for start in range(0, len(samples), block):
+        end = min(start + block, len(samples))
+        left, right = max(0, start - half_width), min(len(samples), end + half_width)
+        interpolated = signal.resample_poly(
+            samples[left:right], factor, 1, window=kernel
+        )
+        retained = interpolated[(start - left) * factor : (end - left) * factor]
+        peak = max(peak, float(np.max(np.abs(retained))))
+    return peak
+
+
+@pytest.mark.parametrize("case", range(6))
+def test_skipping_blocks_that_cannot_hold_the_peak_changes_nothing(case):
+    """C4: bit-identical to interpolating the whole signal, including where it is hardest —
+    a peak straddling a block edge, intersample overshoot near Nyquist, equal blocks."""
+    rng = np.random.default_rng(case)
+    n = 5 * 65536 + 1234
+    if case == 0:  # programme-like: noise with sparse loud transients
+        samples = 0.01 * rng.normal(size=n)
+        for at in rng.integers(0, n, 12):
+            samples[at : at + 50] += rng.normal(
+                scale=0.5, size=len(samples[at : at + 50])
+            )
+    elif case == 1:  # near-Nyquist tone: interpolated peaks well above the samples
+        samples = 0.3 * np.sin(2 * np.pi * 0.47 * np.arange(n) + 0.3)
+    elif case == 2:  # the loudest sample right at a block edge
+        samples = 0.01 * rng.normal(size=n)
+        samples[65536 - 2 : 65536 + 2] = [0.4, -0.9, 0.9, -0.4]
+    elif case == 3:  # every block equally loud: nothing can be skipped
+        samples = 0.5 * rng.normal(size=n)
+    elif case == 4:  # a quiet block's overshoot must not be skipped if it can win
+        samples = 0.001 * rng.normal(size=n)
+        samples[3 * 65536 + 100 : 3 * 65536 + 104] = [0.5, -0.5, 0.5, -0.5]
+        samples[10] = 0.52
+    else:  # silence
+        samples = np.zeros(n)
+    assert waveform_peak(samples) == _peak_of_everything(samples)
+
+
 def test_waveform_retains_filter_ringout_and_zero_padding_prevents_wrap():
     samples = programme()[-1000:].copy()
     samples[:] = 0

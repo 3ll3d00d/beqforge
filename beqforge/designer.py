@@ -1,4 +1,4 @@
-"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.0.
+"""The `design(request) -> response` binding for beqdesigner's designer-interface.md v1.2.
 
 Read that document (in the sibling `beqdesigner` repo, `design/designer-interface.md`) before
 touching this file — it is the contract, not this module. In short: beqdesigner POSTs a
@@ -6,6 +6,16 @@ touching this file — it is the contract, not this module. In short: beqdesigne
 ranked, non-empty list of candidates or a decline, never both, never neither. `tools/
 designer_server.py` is the HTTP transport (§7.1); this module is the pure adapter between that
 wire format and `beqforge.pipeline.run`, kept separately testable without a socket.
+
+1.1 adds `rejected`: every candidate the judge failed goes back beside the answer (or the
+decline) with its failures as `rejection_reasons`, for a reviewer to see what was tried and why
+it lost. It is a separate list rather than a flag on `candidates` so a 1.0 caller, which ignores
+fields it does not know, can never publish one.
+
+1.2 (HTTP binding only; beqdesigner's `design/designer-by-reference.md` §3) lets an array
+arrive by reference — a WAV under a root both sides can see, with the SHA-256 of the decoded
+column — instead of as base64. The data model does not change: `request_from_json` turns a
+reference back into the same array (`beqforge.reference`), or refuses it naming the array.
 
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
@@ -18,18 +28,25 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import logging
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 
-from beqforge import BiquadSpec
+from beqforge import BiquadSpec, explain, record
+from beqforge.cache import Store
 from beqforge.design import DesignMethod
 from beqforge.material import Material
+from beqforge.reference import array_from_reference
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
-CONTRACT_VERSION = "1.0"
+logger = logging.getLogger(__name__)
+
+CONTRACT_VERSION = "1.2"
+"""The version this module implements. Responses echo the request's own version instead."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
@@ -49,6 +66,29 @@ class DesignRequest:
     bass_management: dict | None = None
 
 
+def _validate_audio_arrays(
+    mono_mix: np.ndarray, channels: dict[str, np.ndarray] | None
+) -> None:
+    """Enforce the interface's shared, time-aligned 1-D audio-array contract."""
+    arrays = [("mono_mix", mono_mix), *((channels or {}).items())]
+    expected_length: int | None = None
+    for name, samples in arrays:
+        array = np.asarray(samples)
+        if array.ndim != 1:
+            raise ValueError(
+                f"{name} must be a 1-D audio array, got shape {array.shape}"
+            )
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} must contain only finite samples")
+        if name == "mono_mix":
+            expected_length = len(array)
+        elif len(array) != expected_length:
+            raise ValueError(
+                f"channel {name!r} has {len(array)} samples; "
+                f"mono_mix has {expected_length}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class DesignCandidate:
     """designer-interface.md §3."""
@@ -66,16 +106,22 @@ class DesignCandidate:
     fc_uncertainty_hz: float | None = None
     slope_uncertainty: float | None = None
     channel_scope: ChannelScope | None = None
+    rejection_reasons: list[str] | None = None
+    """1.1: non-empty on every entry of `DesignResponse.rejected`, None on every candidate."""
 
 
 @dataclass(frozen=True, slots=True)
 class DesignResponse:
-    """designer-interface.md §3. Exactly one of `candidates`/`decline_reason` is populated."""
+    """designer-interface.md §3. Exactly one of `candidates`/`decline_reason` is populated.
+
+    `rejected` (1.1) may accompany either: review only, never applied or published.
+    """
 
     contract_version: str
     candidates: list[DesignCandidate] | None = None
     decline_reason: str | None = None
     decline_message: str | None = None
+    rejected: list[DesignCandidate] | None = None
 
 
 # Substrings `pipeline.run` puts in `Report.evidence_notes` when it returns `candidates=[]`
@@ -90,6 +136,8 @@ _BLOCKER_CODES: tuple[tuple[str, str], ...] = (
     ("no bins support a positive correction", "insufficient_coherent_bandwidth"),
     ("exclusions fragment the judged band", "exclusions_fragment_band"),
     ("playback verification unavailable", "playback_verification_unavailable"),
+    ("nothing worth correcting", "within_goal_tolerance"),
+    ("within the programme's own ripple", "within_programme_ripple"),
 )
 
 
@@ -112,7 +160,11 @@ def _decline_for_no_passing_candidate(report: Report) -> tuple[str, str]:
 
 
 def _to_design_candidate(
-    candidate: Candidate, params: PipelineParams, *, report_gain_reduction: bool
+    candidate: Candidate,
+    params: PipelineParams,
+    *,
+    report_gain_reduction: bool,
+    run_notes: tuple[str, ...] = (),
 ) -> DesignCandidate:
     confidence = candidate.confidence
     if not math.isfinite(confidence):
@@ -137,12 +189,19 @@ def _to_design_candidate(
     commentary = {"strategy": candidate.label}
     if candidate.effective_params:
         commentary["effective_params"] = candidate.effective_params
-    if candidate.target_notes:
-        commentary["target_notes"] = "; ".join(candidate.target_notes)
-    if not math.isnan(candidate.verdict.recovered_fraction):
-        commentary["recovered_fraction"] = f"{candidate.verdict.recovered_fraction:.3f}"
-    if not math.isnan(candidate.verdict.shaping_fraction):
-        commentary["shaping_fraction"] = f"{candidate.verdict.shaping_fraction:.3f}"
+    # the response has no field for run-level notes, so the candidate carries them: what bound
+    # its own target first, then the run's limitations
+    notes = tuple(dict.fromkeys((*candidate.target_notes, *run_notes)))
+    if notes:
+        commentary["target_notes"] = "; ".join(notes)
+    # what the judge itself noticed — above all how much of the correction sits below the
+    # level-invariance floor (IMPROVEMENT_PLAN E6). A reviewer reading only the response had
+    # the fraction as a bare number and never saw the sentence saying what it means
+    if candidate.verdict.notes:
+        commentary["verdict_notes"] = "; ".join(dict.fromkeys(candidate.verdict.notes))
+    # recovered_fraction and shaping_fraction are deliberately not here as bare numbers: read
+    # out of context they mean nothing to a reviewer. `explain.correction` says both in words,
+    # and the run record keeps the numbers.
 
     return DesignCandidate(
         filters=list(candidate.filters),
@@ -156,8 +215,47 @@ def _to_design_candidate(
     )
 
 
+def _provenance(
+    report: Report,
+    params: PipelineParams,
+    material: Material,
+    record_dir: Path | None,
+) -> dict[str, str]:
+    """Which build answered, and where its run record went — so a response can be replayed.
+
+    A response carries only the accepted candidate (or a decline) and nothing about the code,
+    so a review queue built from responses cannot say which build made an entry or why the
+    other candidates lost. The record is named by the request audio's digest: the same
+    request writes the same file, and it replays with `tools/replay.py` (charts from the mix
+    only; the material itself never touched disk). A failed write is logged and reported in
+    the provenance, never raised — the design is the product, the record is a receipt.
+    """
+    provenance = {"beqforge_revision": record.revision()}
+    if record_dir is None:
+        return provenance
+    digest = record.array_digest(material)
+    path = Path(record_dir) / f"designer-{digest[:16]}.run.json.gz"
+    try:
+        curves = record.curves_from(
+            material,
+            {c.label: c.filters for c in report.candidates},
+            (),
+            params.realisation,
+        )
+        record.write(path, report, params, None, curves, material_sha256=digest)
+        provenance["run_record"] = str(path)
+    except (OSError, ValueError) as failed:
+        logger.warning(f"run record not written to {path}: {failed}")
+        provenance["run_record"] = f"not written: {failed}"
+    return provenance
+
+
 def design(
-    request: DesignRequest, params: PipelineParams | None = None
+    request: DesignRequest,
+    params: PipelineParams | None = None,
+    *,
+    record_dir: Path | None = None,
+    cache: Store | None = None,
 ) -> DesignResponse:
     """designer-interface.md §1: one call, one title, one answer.
 
@@ -172,8 +270,18 @@ def design(
     without real per-channel audio to build the actual sub feed from, which this repo always
     has when `channels` is supplied; `lpf_position`/`clip_before`/`clip_after` have no
     equivalent in `PlaybackParams`' always-on mains+bus LR4 model. Not modelled, not guessed.
+
+    Every response says which build produced it (`beqforge_revision` in the accepted
+    candidate's commentary, or a trailing bracket on a decline message); with `record_dir`,
+    the full run record is written there too and named the same way — see `_provenance`.
+
+    With `cache`, every stage whose key has not moved is reused from it — the analysis for any
+    request carrying the same samples, the parametric proposal while the server's settings are
+    unchanged (IMPROVEMENT_PLAN R2a). Nothing about the answer depends on it.
     """
     params = params or PipelineParams()
+
+    _validate_audio_arrays(request.mono_mix, request.channels)
 
     material = Material(
         name="designer-request",
@@ -193,33 +301,110 @@ def design(
         )
         params = dataclasses.replace(params, playback=playback)
 
-    report = run(material, params)
+    report = run(material, params, cache_path=cache)
+    provenance = _provenance(report, params, material, record_dir)
 
+    rejected = _rejected(report, params, report_gain_reduction)
     accepted = report.accepted
     if accepted is None:
         if not report.candidates:
-            reason, message = _decline_for_blockers(report.evidence_notes)
+            # the blockers alone when the report has them: the reason, not every caveat
+            reason, message = _decline_for_blockers(
+                report.blockers or report.evidence_notes
+            )
         else:
             reason, message = _decline_for_no_passing_candidate(report)
+        stamp = "; ".join(f"{k}: {v}" for k, v in provenance.items())
         return DesignResponse(
             contract_version=request.contract_version,
             decline_reason=reason,
-            decline_message=message,
+            decline_message=f"{message} | found: {explain.found(report)} [{stamp}]",
+            rejected=rejected,
         )
 
     candidate = _to_design_candidate(
-        accepted, params, report_gain_reduction=report_gain_reduction
+        accepted,
+        params,
+        report_gain_reduction=report_gain_reduction,
+        run_notes=report.evidence_notes,
+    )
+    # the plain-language account first, so a reader of the response meets the basis for the
+    # correction before the notes and parameters that qualify it
+    account = {
+        "found": explain.found(report),
+        "correction": explain.correction(accepted, report),
+        "clipping": explain.clipping(accepted, from_request=report_gain_reduction),
+        "alternatives": explain.alternatives(report, accepted),
+    }
+    candidate = dataclasses.replace(
+        candidate, commentary={**account, **(candidate.commentary or {}), **provenance}
     )
     return DesignResponse(
-        contract_version=request.contract_version, candidates=[candidate]
+        contract_version=request.contract_version,
+        candidates=[candidate],
+        rejected=rejected,
     )
 
 
-def _ndarray_from_json(d: dict) -> np.ndarray:
+def _rejected(
+    report: Report, params: PipelineParams, report_gain_reduction: bool
+) -> list[DesignCandidate] | None:
+    """Every candidate the judge failed, nearest to acceptable first (fewest failures).
+
+    A candidate that passed but lost selection is not here: it was not rejected, and
+    `alternatives` already says why it lost. Nor is one with no sections, which a reviewer
+    could not load (§5). Each carries the same plain-language account as an accepted one, so
+    what the filter would have done can be read beside why it was refused. None when empty —
+    the contract rejects an empty list.
+    """
+    failed = [
+        c
+        for c in report.candidates
+        if not c.verdict.passed and c.filters and any(c.verdict.failures)
+    ]
+    entries = [
+        dataclasses.replace(
+            (
+                mapped := _to_design_candidate(
+                    c, params, report_gain_reduction=report_gain_reduction
+                )
+            ),
+            commentary={
+                "correction": explain.correction(c, report),
+                "clipping": explain.clipping(c, from_request=report_gain_reduction),
+                **(mapped.commentary or {}),
+            },
+            rejection_reasons=[f for f in c.verdict.failures if f],
+        )
+        for c in sorted(failed, key=lambda c: len(c.verdict.failures))
+    ]
+    return entries or None
+
+
+def _ndarray_from_json(
+    d: dict,
+    name: str = "array",
+    shared_root: Path | None = None,
+    fs: int = 0,
+    opened: dict | None = None,
+) -> np.ndarray:
+    """One array, inline (`data_base64`) or, from 1.2, by reference (`file` + `sha256`).
+
+    Exactly one of the two. A body that breaks that, or a `file` without its `sha256`, is
+    malformed (`ValueError`, 400); a well-formed reference that cannot be honoured raises
+    `UnusableReference` (422) from `beqforge.reference`.
+    """
     if d.get("dtype") != _ARRAY_DTYPE:
         raise ValueError(
             f"unsupported array dtype {d.get('dtype')!r}, expected {_ARRAY_DTYPE!r}"
         )
+    inline, by_reference = "data_base64" in d, "file" in d
+    if inline == by_reference:
+        raise ValueError(f"{name} needs exactly one of data_base64 or file")
+    if by_reference:
+        if not isinstance(d["file"], dict) or not d.get("sha256"):
+            raise ValueError(f"{name}: a file reference needs file.path and sha256")
+        return array_from_reference(name, d, shared_root, fs, opened)
     data = np.frombuffer(base64.b64decode(d["data_base64"]), dtype="<f8")
     return data.reshape(tuple(d["shape"]))
 
@@ -233,21 +418,36 @@ def _ndarray_to_json(arr: np.ndarray) -> dict:
     }
 
 
-def request_from_json(body: dict) -> DesignRequest:
-    """designer-interface.md §7.1's request body, as POSTed by `http_designer(url)`."""
+def request_from_json(body: dict, shared_root: Path | None = None) -> DesignRequest:
+    """designer-interface.md §7.1's request body, as POSTed by `http_designer(url)`.
+
+    `shared_root` is where this server finds audio sent by reference (1.2); without one, a
+    `file` array is refused with `UnusableReference`. The material the arrays become is named
+    "designer-request" either way, so a request by reference and the same request inline give
+    the same cache key and the same record.
+    """
     channels = body.get("channels")
-    return DesignRequest(
+    fs = int(body["fs"])
+    opened: dict = {}
+    request = DesignRequest(
         contract_version=body["contract_version"],
-        fs=int(body["fs"]),
+        fs=fs,
         coverage=body["coverage"],
-        mono_mix=_ndarray_from_json(body["mono_mix"]),
+        mono_mix=_ndarray_from_json(
+            body["mono_mix"], "mono_mix", shared_root, fs, opened
+        ),
         channels=(
-            {name: _ndarray_from_json(arr) for name, arr in channels.items()}
+            {
+                name: _ndarray_from_json(arr, name, shared_root, fs, opened)
+                for name, arr in channels.items()
+            }
             if channels
             else None
         ),
         bass_management=body.get("bass_management"),
     )
+    _validate_audio_arrays(request.mono_mix, request.channels)
+    return request
 
 
 def _candidate_to_json(c: DesignCandidate) -> dict:
@@ -267,21 +467,31 @@ def _candidate_to_json(c: DesignCandidate) -> dict:
         "fc_uncertainty_hz": c.fc_uncertainty_hz,
         "slope_uncertainty": c.slope_uncertainty,
         "channel_scope": c.channel_scope,
+        # 1.1, and only where it means something, so a 1.0 response is unchanged on the wire
+        **(
+            {"rejection_reasons": list(c.rejection_reasons)}
+            if c.rejection_reasons is not None
+            else {}
+        ),
     }
 
 
 def response_to_json(response: DesignResponse) -> dict:
-    """designer-interface.md §7.1's response body."""
+    """designer-interface.md §7.1's response body; `rejected` only when there are any."""
     if response.candidates is not None:
-        return {
+        body = {
             "contract_version": response.contract_version,
             "candidates": [_candidate_to_json(c) for c in response.candidates],
         }
-    return {
-        "contract_version": response.contract_version,
-        "decline_reason": response.decline_reason,
-        "decline_message": response.decline_message,
-    }
+    else:
+        body = {
+            "contract_version": response.contract_version,
+            "decline_reason": response.decline_reason,
+            "decline_message": response.decline_message,
+        }
+    if response.rejected is not None:
+        body["rejected"] = [_candidate_to_json(c) for c in response.rejected]
+    return body
 
 
 _ALLOWED_BIQUAD_TYPES = {"peaking_eq", "low_shelf", "high_shelf"}
@@ -313,6 +523,8 @@ def validate_response(response: DesignResponse) -> None:
             "DesignResponse populates neither candidates nor decline_reason"
         )
 
+    _validate_rejected(response.rejected)
+
     if is_decline:
         if not isinstance(response.decline_reason, str) or not response.decline_reason:
             raise ContractViolation("decline_reason must be a non-empty string")
@@ -324,6 +536,11 @@ def validate_response(response: DesignResponse) -> None:
     previous_confidence = None
     for i, candidate in enumerate(response.candidates):
         _validate_candidate(candidate, i)
+        if candidate.rejection_reasons is not None:
+            raise ContractViolation(
+                f"candidates[{i}] carries rejection_reasons — a rejected design belongs in "
+                "rejected, never in candidates"
+            )
         if (
             previous_confidence is not None
             and candidate.confidence > previous_confidence
@@ -335,44 +552,68 @@ def validate_response(response: DesignResponse) -> None:
         previous_confidence = candidate.confidence
 
 
-def _validate_candidate(candidate: DesignCandidate, index: int) -> None:
+def _validate_rejected(rejected: list[DesignCandidate] | None) -> None:
+    """1.1: None or non-empty; every entry a valid candidate with reasons. No ordering rule."""
+    if rejected is None:
+        return
+    if len(rejected) == 0:
+        raise ContractViolation("rejected is an empty list — omit it instead")
+    for i, entry in enumerate(rejected):
+        _validate_candidate(entry, i, "rejected")
+        reasons = entry.rejection_reasons
+        if (
+            not isinstance(reasons, list)
+            or not reasons
+            or not all(isinstance(r, str) and r for r in reasons)
+        ):
+            raise ContractViolation(
+                f"rejected[{i}].rejection_reasons must be a non-empty list of non-empty "
+                f"strings, got {reasons!r}"
+            )
+
+
+def _validate_candidate(
+    candidate: DesignCandidate, index: int, where: str = "candidates"
+) -> None:
     if candidate.confidence is None or not (0.0 <= candidate.confidence <= 1.0):
         raise ContractViolation(
-            f"candidates[{index}].confidence must be in [0.0, 1.0], got {candidate.confidence}"
+            f"{where}[{index}].confidence must be in [0.0, 1.0], got {candidate.confidence}"
         )
     if candidate.mv_adjust_db is None or not math.isfinite(candidate.mv_adjust_db):
         raise ContractViolation(
-            f"candidates[{index}].mv_adjust_db must be a finite number, got {candidate.mv_adjust_db}"
+            f"{where}[{index}].mv_adjust_db must be a finite number, got {candidate.mv_adjust_db}"
         )
     if candidate.gain_reduction_db is not None and (
         not math.isfinite(candidate.gain_reduction_db)
         or candidate.gain_reduction_db > 0
     ):
         raise ContractViolation(
-            f"candidates[{index}].gain_reduction_db must be finite and <= 0, "
+            f"{where}[{index}].gain_reduction_db must be finite and <= 0, "
             f"got {candidate.gain_reduction_db}"
         )
     if not candidate.filters:
-        raise ContractViolation(f"candidates[{index}] has an empty filters list")
+        raise ContractViolation(f"{where}[{index}] has an empty filters list")
     if len(candidate.filters) > _MAX_BIQUAD_SECTIONS:
         raise ContractViolation(
-            f"candidates[{index}]: {len(candidate.filters)} sections exceeds the budget of "
+            f"{where}[{index}]: {len(candidate.filters)} sections exceeds the budget of "
             f"{_MAX_BIQUAD_SECTIONS}"
         )
     for i, spec in enumerate(candidate.filters):
-        _validate_biquad_spec(spec, i, index)
+        _validate_biquad_spec(spec, i, index, where)
     if candidate.commentary is not None:
         if not isinstance(candidate.commentary, dict) or not all(
             isinstance(k, str) and isinstance(v, str)
             for k, v in candidate.commentary.items()
         ):
             raise ContractViolation(
-                f"candidates[{index}].commentary must be a dict[str, str]"
+                f"{where}[{index}].commentary must be a dict[str, str]"
             )
 
 
-def _validate_biquad_spec(spec: BiquadSpec, index: int, candidate_index: int) -> None:
-    prefix = f"candidates[{candidate_index}].filters[{index}]"
+def _validate_biquad_spec(
+    spec: BiquadSpec, index: int, candidate_index: int, where: str = "candidates"
+) -> None:
+    prefix = f"{where}[{candidate_index}].filters[{index}]"
     if spec.type not in _ALLOWED_BIQUAD_TYPES:
         raise ContractViolation(f"{prefix}.type {spec.type!r} is not publishable")
     if not math.isfinite(spec.freq_hz) or spec.freq_hz <= 0:
