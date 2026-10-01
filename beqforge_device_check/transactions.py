@@ -1,0 +1,425 @@
+"""Recoverable case transactions and qualified identity references."""
+
+import json
+import time
+import uuid
+from dataclasses import asdict, replace
+from pathlib import Path
+from typing import Protocol
+
+import numpy as np
+from scipy.signal import sosfilt
+
+from beqforge_device_check.coefficients import rounded, stable
+from beqforge_device_check.evidence import (
+    append,
+    atomic_arrays,
+    atomic_json,
+    register,
+    run_lock,
+)
+from beqforge_device_check.manifest import digest, validate
+from beqforge_device_check.measurement import SweepSettings, recover, sweep
+
+
+class Engine(Protocol):
+    def identify(self) -> dict: ...
+    def snapshot(self) -> dict: ...
+    def mute(self, value: bool) -> None: ...
+    def load(self, case: dict) -> dict: ...
+    def restore(self, snapshot: dict) -> bool: ...
+
+
+class Simulation:
+    """Numerical control with actual time-domain filtering, never hardware evidence."""
+
+    def __init__(self, rate: int, model: str = "float64"):
+        self.rate = rate
+        self.model = model
+        self.sos = np.empty((0, 6))
+        self.muted = False
+
+    def identify(self) -> dict:
+        return {
+            "engine": "simulation",
+            "rate": self.rate,
+            "model": self.model,
+            "scope": "file-in/file-out numerical control",
+            "numpy": np.__version__,
+        }
+
+    def snapshot(self) -> dict:
+        return {"sos": self.sos.tolist(), "muted": self.muted}
+
+    def mute(self, value: bool) -> None:
+        self.muted = value
+
+    def load(self, case: dict) -> dict:
+        if case["rate"] != self.rate:
+            raise ValueError("simulation internal rate mismatch")
+        self.sos = rounded(np.asarray(case["exact_sos"]).reshape(-1, 6), self.model)
+        if not stable(self.sos):
+            raise ValueError("unstable simulation coefficients")
+        return {
+            "sent_sos": self.sos.tolist(),
+            "readback_sos": self.sos.tolist(),
+            "storage_verified": True,
+            "model": self.model,
+        }
+
+    def capture(self, stimulus: np.ndarray, rate: int) -> tuple[np.ndarray, dict]:
+        if self.muted or rate != self.rate:
+            raise ValueError("simulation is muted or rate differs")
+        y = (
+            sosfilt(self.sos, stimulus.astype(float))
+            if len(self.sos)
+            else stimulus.astype(float)
+        )
+        return y[:, None], {
+            "format": "float64",
+            "statuses": [],
+            "scope": "numerical control",
+        }
+
+    def restore(self, snapshot: dict) -> bool:
+        self.sos = np.asarray(snapshot["sos"]).reshape(-1, 6)
+        self.muted = snapshot["muted"]
+        return True
+
+
+def bench_hash(config: dict) -> str:
+    # Qualification identity includes the complete route, levels, stream settings,
+    # engine build/firmware and restoration assumptions, not only a profile name.
+    return digest(config)
+
+
+def measure(
+    directory: Path,
+    case: dict,
+    settings: SweepSettings,
+    engine: Engine,
+    capture,
+    *,
+    reference_channel: int | None = None,
+) -> dict:
+    attempt = uuid.uuid4().hex
+    log = directory / "attempts.jsonl"
+    append(
+        log,
+        {
+            "attempt": attempt,
+            "state": "planned",
+            "case": case["id"],
+            "settings": asdict(settings),
+        },
+    )
+    engine.mute(True)
+    payload = engine.load(case)
+    atomic_json(directory / "transport" / f"{attempt}.json", payload)
+    append(log, {"attempt": attempt, "state": "loaded"})
+    x, metadata = sweep(settings)
+    atomic_arrays(directory / "stimuli" / f"{attempt}.npz", samples=x)
+    atomic_json(directory / "stimuli" / f"{attempt}.json", metadata)
+    settle = case["settling_seconds"] or 0
+    if settle > settings.tail_s:
+        raise ValueError("tail is shorter than the cascade's required linear decay")
+    if settle > 60:
+        raise ValueError("settling exceeds the supported 60-second control bound")
+    engine.mute(False)
+    if settle and not isinstance(engine, Simulation):
+        time.sleep(settle)
+    y, stream = capture.capture(x, settings.rate)
+    if y.ndim != 2 or y.shape[0] != len(x):
+        raise ValueError("capture backend returned missing samples")
+    atomic_arrays(directory / "captures" / f"{attempt}.npz", samples=y)
+    atomic_json(directory / "captures" / f"{attempt}.json", stream)
+    append(log, {"attempt": attempt, "state": "captured"})
+    dut_channel = getattr(capture, "config", {}).get("input", {}).get("channel", 0)
+    result = recover(
+        x,
+        y[:, dut_channel],
+        metadata,
+        reference=y[:, reference_channel] if reference_channel is not None else None,
+        statuses=[str(s) for s in stream.get("statuses", []) if s],
+    )
+    if not result["valid"]:
+        append(
+            log, {"attempt": attempt, "state": "failed", "failures": result["failures"]}
+        )
+        raise ValueError("; ".join(result["failures"]))
+    arrays = {
+        k: result.pop(k)
+        for k in (
+            "frequencies",
+            "response",
+            "mask",
+            "snr_db",
+            "inversion_bias_db",
+            "impulse",
+        )
+    }
+    atomic_arrays(directory / "analysis" / f"{attempt}.npz", **arrays)
+    result.update(
+        {"attempt": attempt, "case": case["id"], "level_dbfs": settings.level_dbfs}
+    )
+    atomic_json(directory / "analysis" / f"{attempt}.json", result)
+    append(
+        log,
+        {
+            "attempt": attempt,
+            "state": "completed",
+            "case": case["id"],
+            "level_dbfs": settings.level_dbfs,
+        },
+    )
+    return result
+
+
+def qualify(
+    config: dict,
+    manifest: dict,
+    directory: Path,
+    engine: Engine,
+    capture,
+    settings: SweepSettings,
+    *,
+    accuracy_db: float,
+) -> dict:
+    validate(manifest)
+    if not isinstance(engine, Simulation) and not config.get(
+        "electrical_bench_acknowledged"
+    ):
+        raise ValueError(
+            "explicit disconnected electrical-bench acknowledgement is required"
+        )
+    if accuracy_db <= 0 or not np.isfinite(accuracy_db):
+        raise ValueError("predeclare a positive engineering accuracy requirement")
+    identity = next(case for case in manifest["cases"] if case["name"] == "identity")
+    results = []
+    with run_lock(directory):
+        snapshot = engine.snapshot()
+        atomic_json(directory / "bench.json", config)
+        atomic_json(directory / "manifest.json", manifest)
+        try:
+            for level in manifest["levels_dbfs"]:
+                traces, masks = [], []
+                for _ in range(max(5, manifest["identity_repeats"])):
+                    result = measure(
+                        directory,
+                        identity,
+                        replace(settings, level_dbfs=level),
+                        engine,
+                        capture,
+                        reference_channel=config.get("reference_channel"),
+                    )
+                    results.append(result)
+                    with np.load(
+                        directory / "analysis" / f"{result['attempt']}.npz",
+                        allow_pickle=False,
+                    ) as arrays:
+                        frequencies = arrays["frequencies"].copy()
+                        traces.append(arrays["response"].copy())
+                        masks.append(arrays["mask"].copy())
+                magnitudes = 20 * np.log10(np.maximum(np.abs(traces), 1e-300))
+                uncertainty = (
+                    np.max(np.abs(magnitudes - np.median(magnitudes, axis=0)), axis=0)
+                    * 2
+                    + 0.01
+                )
+                valid = np.all(masks, axis=0) & (uncertainty < accuracy_db / 3)
+                atomic_arrays(
+                    directory / "analysis" / f"qualification-{level:g}.npz",
+                    frequencies=frequencies,
+                    uncertainty_db=uncertainty,
+                    mask=valid,
+                    references=np.asarray(traces),
+                )
+            qualification = {
+                "schema_version": 1,
+                "bench_hash": bench_hash(config),
+                "manifest_hash": manifest["hash"],
+                "settings": asdict(settings),
+                "accuracy_db": accuracy_db,
+                "engine": engine.identify(),
+                "results": results,
+                "scope": "identity repeatability only; convergence/direct-loopback/bypass still required",
+                "qualified": False,
+            }
+            qualification["hash"] = digest(qualification)
+            atomic_json(directory / "qualification.json", qualification)
+            return qualification
+        finally:
+            engine.mute(True)
+            restored = engine.restore(snapshot)
+            if not restored:
+                engine.mute(True)
+            atomic_json(
+                directory / "run.json",
+                {"restored": restored, "engine": engine.identify()},
+            )
+            register(directory)
+
+
+def run(
+    config: dict,
+    manifest: dict,
+    qualification_dir: Path,
+    directory: Path,
+    engine: Engine,
+    capture,
+    *,
+    resume: bool = False,
+) -> dict:
+    validate(manifest)
+    qualification = json.loads((qualification_dir / "qualification.json").read_text())
+    if qualification["hash"] != digest(
+        {k: v for k, v in qualification.items() if k != "hash"}
+    ):
+        raise ValueError("qualification hash mismatch")
+    if (
+        qualification["bench_hash"] != bench_hash(config)
+        or qualification["manifest_hash"] != manifest["hash"]
+    ):
+        raise ValueError("qualification is stale for this bench/manifest")
+    if not qualification["qualified"] and not isinstance(engine, Simulation):
+        raise ValueError(
+            "live bench is not qualified: complete loopback/bypass/convergence checks"
+        )
+    settings = SweepSettings(**qualification["settings"])
+    if not isinstance(engine, Simulation) and not config.get(
+        "electrical_bench_acknowledged"
+    ):
+        raise ValueError(
+            "explicit disconnected electrical-bench acknowledgement is required"
+        )
+    with run_lock(directory):
+        identity = next(
+            case for case in manifest["cases"] if case["name"] == "identity"
+        )
+        prior = directory / "run.json"
+        if prior.exists() and not resume:
+            raise ValueError("run already exists; use explicit resume")
+        if prior.exists():
+            old = json.loads(prior.read_text())
+            if old.get("manifest_hash") != manifest["hash"] or old.get(
+                "bench_hash"
+            ) != bench_hash(config):
+                raise ValueError("resume identity differs")
+        snapshot = engine.snapshot()
+        summary = {
+            "schema_version": 1,
+            "manifest_hash": manifest["hash"],
+            "bench_hash": bench_hash(config),
+            "engine": engine.identify(),
+            "snapshot": snapshot,
+            "completed": [],
+            "failures": [],
+            "scope": "simulation"
+            if isinstance(engine, Simulation)
+            else "live electrical bench",
+        }
+        if prior.exists():
+            summary["completed"] = old["completed"]
+            summary["failures"] = old["failures"]
+        atomic_json(prior, summary)
+        atomic_json(directory / "bench.json", config)
+        atomic_json(directory / "manifest.json", manifest)
+        atomic_json(directory / "qualification.json", qualification)
+        cases = {case["id"]: case for case in manifest["cases"]}
+        try:
+            for level in manifest["levels_dbfs"]:
+                # Resume always starts with a newly loaded identity, never trusting stale state.
+                before = measure(
+                    directory,
+                    identity,
+                    replace(settings, level_dbfs=level),
+                    engine,
+                    capture,
+                    reference_channel=config.get("reference_channel"),
+                )
+                for ordinal, case_id in enumerate(manifest["order"]):
+                    key = digest(
+                        [manifest["hash"], bench_hash(config), level, ordinal, case_id]
+                    )
+                    if any(item["key"] == key for item in summary["completed"]):
+                        continue
+                    case = cases[case_id]
+                    if case["status"] != "planned":
+                        summary["completed"].append(
+                            {
+                                "key": key,
+                                "case": case_id,
+                                "status": case["status"],
+                                "reason": case["reason"],
+                            }
+                        )
+                        atomic_json(prior, summary)
+                        continue
+                    result = measure(
+                        directory,
+                        case,
+                        replace(settings, level_dbfs=level),
+                        engine,
+                        capture,
+                        reference_channel=config.get("reference_channel"),
+                    )
+                    after = measure(
+                        directory,
+                        identity,
+                        replace(settings, level_dbfs=level),
+                        engine,
+                        capture,
+                        reference_channel=config.get("reference_channel"),
+                    )
+                    with (
+                        np.load(
+                            directory / "analysis" / f"{before['attempt']}.npz",
+                            allow_pickle=False,
+                        ) as left,
+                        np.load(
+                            directory / "analysis" / f"{after['attempt']}.npz",
+                            allow_pickle=False,
+                        ) as right,
+                    ):
+                        mask = left["mask"] & right["mask"]
+                        drift = 20 * np.log10(
+                            np.maximum(
+                                np.abs(right["response"] / left["response"]), 1e-300
+                            )
+                        )
+                        if (
+                            not np.any(mask)
+                            or np.max(np.abs(drift[mask]))
+                            > qualification["accuracy_db"] / 3
+                        ):
+                            raise ValueError(
+                                "identity bracket drift exceeds frozen uncertainty budget"
+                            )
+                    # Do not complete a case until both reference brackets are saved.
+                    summary["completed"].append(
+                        {
+                            "key": key,
+                            "case": case_id,
+                            "status": "measured",
+                            "result": result,
+                            "before": before["attempt"],
+                            "after": after["attempt"],
+                        }
+                    )
+                    atomic_json(prior, summary)
+                    before = after
+            summary["complete"] = True
+        except BaseException as error:
+            summary["failures"].append(
+                {"type": type(error).__name__, "reason": str(error)}
+            )
+            summary["complete"] = False
+            raise
+        finally:
+            engine.mute(True)
+            summary["restored"] = engine.restore(snapshot)
+            if not summary["restored"]:
+                engine.mute(True)
+            atomic_json(prior, summary)
+            register(directory)
+    return summary

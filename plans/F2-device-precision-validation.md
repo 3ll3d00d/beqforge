@@ -561,3 +561,23 @@ Validation: all ten foundation/recovery tests pass; known-transfer error was bel
 for identity, a high-Q low-frequency peak and a cancelling shelf cascade. Injected delay,
 clock mismatch, clipping, truncation, callback dropouts, noise masking and preserved gain
 are covered. These are numerical checks, not a qualified 2 Hz bench result. Ruff passes.
+
+### 3. Evidence transactions and identity repeatability
+
+Added exclusive run locking, append-only attempt states, atomic non-pickle capture/stimulus/
+analysis files, reloads, identity brackets, drift aborts and explicit resume. Every resume
+remeasures identity; completed keys include manifest, bench, level and ordinal. Captures and
+sent payloads survive a failure, and restoration is attempted on completion/failure. ZIP
+export includes only registered evidence with verified hashes; summary-only archives are
+marked insufficient for replay. No automatic upload or retry is implemented.
+
+Identity qualification loads at least five independent repeats per level and freezes
+frequency masks/repeat spread and the independently supplied engineering requirement. It is
+honestly labelled incomplete until convergence, direct loopback and bypass are demonstrated;
+only the numerical control can batch-run against this initial qualification. Live paths
+require the recorded disconnected-bench acknowledgement before qualification emits a signal.
+
+Validation: fourteen F2 tests passed, including partial failure/restoration, explicit resume,
+stale qualifications, concurrent lock refusal and unrelated-file exclusion. Ruff passed.
+The numerical engine processes captures with independent SciPy `sosfilt`. Live restoration
+and the broader qualification protocol remain adapter/bench tasks.
