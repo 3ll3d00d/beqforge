@@ -1,0 +1,16 @@
+beqforge-device-check: experimental measurement preview, not hardware-qualified.
+
+The bundled miniDSP helper is minidsp-rs 0.1.9, Copyright 2021 Mathieu Rene,
+licensed under Apache-2.0. See helpers/minidsp-LICENSE.txt and helper.json.
+Source: https://github.com/mrene/minidsp-rs/tree/v0.1.9
+
+Python, NumPy, SciPy, matplotlib, pyfar, sounddevice, CFFI, websocket-client and
+transitive Python packages retain their installed distribution metadata/licences
+in the executable. PortAudio is separately included by sounddevice's PyInstaller
+hook. PortAudio upstream licence: https://www.portaudio.com/license.html
+System drivers and audio services remain external. Linux native library notices
+are supplied with each artifact; libusb/libudev are host dependencies of the helper.
+
+This preview is unsigned. No Windows ASIO, macOS signing/notarisation, USB-driver
+installation or live audio-route compatibility is claimed. Only architectures
+which passed their native frozen self-test are eligible for preview artifacts.

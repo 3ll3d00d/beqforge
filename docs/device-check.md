@@ -101,3 +101,35 @@ cascade weighting. A thousand catalogue entries on one device are not independen
 Bundles are local exports; nothing uploads automatically. `--summary-only` excludes raw arrays
 and is marked insufficient for replay. Bundling verifies registered evidence and excludes
 unrelated files. Review the exported bench/device facts and restore settings before sharing.
+
+## Standalone previews
+
+`beqforge-device-check.spec` has separate folder and single-file modes. Prepare the helper
+on the native target, then build with PyInstaller 6.22.3 and the locked `device-check` extra:
+
+```sh
+uv sync --locked --extra device-check
+uv pip install pyinstaller==6.22.3
+uv run python tools/prepare_device_check_helper.py --target linux-x86_64 --out build/device-helper --cache build/helper-cache
+BEQFORGE_DEVICE_BUILD_MODE=onedir uv run pyinstaller --clean --noconfirm --distpath dist/folder beqforge-device-check.spec
+uv run python tools/smoke_test_device_check.py dist/folder/beqforge-device-check/beqforge-device-check --out 'build/folder test é'
+uv run pyinstaller --clean --noconfirm --distpath dist/single beqforge-device-check.spec
+uv run python tools/smoke_test_device_check.py dist/single/beqforge-device-check --out 'build/single test é' --package dist/preview-linux-x86_64
+```
+
+The dedicated workflow builds Linux x86_64 on Ubuntu 22.04 (glibc 2.35 baseline), Windows
+x86_64 on Windows Server 2022, and macOS arm64/x86_64 separately on macOS 15 runners.
+These are build/test environments, not evidence of support for older operating systems.
+Every target checks its native architecture and hash-pinned miniDSP 0.1.9 helper, preserves
+upstream notices, and runs a substantive frozen numerical self-test before uploading a
+checksum-bearing preview. Cross-platform CI has not yet run for this implementation.
+The local Linux build on this development host does not claim the Ubuntu 22.04 baseline.
+
+The single executable extracts its helper to PyInstaller's private runtime directory.
+Saved bench files use `"executable": "bundled"` to resolve the current extraction directory;
+an explicit path selects an external helper instead. Engine identity records its exact
+version and SHA-256. CamillaDSP remains separately installed. Audio/USB drivers, Linux
+host audio services, USB permissions and macOS microphone permission remain host setup.
+The preview is unsigned and unnotarised; Windows ASIO has not been verified. Distribution
+metadata and helper/native notices accompany the artifact. Hardware qualification and the
+pilot are required on each claimed target before it can become a validated release.

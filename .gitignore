@@ -262,3 +262,6 @@ charts/
 
 # generated output — .beq exports, the correction ledger, anything under --out/--charts-dir
 out/
+
+# Dedicated, reviewed F2 packaging recipe
+!/beqforge-device-check.spec

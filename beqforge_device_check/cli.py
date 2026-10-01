@@ -23,11 +23,27 @@ def read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def helper_path(value: str) -> Path:
+    if value != "bundled":
+        return Path(value)
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).parent.parent))
+    path = root / "helpers" / ("minidsp.exe" if sys.platform == "win32" else "minidsp")
+    if not path.is_file():
+        raise ValueError(
+            "this build has no bundled miniDSP helper; supply an executable"
+        )
+    return path
+
+
 def provenance() -> dict:
     from beqforge.record import revision
 
     result = {"tool": "beqforge-device-check", "beqforge_revision": revision()}
-    root = Path(__file__).parent
+    # The frozen entry script lives at the bundle root; package data lives alongside
+    # __init__, so provenance must resolve the package rather than __main__.
+    import beqforge_device_check
+
+    root = Path(beqforge_device_check.__file__).parent
     stamp = root / "BUILD_REVISION"
     result["implementation"] = (
         stamp.read_text().strip()
@@ -95,7 +111,7 @@ def factory(config: dict, directory: Path):
         )
     else:
         engine = Minidsp(
-            Helper(Path(options["executable"]), options["version"]),
+            Helper(helper_path(options["executable"]), options["version"]),
             profile,
             serial=options["serial"],
             restore_commands=options["restore_commands"],
@@ -132,10 +148,14 @@ def setup(args) -> dict:
     executable = args.executable or shutil.which(
         "minidsp" if mode == "minidsp" else "camilladsp"
     )
+    if mode == "minidsp" and not args.executable and getattr(sys, "frozen", False):
+        executable = "bundled"
     if not executable:
         raise ValueError("supply an explicit installed engine/helper executable")
     config["engine"] = {
-        "executable": str(Path(executable).resolve()),
+        "executable": executable
+        if executable == "bundled"
+        else str(Path(executable).resolve()),
         "version": "0.1.9" if mode == "minidsp" else "4.1.3",
     }
     if offline:
@@ -192,6 +212,62 @@ def self_test(directory: Path) -> dict:
 
     from beqforge_device_check.coefficients import response
 
+    # These checks exercise adapter failure behaviour inside the actual frozen process.
+    from beqforge_device_check.engines import Helper, Minidsp
+
+    bundled_helper = None
+    if getattr(sys, "frozen", False):
+        binary = helper_path("bundled")
+        Helper(binary, "0.1.9")
+        from beqforge_device_check.evidence import file_hash
+
+        bundled_helper = read(binary.parent / "helper.json")
+        if file_hash(binary) != bundled_helper["binary_sha256"]:
+            raise ValueError("bundled helper hash changed")
+
+    mock = directory / "mock-helper"
+    atomic_bytes(mock, b"self-test mock, never executed")
+    commands = []
+
+    def runner(args, **kwargs):
+        if kwargs.get("timeout") != 10 or not kwargs.get("check"):
+            raise ValueError("helper subprocess bounds lost")
+        commands.append(args)
+        stdout = (
+            "minidsp 0.1.9"
+            if args[-1] == "--version"
+            else (
+                "0: Found 2x4HD with serial 123456 at usb:0"
+                if args[-1] == "probe"
+                else "{}"
+            )
+        )
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    adapter = Minidsp(
+        Helper(mock, "0.1.9", runner=runner),
+        PROFILES["minidsp-2x4hd"],
+        serial="123456",
+        restore_commands=[["config", "0"]],
+    )
+    payload = adapter.load(generate(PROFILES["minidsp-2x4hd"])["cases"][1])
+    if payload["commands"][0][-2:] != ["all", "clear"]:
+        raise ValueError("unused miniDSP slots were not cleared")
+    calls = []
+
+    def timeout_runner(args, **kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    try:
+        Helper(mock, "0.1.9", runner=timeout_runner)
+    except subprocess.TimeoutExpired:
+        if len(calls) != 1:
+            raise ValueError("timed-out helper was retried") from None
+    else:
+        raise ValueError("helper timeout was swallowed")
+    mock.unlink()
+
     profile = PROFILES["simulation-float64"]
     manifest = generate(profile, rate=48000)
     # Keep the executable smoke test short while retaining a sensitive independent transfer.
@@ -244,7 +320,11 @@ def self_test(directory: Path) -> dict:
     )
     report = analyse(directory / "run", directory / "run")
     exported = bundle(directory / "run", directory / "results.zip")
+    import sounddevice as sd
+
     from beqforge_device_check.audio import devices
+
+    native_portaudio = list(sd.get_portaudio_version())
 
     try:
         inventory = devices(timeout_s=10)
@@ -261,7 +341,10 @@ def self_test(directory: Path) -> dict:
     result = {
         "passed": completed["complete"] and report["complete"],
         "known_transfer_error_db": errors,
+        "adapter_checks": {"unused_slots_cleared": True, "timeout_without_retry": True},
+        "bundled_helper": bundled_helper,
         "portaudio": audio,
+        "native_portaudio": native_portaudio,
         "bundle_bytes": exported["bytes"],
         "provenance": provenance(),
     }

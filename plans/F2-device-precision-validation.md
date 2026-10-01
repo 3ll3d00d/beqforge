@@ -645,3 +645,30 @@ the offline report and exported its evidence. PortAudio discovery timed out afte
 10-second subprocess on this host; this is recorded as a live-audio limitation. The repository's
 explicit test-package marker prevents optional dependency test packages shadowing its helpers.
 Live qualification remains incomplete: no miniDSP or audio interface measurement was performed.
+
+### 7. Native standalone preview builds
+
+Added a dedicated spec and preview-only workflow with explicit Linux x86_64, Windows x86_64,
+macOS arm64 and macOS x86_64 runner targets. Builds check the host architecture, use pinned
+PyInstaller 6.22.3, bundle the hash-pinned miniDSP 0.1.9 helper, preserve upstream/native notices
+and distribution metadata, and record implementation/library/helper hashes. Saved setups resolve
+`bundled` against the current private extraction directory, with an external-helper override.
+Linux fails the build without discoverable PortAudio. The workflow diagnoses a folder build
+before the onefile build and uploads checksum-bearing previews, never validated releases.
+
+Both local Linux folder and onefile builds passed the substantive frozen self-test, including
+known transfer recovery (~6.8e-9 dB worst valid-bin error), helper timeout/no retry, unused-slot
+clearing, evidence/report/ZIP generation, native PortAudio initialisation and device discovery.
+The actual bundled helper's version and hash are checked without probing/changing USB devices.
+Tests ran from paths containing spaces and a non-ASCII character. The onefile preview is about
+96 MB; an initial onefile self-test took 10.7 seconds including extraction. The first prototype
+revealed an empty source digest because the frozen entry script is outside the package; package
+resolution and the stamped implementation digest were corrected and checked by the smoke tool.
+Twenty-six F2 tests pass; one optional real-Camilla test skips unless its binary is supplied.
+The complete suite passed in checkpoint 6, and `uv lock --check` and Ruff pass.
+
+This host's Linux build is a local preview, not evidence of the workflow's Ubuntu 22.04/glibc
+2.35 baseline. Cross-platform CI has not run; macOS permission/signing/notarisation, Windows
+signing/drivers and actual playback/capture remain unverified. The Linux audio discovery timeout
+seen in the source run did not occur in either frozen preview. No hardware measurements were
+made and no designer behaviour changed.
