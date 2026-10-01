@@ -18,6 +18,7 @@ beqforge = "beqforge.cli:main"
 device-check = [
     "pyfar==0.8.1",
     "sounddevice==0.5.6",
+    "websocket-client==1.9.2",
 ]
 
 [dependency-groups]

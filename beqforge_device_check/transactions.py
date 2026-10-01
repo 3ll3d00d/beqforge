@@ -33,6 +33,8 @@ class Engine(Protocol):
 class Simulation:
     """Numerical control with actual time-domain filtering, never hardware evidence."""
 
+    live = False
+
     def __init__(self, rate: int, model: str = "float64"):
         self.rate = rate
         self.model = model
@@ -93,6 +95,22 @@ def bench_hash(config: dict) -> str:
     return digest(config)
 
 
+def restore_state(engine: Engine, snapshot: dict) -> tuple[bool, list[str]]:
+    errors = []
+    try:
+        engine.mute(True)
+        restored = engine.restore(snapshot)
+    except Exception as error:  # noqa: BLE001 - save any adapter failure during emergency restoration
+        errors.append(f"restoration: {type(error).__name__}: {error}")
+        restored = False
+    if not restored:
+        try:
+            engine.mute(True)
+        except Exception as error:  # noqa: BLE001 - save any adapter failure during emergency restoration
+            errors.append(f"could not verify final mute: {error}")
+    return restored, errors
+
+
 def measure(
     directory: Path,
     case: dict,
@@ -126,7 +144,7 @@ def measure(
     if settle > 60:
         raise ValueError("settling exceeds the supported 60-second control bound")
     engine.mute(False)
-    if settle and not isinstance(engine, Simulation):
+    if settle and getattr(engine, "live", True):
         time.sleep(settle)
     y, stream = capture.capture(x, settings.rate)
     if y.ndim != 2 or y.shape[0] != len(x):
@@ -186,7 +204,7 @@ def qualify(
     accuracy_db: float,
 ) -> dict:
     validate(manifest)
-    if not isinstance(engine, Simulation) and not config.get(
+    if getattr(engine, "live", True) and not config.get(
         "electrical_bench_acknowledged"
     ):
         raise ValueError(
@@ -249,13 +267,14 @@ def qualify(
             atomic_json(directory / "qualification.json", qualification)
             return qualification
         finally:
-            engine.mute(True)
-            restored = engine.restore(snapshot)
-            if not restored:
-                engine.mute(True)
+            restored, errors = restore_state(engine, snapshot)
             atomic_json(
                 directory / "run.json",
-                {"restored": restored, "engine": engine.identify()},
+                {
+                    "restored": restored,
+                    "restoration_errors": errors,
+                    "engine": engine.identify(),
+                },
             )
             register(directory)
 
@@ -281,12 +300,12 @@ def run(
         or qualification["manifest_hash"] != manifest["hash"]
     ):
         raise ValueError("qualification is stale for this bench/manifest")
-    if not qualification["qualified"] and not isinstance(engine, Simulation):
+    if not qualification["qualified"] and getattr(engine, "live", True):
         raise ValueError(
             "live bench is not qualified: complete loopback/bypass/convergence checks"
         )
     settings = SweepSettings(**qualification["settings"])
-    if not isinstance(engine, Simulation) and not config.get(
+    if getattr(engine, "live", True) and not config.get(
         "electrical_bench_acknowledged"
     ):
         raise ValueError(
@@ -314,9 +333,7 @@ def run(
             "snapshot": snapshot,
             "completed": [],
             "failures": [],
-            "scope": "simulation"
-            if isinstance(engine, Simulation)
-            else "live electrical bench",
+            "scope": engine.identify()["scope"],
         }
         if prior.exists():
             summary["completed"] = old["completed"]
@@ -416,10 +433,9 @@ def run(
             summary["complete"] = False
             raise
         finally:
-            engine.mute(True)
-            summary["restored"] = engine.restore(snapshot)
-            if not summary["restored"]:
-                engine.mute(True)
+            summary["restored"], summary["restoration_errors"] = restore_state(
+                engine, snapshot
+            )
             atomic_json(prior, summary)
             register(directory)
     return summary

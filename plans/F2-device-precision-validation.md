@@ -581,3 +581,26 @@ Validation: fourteen F2 tests passed, including partial failure/restoration, exp
 stale qualifications, concurrent lock refusal and unrelated-file exclusion. Ruff passed.
 The numerical engine processes captures with independent SciPy `sosfilt`. Live restoration
 and the broader qualification protocol remain adapter/bench tasks.
+
+### 4. miniDSP and CamillaDSP adapters
+
+Added bounded helper processes with version/hash checks and argument arrays. miniDSP selection
+requires an explicit serial and rechecks it before commands; each load clears all unused
+selected-route slots and explicitly activates sections. Feedback signs match ezbeq's loader.
+The miniDSP adapter requires user-supplied complete restoration commands because master status
+cannot reconstruct its configuration. Restoration remains unverified without coefficient
+readback, so it leaves the device muted and reports the outstanding state. Emergency
+restoration failures are recorded without losing the run record. No hardware was changed here.
+
+CamillaDSP supports a pinned raw file-in/file-out control and an explicit mono live websocket
+bench template. Commands are correlated by name with finite bounds; active configuration,
+version, mute and restoration are checked. Parameter readback is labelled separately from
+coefficient-bit readback. websocket-client 1.9.2 is an optional pinned measurement dependency.
+
+Validation: nineteen F2 tests passed, including helper timeouts (no retry), feedback signs,
+unused-slot clearing, unverified restore, websocket response matching and restoration failure.
+The official Linux amd64 CamillaDSP 4.1.3 (05e9cfc) binary processed identity, benign and
+sensitive pilot cascades at 96 kHz. Recovered valid-bin error against independent analytical
+predictions was below 1e-6 dB (observed approximately 9.15e-9 dB). This validates this binary's
+file-processing control only; its live path, other builds and the miniDSP remain unmeasured.
+The helper was downloaded into scratch space, not vendored or installed globally. Ruff passes.
