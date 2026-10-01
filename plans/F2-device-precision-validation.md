@@ -541,3 +541,23 @@ Validation: four tests passed, covering ezbeq-compatible 2x4 HD capabilities, im
 checks, independent SciPy frequency-response agreement, feedback sign and a low-frequency
 case that becomes unstable after float32 rounding. Ruff passed for the new package/tests.
 This is an offline foundation, not a measured device claim. No code under `beqforge/` changed.
+
+### 2. Stimulus, recovery and capture foundation
+
+Pinned measurement-only extras to sounddevice 0.5.6 and pyfar 0.8.1, verified on Python 3.13.
+The exact emitted float32 sweep includes pre-roll and zero tail, hashes and sample positions.
+Offline pyfar regularised inversion preserves the full tail and native FFT frequencies, records
+its calculable inversion bias, masks under-range bins and does not remove gain/filter phase.
+An independent timing channel estimates transport delay and relative drift; excess drift is
+refused rather than resampled. Unverified latency remains a phase limitation.
+
+The explicit sounddevice Stream backend checks names/host APIs/channels/rate, uses bounded
+preallocated RAM buffers, records callback statuses/timestamps and writes completed captures
+outside the callback. Device discovery is isolated in a timeout-bounded subprocess: native
+PortAudio initialisation succeeded on this host, but discovery stalled and was stopped.
+No live signal was emitted and no miniDSP settings changed. Streaming remains bench-unverified.
+
+Validation: all ten foundation/recovery tests pass; known-transfer error was below 0.002 dB
+for identity, a high-Q low-frequency peak and a cancelling shelf cascade. Injected delay,
+clock mismatch, clipping, truncation, callback dropouts, noise masking and preserved gain
+are covered. These are numerical checks, not a qualified 2 Hz bench result. Ruff passes.
