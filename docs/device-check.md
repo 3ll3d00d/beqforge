@@ -33,6 +33,8 @@ state headroom; clipping still aborts a run. Unsupported/unstable cases are reta
 It emits no live signal. It reports unavailable/stalled host audio discovery separately;
 numerical success does not prove hardware compatibility. The capture implementation uses
 bounded RAM rather than writing files inside the callback; maximum RAM is a bench setting.
+Use `self-test --skip-audio-discovery --out DIR` for completely offline testing without
+enumerating audio devices. This also exercises assembly/replay of all qualification stages.
 
 ## CamillaDSP reference
 
@@ -64,12 +66,48 @@ master-status readback cannot recover the whole device configuration. The adapte
 those commands but cannot verify coefficient bits, so it leaves the device muted and reports
 unverified restoration. Review the saved state with the official device software before reuse.
 
-Qualification currently gathers active identity repeatability at both levels. It is labelled
-**incomplete**: direct interface loopback, device bypass, sweep/tail convergence, clock/noise
-and pilot evidence must be added before a live batch is licensed. Numerical/file controls can
-run against identity qualification; live `run` refuses incomplete qualification. No published
-target OS or device is bench-validated yet. See the [F2 measurement plan](../plans/F2-device-precision-validation.md)
-for the remaining protocol, arithmetic/noise/ring-out tests and release criteria.
+Qualification has four recorded stages. Run them against the same frozen manifest, bench
+configuration, sweep settings and predeclared accuracy requirement, using different output
+directories. The default `--stage identity` gathers at least five independently loaded
+active identities per level. It remains incomplete until the supporting stages are assembled:
+
+```bash
+beqforge-device-check qualify --config bench.json --manifest cases.json --accuracy-db 0.1 --stage identity --out qualification/
+# Reconnect the interface output directly to its capture input before this stage.
+# This stage opens the configured audio stream but sends no miniDSP control commands.
+beqforge-device-check qualify --config bench.json --manifest cases.json --accuracy-db 0.1 --stage direct-loopback --path-description 'Interface output 1 directly to line input 1' --out direct/
+# Restore the documented DUT wiring before the following stages.
+beqforge-device-check qualify --config bench.json --manifest cases.json --accuracy-db 0.1 --stage device-bypass --path-description 'DUT route with selected input PEQ bank bypassed' --out bypass/
+beqforge-device-check qualify --config bench.json --manifest cases.json --accuracy-db 0.1 --stage convergence --out convergence/
+beqforge-device-check complete-qualification qualification/ --supporting direct/ --supporting bypass/ --supporting convergence/
+```
+
+The bypass stage bypasses the selected miniDSP PEQ bank, not every processing stage. Other
+stages must already be disabled or documented in setup. Convergence doubles sweep duration
+and retained tail independently for identity and every planned cascade; it does not refit or
+remove gain. A large catalogue can take substantial time even at this stage. Start with the
+pilot, then qualify the exact catalogue manifest/settings/levels before its batch.
+
+Completion checks hashes, matching settings/engine, masks and measured repeatability,
+inversion/noise bounds and convergence. Only their common usable bins qualify. Missing,
+stale or under-range evidence refuses completion. Set `common_clock: true` and describe its
+established basis in `clock_basis`, or supply an independent `reference_channel` in the bench
+JSON. Merely sharing a nominal sample rate is not a shared clock. Timing-reference captures
+reject excess measured drift. Setup asks for these fields; wiring descriptions are operator
+records, not automatic electrical-route detection.
+
+Supporting raw captures/stimuli and transport records travel with completed qualification
+and the run bundle. Numerical/file controls can run against identity-only qualification;
+live `run` refuses incomplete qualification. No target OS or device is bench-validated yet.
+The [F2 measurement plan](../plans/F2-device-precision-validation.md) retains the hardware
+pilot, arithmetic/noise/ring-out experiments and release criteria.
+
+The pinned miniDSP CLI parses PEQ coefficients as float32 and writes float32 to the 2x4 HD
+transport. Reports therefore retain requested coefficients separately from the float32 sent
+coefficients. Sending more decimal digits cannot remove that conversion. Sent bits are still
+not coefficient storage readback or proof of recursive arithmetic. The source references are
+[`PeqCommand::Set`](https://github.com/mrene/minidsp-rs/blob/v0.1.9/minidsp/src/bin/minidsp/main.rs)
+and the [2x4 HD dialect](https://github.com/mrene/minidsp-rs/blob/v0.1.9/protocol/src/device/m2x4hd.rs).
 
 Every run saves exact stimuli, raw captures, sent payloads, partial attempts, identities and
 restoration status. Ctrl-C and failures stop the transaction; no timed-out sweep is retried
@@ -97,6 +135,26 @@ Channel-specific schemas are currently unsupported and visible in the inventory.
 separate engine configurations and unmatched counts. Reports show signed errors and missing
 bins, identity uncertainty, frequency excursions, individual traces and separate entry/unique
 cascade weighting. A thousand catalogue entries on one device are not independent units.
+
+Single-run HTML reports include catalogue error plots and qualified counts. JSON includes
+per-frequency median, 90th/95th percentile, maximum error and fractions above the predeclared
+requirement, separately weighted by entries and unique cascades. A 128-point logarithmic display
+grid interpolates only between adjacent qualified native bins; no gap is bridged and every
+frequency carries its denominator. Reloads contribute a cascade's maximum absolute error,
+median signed error and maximum uncertainty, rather than counting as additional cascades.
+Matched-device JSON compares equal levels on shared qualified bins, with signed differences,
+combined uncertainty, missing coverage and individual reload-pair evidence IDs.
+
+Per-case `accuracy_assessment` distinguishes bins inside the requirement including uncertainty,
+bins exceeding it even after uncertainty, unresolved bins and unqualified bins. This applies
+only to the measured valid band. Characteristics include section count, lowest corner, Q and
+predicted quantisation departure for subsequent population investigation.
+
+For offline precision controls, a simulation bench can set `storage_model` to `float32` or
+`float64`, independently of `arithmetic` (`float32` or `float64`, default float64). The former
+rounds stored coefficients; the latter selects SciPy's recursive processing precision. This
+is a named numerical control, not an emulation of a proprietary DSP implementation. Different
+settings require fresh qualification because they change engine identity.
 
 Bundles are local exports; nothing uploads automatically. `--summary-only` excludes raw arrays
 and is marked insufficient for replay. Bundling verifies registered evidence and excludes

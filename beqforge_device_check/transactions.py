@@ -16,6 +16,7 @@ from beqforge_device_check.evidence import (
     atomic_arrays,
     atomic_bytes,
     atomic_json,
+    evidence_name,
     file_hash,
     register,
     run_lock,
@@ -42,9 +43,12 @@ class Simulation:
 
     live = False
 
-    def __init__(self, rate: int, model: str = "float64"):
+    def __init__(self, rate: int, model: str = "float64", arithmetic: str = "float64"):
+        if arithmetic not in ("float32", "float64"):
+            raise ValueError("simulation arithmetic must be float32 or float64")
         self.rate = rate
         self.model = model
+        self.arithmetic = arithmetic
         self.sos = np.empty((0, 6))
         self.muted = False
 
@@ -53,6 +57,7 @@ class Simulation:
             "engine": "simulation",
             "rate": self.rate,
             "model": self.model,
+            "arithmetic": f"SciPy sosfilt {self.arithmetic}; not a device implementation model",
             "scope": "file-in/file-out numerical control",
             "numpy": np.__version__,
         }
@@ -66,14 +71,15 @@ class Simulation:
     def load(self, case: dict) -> dict:
         if case["rate"] != self.rate:
             raise ValueError("simulation internal rate mismatch")
+        sent = np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6)
         self.sos = rounded(
-            np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6),
+            sent,
             self.model,
         )
         if not stable(self.sos):
             raise ValueError("unstable simulation coefficients")
         return {
-            "sent_sos": self.sos.tolist(),
+            "sent_sos": sent.tolist(),
             "readback_sos": self.sos.tolist(),
             "storage_verified": True,
             "model": self.model,
@@ -82,13 +88,14 @@ class Simulation:
     def capture(self, stimulus: np.ndarray, rate: int) -> tuple[np.ndarray, dict]:
         if self.muted or rate != self.rate:
             raise ValueError("simulation is muted or rate differs")
+        dtype = np.float32 if self.arithmetic == "float32" else np.float64
         y = (
-            sosfilt(self.sos, stimulus.astype(float))
+            sosfilt(self.sos.astype(dtype), stimulus.astype(dtype))
             if len(self.sos)
-            else stimulus.astype(float)
+            else stimulus.astype(dtype)
         )
         return y[:, None], {
-            "format": "float64",
+            "format": self.arithmetic,
             "statuses": [],
             "scope": "numerical control",
         }
@@ -226,8 +233,14 @@ def qualify(
     settings: SweepSettings,
     *,
     accuracy_db: float,
+    stage: str = "identity",
+    path_description: str | None = None,
 ) -> dict:
     validate(manifest)
+    if stage not in ("identity", "direct-loopback", "device-bypass"):
+        raise ValueError("unsupported repeatability qualification stage")
+    if stage != "identity" and not path_description:
+        raise ValueError("describe the actual direct/bypass measurement path")
     if getattr(engine, "live", True) and not config.get(
         "electrical_bench_acknowledged"
     ):
@@ -244,7 +257,7 @@ def qualify(
         atomic_json(directory / "manifest.json", manifest)
         try:
             for level in manifest["levels_dbfs"]:
-                traces, masks = [], []
+                traces, masks, biases, noise_bounds = [], [], [], []
                 for _ in range(max(5, manifest["identity_repeats"])):
                     result = measure(
                         directory,
@@ -262,11 +275,19 @@ def qualify(
                         frequencies = arrays["frequencies"].copy()
                         traces.append(arrays["response"].copy())
                         masks.append(arrays["mask"].copy())
+                        biases.append(arrays["inversion_bias_db"].copy())
+                        noise_bounds.append(
+                            -20
+                            * np.log10(
+                                np.maximum(1 - 10 ** (-arrays["snr_db"] / 20), 1e-15)
+                            )
+                        )
                 magnitudes = 20 * np.log10(np.maximum(np.abs(traces), 1e-300))
                 uncertainty = (
                     np.max(np.abs(magnitudes - np.median(magnitudes, axis=0)), axis=0)
                     * 2
-                    + 0.01
+                    + 2 * np.max(biases, axis=0)
+                    + 2 * np.max(noise_bounds, axis=0)
                 )
                 valid = np.all(masks, axis=0) & (uncertainty < accuracy_db / 3)
                 atomic_arrays(
@@ -278,6 +299,8 @@ def qualify(
                 )
             qualification = {
                 "schema_version": 1,
+                "stage": stage,
+                "path_description": path_description,
                 "bench_hash": bench_hash(config),
                 "manifest_hash": manifest["hash"],
                 "settings": asdict(settings),
@@ -385,6 +408,20 @@ def run(
             if file_hash(path) != expected_hash:
                 raise ValueError("qualification reference evidence changed")
             atomic_bytes(directory / "analysis" / name, path.read_bytes())
+        for relative, expected_hash in qualification.get(
+            "supporting_files", {}
+        ).items():
+            if not evidence_name(relative) or relative.split("/")[0] not in (
+                "captures",
+                "stimuli",
+                "analysis",
+                "transport",
+            ):
+                raise ValueError("invalid supporting qualification evidence path")
+            path = qualification_dir / relative
+            if file_hash(path) != expected_hash:
+                raise ValueError("supporting qualification evidence changed")
+            atomic_bytes(directory / relative, path.read_bytes())
         cases = {case["id"]: case for case in manifest["cases"]}
         try:
             for level in manifest["levels_dbfs"]:

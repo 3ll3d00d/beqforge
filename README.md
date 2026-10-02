@@ -129,6 +129,10 @@ written atomically, and retained without eviction. Packaged executables use bake
 digests. On the measured two-hour, eight-channel Alto Knights request this reduced design
 time from 110 s cold to 50 s warm. See the [completed cache record](plans/R2a-server-stage-cache.md).
 
+`--cache-dir` and `--shared-root` create missing directories, including parents, at startup.
+The server checks each with a temporary-file write and removes the probe before listening.
+An unusable directory causes a startup error naming the option and path.
+
 **Audio by reference (contract 1.2).** `--shared-root DIR` permits request arrays to name a WAV
 relative to that root plus the SHA-256 of its decoded column, instead of inline base64 audio.
 The server resolves, decodes and checks each reference; an unusable reference gets HTTP 422
@@ -136,6 +140,40 @@ naming the array, rather than a design decline. Inline requests remain supported
 `GET /health` reports `contract_version` and whether `shared_root` is enabled. Each request
 logs read, parse, decode, design and response timings; `tools/experiments/request_timing.py`
 measures cold and warm requests.
+
+Every `serve-designer` configuration option can also be set through an environment variable.
+Explicit CLI options take precedence; for repeatable options, CLI values replace the entire
+environment list. `--help` lists the variable beside each option. Other subcommands retain
+their existing CLI configuration.
+
+| Option | Environment variable | Value |
+| --- | --- | --- |
+| `--host` | `BEQFORGE_HOST` | hostname or address |
+| `--port` | `BEQFORGE_PORT` | integer |
+| `--device-rate` | `BEQFORGE_DEVICE_RATE` | Hz |
+| `--coefficient-bits` | `BEQFORGE_COEFFICIENT_BITS` | integer |
+| `--integer-bits` | `BEQFORGE_INTEGER_BITS` | integer |
+| `--exclude` | `BEQFORGE_EXCLUDE` | JSON array of frequency pairs, e.g. `[[18,22],[40,42]]` |
+| `--goal-tolerance` | `BEQFORGE_GOAL_TOLERANCE` | dB |
+| `--goal-tilt` | `BEQFORGE_GOAL_TILT` | dB per octave |
+| `--content-edge` | `BEQFORGE_CONTENT_EDGE` | boolean |
+| `--strategy` | `BEQFORGE_STRATEGY` | JSON array of names, e.g. `["flatten","counterfactual"]` |
+| `--record-dir` | `BEQFORGE_RECORD_DIR` | path |
+| `--cache-dir` | `BEQFORGE_CACHE_DIR` | path |
+| `--shared-root` | `BEQFORGE_SHARED_ROOT` | path |
+| `--quiet` | `BEQFORGE_QUIET` | boolean |
+
+Booleans accept `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`, ignoring case.
+`--no-content-edge` and `--no-quiet` disable settings enabled through the environment.
+Environment values undergo the same argument validation as CLI values.
+
+```bash
+BEQFORGE_PORT=8420 \
+BEQFORGE_CACHE_DIR=/var/cache/beqforge \
+BEQFORGE_SHARED_ROOT=/srv/beq-audio \
+BEQFORGE_STRATEGY='["flatten"]' \
+beqforge serve-designer
+```
 
 **Rejected candidates.** Every candidate failed by the judge is returned in `rejected` with
 its failure reasons, for review beside the accepted answer or decline. The server validates

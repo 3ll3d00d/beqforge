@@ -42,7 +42,13 @@ def test_minidsp_signs_capacity_clear_and_unverified_restore(tmp_path):
     payload = engine.load(case)
     assert payload["commands"][0][-2:] == ["all", "clear"]
     values = [float(x) for x in payload["commands"][1][-5:]]
-    assert values[-2] == -case["exact_sos"][0][4]
+    assert values[-2] == -float(np.float32(case["exact_sos"][0][4]))
+    assert np.array_equal(
+        payload["sent_sos"],
+        np.asarray(case["exact_sos"], dtype=np.float32).astype(float),
+    )
+    assert not np.array_equal(payload["requested_sos"], payload["sent_sos"])
+    assert payload["transport_format"] == "float32"
     assert not payload["storage_verified"]
     assert not engine.restore(engine.snapshot())
     assert commands[-1][-2:] == ["config", "0"]

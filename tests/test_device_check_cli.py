@@ -1,6 +1,39 @@
 import json
 
-from beqforge_device_check.cli import main
+import pytest
+
+from beqforge_device_check.cli import main, validate_config
+from beqforge_device_check.profiles import PROFILES
+
+
+def live_config():
+    return {
+        "schema_version": 1,
+        "profile": PROFILES["minidsp-2x4hd"].as_dict(),
+        "route": "input",
+        "channel": 0,
+        "rate": 96000,
+        "engine_mode": "minidsp",
+        "firmware_or_build": "documented firmware",
+        "physical_route": "electrical bench",
+        "electrical_bench_acknowledged": True,
+        "audio": {"input": {"channels": 2, "channel": 0}},
+    }
+
+
+@pytest.mark.parametrize("reference", [-1, 0, 2, True])
+def test_timing_reference_cannot_be_the_dut_or_an_invalid_channel(reference):
+    with pytest.raises(ValueError, match="separate captured input"):
+        validate_config({**live_config(), "reference_channel": reference})
+
+
+def test_valid_independent_timing_reference_and_explicit_clock_basis():
+    config = {**live_config(), "reference_channel": 1}
+    assert validate_config(config).id == "minidsp-2x4hd"
+    with pytest.raises(ValueError, match="boolean"):
+        validate_config({**config, "common_clock": "false"})
+    with pytest.raises(ValueError, match="clock basis"):
+        validate_config({**config, "common_clock": True})
 
 
 def test_offline_setup_and_plan_do_not_require_audio_or_device(tmp_path, capsys):

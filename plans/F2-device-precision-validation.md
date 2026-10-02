@@ -1,8 +1,9 @@
 # F2: measuring device coefficient precision and arithmetic
 
-Planning draft, 2026-09-30. Execution and any change to device assumptions remain open in
-[TODO.md](../TODO.md). This document specifies the experiment; no measurements have been
-made and no fitter, acceptance rule or Q limit is changed.
+Experiment plan, 2026-09-30; implementation preview updated 2026-10-02. Hardware execution
+and any change to device assumptions remain open in [TODO.md](../TODO.md). Implementation
+and numerical/software-control outcomes are recorded below; no hardware precision conclusion,
+fitter, acceptance rule or Q limit is changed.
 
 ## Question and scope
 
@@ -691,8 +692,71 @@ that interrupted samples/statuses survive restoration; exported/imported complet
 runs regenerate identical report results; malformed paths/hashes/oversized bundles leave no
 visible destination. Ruff passes. The frozen self-test now includes import/offline replay too.
 
-Remaining F2 work is deliberately open: direct interface/bypass and duration/tail convergence
+Remaining F2 work at checkpoint 8 was deliberately open: direct interface/bypass and duration/tail convergence
 qualification, live pilot and arithmetic/noise/ring-out experiments, JRiver feasibility,
 channel-specific catalogue formats, shared-frequency matched comparison/denominators, redacted
 community exchange and cross-platform CI/bench verification. The current preview validates a
 numerical/control workflow, not the device precision conclusions or the full protocol.
+
+### 9. Runnable qualification and catalogue population analysis
+
+The owner selected miniDSP serial 914267. Only minidsp-rs 0.1.9 CLI discovery/status was used;
+status reported USB source, preset 0 and an unmuted 0 dB master. No filter, gain, mute or
+routing settings were changed, and no audio stream or live signal was opened. The device
+was then disconnected because this host was unstable; live work resumes on a different host.
+
+Corrected a precision attribution error: the pinned CLI's `PeqCommand::Set` parses `Vec<f32>`
+and its 2x4 HD dialect encodes `Float32LE`, confirmed from the v0.1.9 source. Payload records
+now separate requested coefficients from the actual float32 transport values. More decimal
+digits cannot evade that conversion. Storage remains unverified, and recursive arithmetic
+is a distinct hypothesis. Numerical controls now independently select stored-coefficient
+precision and SciPy float32/float64 recursive processing, explicitly not a proprietary-device
+emulator. This changes neither the designer nor its realisation assumptions.
+
+Added direct-interface and selected-PEQ-bank bypass repeatability stages, independent sweep
+duration/tail doubling on every planned cascade, and offline qualification assembly. Direct
+loopback opens only the named audio route and sends no DUT controls; the operator must rewire
+and record the path. Bypass is expressly the selected PEQ bank, not the whole DSP. Completion
+requires matching bench/manifest/settings/engine and hashed evidence for all stages, a recorded
+clock basis or timing reference, and common usable bins within the frozen uncertainty budget.
+Identity uncertainty now uses measured repeat spread, output-noise bounds and inversion bias
+rather than adding an arbitrary 0.01 dB. Supporting raw recordings and transport evidence are
+copied into the completed qualification and run bundles; stale/missing evidence refuses a run.
+The checks do not establish a zero-input arithmetic detection bound or verify physical wiring.
+
+Filter reports now classify qualified bins as within the engineering requirement, exceeding it
+despite uncertainty, or unresolved. They retain unqualified coverage and filter characteristics.
+Catalogue population reports add signed bias, median/90th/95th/maximum absolute errors,
+exceedance fractions and qualified denominators at each frequency, separately weighted by
+entries and unique cascades. Reloads remain dependent. The declared 128-point logarithmic
+display grid interpolates adjacent valid bins only; it never bridges a masked gap. HTML plots
+show error distributions with the qualified counts. Matched-device comparisons now calculate
+signed differences and combined uncertainty on shared valid bins at matching levels, retain
+each reload pair and expose omitted levels/coverage. Offline replay verifies registered
+analysis/transport hashes and qualification identity before producing a report.
+
+Validation: 48 verifier tests passed, one optional real-Camilla test skipped; Ruff and
+`git diff --check` passed. The full repository run passed 660 tests and skipped two; its
+16 localhost HTTP tests and one extractor test initially failed because the sandbox blocked
+sockets and uv's cache. All 17 passed in environment-specific reruns. The final timing-reference
+guards were then covered by the complete verifier test set without repeating unaffected
+designer tests. Independent timing references cannot select the DUT capture channel, an
+out-of-range channel or a boolean; common-clock claims require a boolean and recorded basis.
+
+Source, rebuilt Linux folder and final single-file preview self-tests passed independent
+identity/benign/sensitive recovery (worst valid-bin error approximately 6.8e-9 dB), qualification
+assembly, raw-evidence export/import and identical offline replay. Audio discovery was explicitly
+disabled in all self-tests; no hardware was probed or measured. The final single-file smoke
+test held the sleep inhibitor and completed in 21.3 seconds. The executable is 96,237,560 bytes,
+SHA-256 `2d2c436c25cbad4c4406cde67dde7b65bc535a37014a9aeac1fb36e8cf3d1488`.
+The ignored local delivery directory `dist/device-check-linux-x86_64-preview/` contains the
+executable, guide, notices, smoke record and `SHA256SUMS`. This is a build for this development
+host, not evidence of the workflow's Ubuntu/glibc baseline or compatibility with another OS.
+
+The documented commands are runnable on the next host after installing the measurement extra
+or using a matching standalone preview and completing setup. Remaining evidence/development:
+real bench qualification and live pilot, low-level/noise/ring-out experiments and arithmetic
+detection bounds, JRiver feasibility, explicitly characterised channel-specific catalogue
+schemas, community-bundle redaction, cross-platform build/bench verification. A complete
+catalogue inventory may legitimately account for unsupported entries; those entries are never
+silently dropped, clamped or truncated. No hardware/model/Q-limit validation is claimed.

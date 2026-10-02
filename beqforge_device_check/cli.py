@@ -91,18 +91,43 @@ def validate_config(config: dict) -> DeviceProfile:
             )
         if not config.get("audio"):
             raise ValueError("explicit audio routes are required")
+        if not isinstance(config.get("common_clock", False), bool):
+            raise ValueError("common_clock must be a boolean")
+        if config.get("common_clock") and not config.get("clock_basis"):
+            raise ValueError("describe the established common-clock basis")
+        reference = config.get("reference_channel")
+        if reference is not None:
+            selection = config["audio"]["input"]
+            if (
+                not isinstance(reference, int)
+                or isinstance(reference, bool)
+                or not 0 <= reference < selection["channels"]
+                or reference == selection["channel"]
+            ):
+                raise ValueError(
+                    "timing reference must be a separate captured input channel, bypassing the DUT"
+                )
     return profile
 
 
-def factory(config: dict, directory: Path):
+def factory(config: dict, directory: Path, *, stage: str = "identity"):
     from beqforge_device_check.engines import CamillaFile, CamillaLive, Helper, Minidsp
 
     profile = validate_config(config)
     mode, rate = config["engine_mode"], config["rate"]
     if mode == "simulation":
-        engine = Simulation(rate, config.get("storage_model", "float64"))
+        engine = Simulation(
+            rate,
+            config.get("storage_model", "float64"),
+            config.get("arithmetic", "float64"),
+        )
         return engine, engine
     options = config["engine"]
+    if stage == "direct-loopback":
+        from beqforge_device_check.audio import StreamCapture, devices
+        from beqforge_device_check.qualification import DirectReference
+
+        return DirectReference(), StreamCapture(config["audio"], devices())
     if mode == "camilladsp-file":
         engine = CamillaFile(
             Helper(Path(options["executable"]), options["version"]),
@@ -124,6 +149,10 @@ def factory(config: dict, directory: Path):
     from beqforge_device_check.audio import StreamCapture, devices
 
     capture = StreamCapture(config["audio"], devices())
+    if stage == "device-bypass":
+        from beqforge_device_check.qualification import BypassReference
+
+        engine = BypassReference(engine)
     return engine, capture
 
 
@@ -203,6 +232,20 @@ def setup(args) -> dict:
             "channel": int(input(f"{side} channel index (zero-based): ")),
         }
     config["audio"].update({"latency": "high", "blocksize": 1024})
+    config["common_clock"] = (
+        input(
+            "Do playback/capture share a hardware clock? Type YES if established: "
+        ).strip()
+        == "YES"
+    )
+    config["clock_basis"] = input(
+        "Clock basis (shared interface/digital clocking, or unknown): "
+    ).strip()
+    timing = input(
+        "Independent timing-reference input channel (zero-based; blank if absent): "
+    ).strip()
+    if timing:
+        config["reference_channel"] = int(timing)
     config["electrical_bench_acknowledged"] = (
         input("Type DISCONNECTED to acknowledge the electrical bench: ").strip()
         == "DISCONNECTED"
@@ -211,7 +254,7 @@ def setup(args) -> dict:
     return config
 
 
-def self_test(directory: Path) -> dict:
+def self_test(directory: Path, *, audio_discovery: bool = True) -> dict:
     """Run real native imports, known-transfer recovery, transactions and offline replay."""
     from scipy.signal import sosfilt
 
@@ -283,6 +326,8 @@ def self_test(directory: Path) -> dict:
         "route": "filter",
         "channel": 0,
         "engine_mode": "simulation",
+        "common_clock": True,
+        "clock_basis": "numerical control: stimulus and capture share one sample axis",
     }
     engine = Simulation(48000)
     settings = SweepSettings(
@@ -309,6 +354,7 @@ def self_test(directory: Path) -> dict:
             raise ValueError(f"self-test known-transfer error {error:g} dB")
         errors[case["name"]] = error
     manifest["order"] = [manifest["cases"][1]["id"]] * 3
+    manifest["cases"] = manifest["cases"][:2]
     manifest["hash"] = digest({k: v for k, v in manifest.items() if k != "hash"})
     short = SweepSettings(rate=48000, duration_s=1, tail_s=2, preroll_s=0.25)
     qualify(
@@ -320,6 +366,37 @@ def self_test(directory: Path) -> dict:
         short,
         accuracy_db=0.1,
     )
+    from beqforge_device_check.qualification import complete, convergence
+
+    for stage in ("direct-loopback", "device-bypass"):
+        qualify(
+            config,
+            manifest,
+            directory / stage,
+            engine,
+            engine,
+            short,
+            accuracy_db=0.1,
+            stage=stage,
+            path_description="offline numerical stage assembly; no physical route claim",
+        )
+    convergence(
+        config,
+        manifest,
+        directory / "convergence",
+        engine,
+        engine,
+        short,
+        accuracy_db=0.1,
+    )
+    complete(
+        directory / "qualification",
+        [
+            directory / stage
+            for stage in ("direct-loopback", "device-bypass", "convergence")
+        ],
+        clock_verified=True,
+    )
     completed = run(
         config, manifest, directory / "qualification", directory / "run", engine, engine
     )
@@ -329,24 +406,26 @@ def self_test(directory: Path) -> dict:
     replayed = analyse(directory / "imported", directory / "replayed")
     if replayed["results"] != report["results"]:
         raise ValueError("bundle import changed offline analysis")
-    import sounddevice as sd
+    native_portaudio = None
+    audio = {"status": "skipped", "limitation": "audio discovery deliberately disabled"}
+    if audio_discovery:
+        import sounddevice as sd
 
-    from beqforge_device_check.audio import devices
+        from beqforge_device_check.audio import devices
 
-    native_portaudio = list(sd.get_portaudio_version())
-
-    try:
-        inventory = devices(timeout_s=10)
-        audio = {
-            "status": "initialised",
-            "devices": len(inventory["devices"]),
-            "portaudio": inventory["portaudio"],
-        }
-    except subprocess.TimeoutExpired:
-        audio = {
-            "status": "discovery-timeout",
-            "limitation": "live audio remains unavailable on this host",
-        }
+        native_portaudio = list(sd.get_portaudio_version())
+        try:
+            inventory = devices(timeout_s=10)
+            audio = {
+                "status": "initialised",
+                "devices": len(inventory["devices"]),
+                "portaudio": inventory["portaudio"],
+            }
+        except subprocess.TimeoutExpired:
+            audio = {
+                "status": "discovery-timeout",
+                "limitation": "live audio remains unavailable on this host",
+            }
     result = {
         "passed": completed["complete"] and report["complete"],
         "known_transfer_error_db": errors,
@@ -356,6 +435,7 @@ def self_test(directory: Path) -> dict:
         "native_portaudio": native_portaudio,
         "bundle_bytes": exported["bytes"],
         "bundle_replay_verified": True,
+        "qualification_stage_assembly_verified": True,
         "provenance": provenance(),
     }
     atomic_json(directory / "self-test.json", result)
@@ -379,6 +459,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--executable")
     command = sub.add_parser("self-test")
     command.add_argument("--out", type=Path, required=True)
+    command.add_argument("--skip-audio-discovery", action="store_true")
     for name in ("plan", "qualify", "run", "catalogue-plan", "catalogue-entry"):
         command = sub.add_parser(name)
         command.add_argument("--config", type=Path, required=True)
@@ -394,6 +475,12 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--tail", type=float, default=15)
             command.add_argument("--low-hz", type=float, default=2)
             command.add_argument("--high-hz", type=float, default=200)
+            command.add_argument(
+                "--stage",
+                choices=("identity", "direct-loopback", "device-bypass", "convergence"),
+                default="identity",
+            )
+            command.add_argument("--path-description")
         elif name == "run":
             command.add_argument("--manifest", type=Path, required=True)
             command.add_argument("--qualification", type=Path, required=True)
@@ -407,6 +494,9 @@ def parser() -> argparse.ArgumentParser:
             if name == "catalogue-entry":
                 command.add_argument("--entry", required=True)
                 command.add_argument("--qualification", type=Path)
+    command = sub.add_parser("complete-qualification")
+    command.add_argument("directory", type=Path)
+    command.add_argument("--supporting", type=Path, action="append", required=True)
     for name in ("analyse", "catalogue-analyse"):
         command = sub.add_parser(name)
         command.add_argument("directories", type=Path, nargs="+")
@@ -447,6 +537,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(args) -> dict | list:
+    if args.command == "complete-qualification":
+        from beqforge_device_check.qualification import complete
+
+        config = read(args.directory / "bench.json")
+        clock_verified = config.get("reference_channel") is not None or bool(
+            config.get("common_clock") and config.get("clock_basis")
+        )
+        record = complete(
+            args.directory, args.supporting, clock_verified=clock_verified
+        )
+        return {k: v for k, v in record.items() if k != "results"}
     if args.command in ("devices", "_audio-devices"):
         from beqforge_device_check.audio import devices, native_devices
 
@@ -461,7 +562,7 @@ def dispatch(args) -> dict | list:
         atomic_json(args.out, config)
         return config
     if args.command == "self-test":
-        return self_test(args.out)
+        return self_test(args.out, audio_discovery=not args.skip_audio_discovery)
     if args.command == "bundle":
         return bundle(args.directory, args.out, summary_only=args.summary_only)
     if args.command == "import-bundle":
@@ -549,9 +650,19 @@ def dispatch(args) -> dict | list:
     validate(manifest)
     if DeviceProfile.from_dict(manifest["profile"]) != profile:
         raise ValueError("bench and manifest profiles disagree")
-    engine, capture = factory(config, args.out)
+    engine, capture = factory(
+        config, args.out, stage=getattr(args, "stage", "identity")
+    )
     if args.command == "qualify":
-        result = qualify(
+        if args.stage == "convergence":
+            from beqforge_device_check.qualification import convergence
+
+            operation = convergence
+            extra = {}
+        else:
+            operation = qualify
+            extra = {"stage": args.stage, "path_description": args.path_description}
+        result = operation(
             config,
             manifest,
             args.out,
@@ -565,6 +676,7 @@ def dispatch(args) -> dict | list:
                 high_hz=args.high_hz,
             ),
             accuracy_db=args.accuracy_db,
+            **extra,
         )
         return {k: v for k, v in result.items() if k != "results"}
     for suffix, name in (

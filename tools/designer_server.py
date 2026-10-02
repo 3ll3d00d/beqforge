@@ -20,10 +20,13 @@ import argparse
 import json
 import logging
 import math
+import os
 import sys
+import tempfile
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import override
 
 # the package is not installed into the venv, and tools/ rather than the repo root is what
 # lands on sys.path when this is run as a script
@@ -47,6 +50,80 @@ from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DESIGN_PATH = "/design"
+
+
+class _EnvironmentParser(argparse.ArgumentParser):
+    """Environment defaults use the same conversions and validation as CLI arguments."""
+
+    def __init__(self, **kwargs):
+        self.environment_actions: list[tuple[argparse.Action, bool]] = []
+        super().__init__(**kwargs)
+
+    @override
+    def add_argument(self, *args, **kwargs) -> argparse.Action:
+        action = super().add_argument(*args, **kwargs)
+        if action.dest != "help":
+            self.environment_actions.append((action, kwargs.get("action") == "append"))
+            name = f"BEQFORGE_{action.dest.upper()}"
+            action.help = f"{action.help or ''} (env: {name})".strip()
+        return action
+
+    @override
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
+        arguments = list(sys.argv[1:] if args is None else args)
+        if "--help" in arguments or "-h" in arguments:
+            return super().parse_args(arguments, namespace)
+        explicit = {argument.split("=", 1)[0] for argument in arguments}
+        if self.allow_abbrev:
+            options = [
+                option
+                for action, _ in self.environment_actions
+                for option in action.option_strings
+            ]
+            for flag in tuple(explicit):
+                matches = [option for option in options if option.startswith(flag)]
+                if flag.startswith("--") and len(matches) == 1:
+                    explicit.add(matches[0])
+        defaults: list[str] = []
+        for action, repeatable in self.environment_actions:
+            name = f"BEQFORGE_{action.dest.upper()}"
+            value = os.environ.get(name)
+            if value is None or explicit.intersection(action.option_strings):
+                continue
+            option = action.option_strings[0]
+            if isinstance(action, argparse.BooleanOptionalAction):
+                lowered = value.strip().lower()
+                if lowered not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+                    self.error(f"{name} must be true/false, yes/no, on/off or 1/0")
+                if lowered in ("1", "true", "yes", "on"):
+                    defaults.append(option)
+            elif repeatable:
+                try:
+                    items = json.loads(value)
+                except ValueError:
+                    self.error(f"{name} must be a JSON array")
+                if not isinstance(items, list):
+                    self.error(f"{name} must be a JSON array")
+                for item in items:
+                    if action.nargs == 2:
+                        if not isinstance(item, list) or len(item) != 2:
+                            self.error(f"{name} must be a JSON array of pairs")
+                        defaults.extend([option, *(str(part) for part in item)])
+                    else:
+                        if not isinstance(item, str):
+                            self.error(f"{name} must be a JSON array of strings")
+                        defaults.append(f"{option}={item}")
+            else:
+                defaults.append(f"{option}={value}")
+        return super().parse_args([*defaults, *arguments], namespace)
+
+
+def _prepare_directory(path: Path) -> None:
+    """Create the directory and exercise an actual write before accepting requests."""
+    path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path, prefix=".beqforge-startup-") as probe:
+        probe.write(b"beqforge directory check\n")
+        probe.flush()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -146,7 +223,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _EnvironmentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8420)
     parser.add_argument(
@@ -195,7 +272,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--content-edge",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help=(
             "opt-in: judge from the content edge, not the tracking floor — recovers steep "
             "filters partway down to where the programme meets the noise, but can lift that "
@@ -227,7 +305,7 @@ def main() -> int:
         help=(
             "keep the stage cache here, one file per entry, and reuse any stage whose key "
             "has not moved: a repeat request skips the analysis. Several servers may "
-            "share one directory. Off by default"
+            "share one directory. Created and checked for writes at startup. Off by default"
         ),
     )
     parser.add_argument(
@@ -238,10 +316,15 @@ def main() -> int:
             "accept audio by reference (contract 1.2): an array may name a WAV by a path "
             "relative to DIR, beqdesigner's work_dir as this host sees it. Paths escaping "
             "DIR, even through a symlink, are refused. Off by default: a reference is then "
-            "answered 422"
+            "answered 422. Created and checked for writes at startup"
         ),
     )
-    parser.add_argument("--quiet", action="store_true", help="only warnings and above")
+    parser.add_argument(
+        "--quiet",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="only warnings and above",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -280,11 +363,21 @@ def main() -> int:
         ),
     )
 
+    for option, directory in (
+        ("--cache-dir", args.cache_dir),
+        ("--shared-root", args.shared_root),
+    ):
+        if directory is not None:
+            try:
+                _prepare_directory(directory)
+            except OSError as error:
+                parser.error(
+                    f"{option} {directory}: cannot create or write directory: {error}"
+                )
+
     _Handler.params = params
     _Handler.record_dir = args.record_dir
     _Handler.cache = DirStore(args.cache_dir) if args.cache_dir else None
-    if args.shared_root is not None and not args.shared_root.is_dir():
-        parser.error(f"--shared-root {args.shared_root} is not a directory")
     _Handler.shared_root = args.shared_root.resolve() if args.shared_root else None
     # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
     # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and

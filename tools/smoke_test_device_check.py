@@ -10,11 +10,20 @@ from pathlib import Path
 from beqforge_device_check.evidence import atomic_json, file_hash
 
 
-def smoke(binary: Path, directory: Path, package: Path | None = None) -> dict:
+def smoke(
+    binary: Path,
+    directory: Path,
+    package: Path | None = None,
+    *,
+    audio_discovery: bool = True,
+) -> dict:
     directory.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
+    command = [str(binary.resolve()), "self-test", "--out", str(directory / "evidence")]
+    if not audio_discovery:
+        command.append("--skip-audio-discovery")
     result = subprocess.run(
-        [str(binary.resolve()), "self-test", "--out", str(directory / "evidence")],
+        command,
         check=True,
         capture_output=True,
         text=True,
@@ -24,7 +33,8 @@ def smoke(binary: Path, directory: Path, package: Path | None = None) -> dict:
     if (
         not payload["passed"]
         or not all(payload["adapter_checks"].values())
-        or not payload["native_portaudio"]
+        or (audio_discovery and not payload["native_portaudio"])
+        or not payload["qualification_stage_assembly_verified"]
     ):
         raise ValueError("frozen self-test did not pass")
     from beqforge_device_check.manifest import digest
@@ -61,5 +71,16 @@ if __name__ == "__main__":
     parser.add_argument("executable", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--package", type=Path)
+    parser.add_argument("--skip-audio-discovery", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(smoke(args.executable, args.out, args.package), indent=2))
+    print(
+        json.dumps(
+            smoke(
+                args.executable,
+                args.out,
+                args.package,
+                audio_discovery=not args.skip_audio_discovery,
+            ),
+            indent=2,
+        )
+    )

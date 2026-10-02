@@ -43,10 +43,37 @@ def test_transaction_restore_resume_and_offline_bundle(tmp_path, bench):
     assert summary["complete"] and summary["restored"]
     assert engine.snapshot() == state
     assert len(summary["completed"]) == 6
+    from beqforge_device_check.evidence import atomic_json, register
+
+    atomic_json(
+        directory / "inventory.json",
+        {
+            "source": {"complete_snapshot_declared": True},
+            "entries": [
+                {
+                    "id": "first",
+                    "case": manifest["cases"][1]["id"],
+                    "status": "planned",
+                },
+                {
+                    "id": "duplicate",
+                    "case": manifest["cases"][1]["id"],
+                    "status": "planned",
+                },
+                {"id": "unsupported", "status": "unsupported", "reason": "capacity"},
+            ],
+        },
+    )
+    register(directory)
     report = analyse(directory, directory)
     assert len(report["results"]) == 6
     assert max(item["exact"]["worst_db"] for item in report["results"]) < 0.002
     assert (directory / "report.html").exists()
+    assert (directory / "charts" / "catalogue-population.png").exists()
+    assert report["catalogue"]["unique_cascade_weighted"]["count"] == 1
+    assert (
+        report["results"][0]["accuracy_assessment"]["outcome"] == "within-requirement"
+    )
     resumed = run(
         config,
         manifest,
@@ -157,3 +184,23 @@ def test_live_identity_measurement_requires_disconnected_bench_ack(tmp_path, ben
             replace(SweepSettings(), duration_s=1),
             accuracy_db=0.1,
         )
+
+
+def test_storage_conversion_and_recursive_arithmetic_are_separate_controls():
+    from scipy.signal import sosfilt
+
+    case = generate(PROFILES["simulation-float64"], rate=48000)["cases"][1]
+    samples = np.random.default_rng(123).normal(0, 0.01, 48000).astype(np.float32)
+    storage_only = Simulation(48000, "float32", "float64")
+    recursive = Simulation(48000, "float32", "float32")
+    payload = storage_only.load(case)
+    recursive.load(case)
+    assert payload["sent_sos"] == case["exact_sos"]
+    assert payload["readback_sos"] != payload["sent_sos"]
+    first, _ = storage_only.capture(samples, 48000)
+    second, metadata = recursive.capture(samples, 48000)
+    assert first.dtype == np.float64 and second.dtype == np.float32
+    assert metadata["format"] == "float32"
+    expected = sosfilt(np.asarray(payload["readback_sos"], dtype=np.float32), samples)
+    assert np.array_equal(second[:, 0], expected)
+    assert np.max(np.abs(first[:, 0] - second[:, 0])) > 1e-7

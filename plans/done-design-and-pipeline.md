@@ -748,6 +748,32 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## Server startup configuration (30 September 2026)
+
+`serve-designer --cache-dir DIR` previously created its directory on the first cache write;
+`--shared-root DIR` required an existing directory. Both now create missing parents and
+perform a temporary-file write/flush/cleanup before binding the HTTP socket. Creation or
+write failure is an argparse startup error naming the option and path, rather than a
+failure on the first request. Existing contents are preserved.
+
+All 14 server configuration options accept `BEQFORGE_<OPTION>` environment variables,
+with hyphens replaced by underscores. Explicit CLI values override the environment;
+repeatable CLI options replace the corresponding environment list. Strategies use JSON
+arrays of strings, exclusions JSON arrays of pairs, and boolean settings accept
+true/false, yes/no, on/off or 1/0. `--no-content-edge` and `--no-quiet` allow disabling an
+environment setting. Environment arguments use the existing argparse conversions and
+configuration validation; `--help` lists the names and works even with invalid environment
+settings. Other subcommands retain their existing configuration.
+
+Checks: 29 startup/configuration tests passed, covering directories before binding,
+obstructing files, failed writes, probe cleanup, all environment options, CLI precedence,
+invalid inputs and help. The full suite passed 618 tests and skipped one in the restricted
+sandbox; its 16 HTTP cases were blocked solely by socket creation. Those 16 passed when
+rerun with loopback access (634 passed across the two runs). Ruff checks and formatting
+passed. Only the transport script
+changed: no `beqforge/` modules, targets, filters, judging or baseline records changed, so
+the decision regression probe does not apply.
+
 ## Earlier real-title repairs (16 September 2026)
 
  the first real-title rerun since R1-R12 landed (16 September 2026)

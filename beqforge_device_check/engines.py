@@ -123,11 +123,10 @@ class Minidsp:
         ).reshape(-1, 6)
         if len(exact) > route.sections:
             raise ValueError("cascade exceeds selected route capacity")
-        # Transport is round-trip binary64 decimal; the float32 storage model is
-        # a stated hypothesis until checked by readback or independent evidence.
-        sent = np.array([[float(f"{x:.17g}") for x in row] for row in exact]).reshape(
-            -1, 6
-        )
+        # minidsp-rs v0.1.9 parses `set` as Vec<f32>, and its m2x4hd dialect
+        # writes Float32LE. Decimal precision cannot bypass that conversion.
+        # This establishes transport precision, not stored bits or arithmetic.
+        sent = rounded(exact, "float32")
         predicted = rounded(sent, self.profile.coefficient_format)
         if not stable(sent) or not stable(predicted):
             raise ValueError("unstable sent/stored-model cascade; refusing load")
@@ -149,7 +148,10 @@ class Minidsp:
             commands.append(command)
         return {
             "commands": commands,
+            "requested_sos": exact.tolist(),
             "sent_sos": sent.tolist(),
+            "transport_format": "float32",
+            "transport_precision_source": "minidsp-rs v0.1.9: minidsp/src/bin/minidsp/main.rs PeqCommand::Set Vec<f32>; protocol/src/device/m2x4hd.rs Float32LE",
             "candidate_stored_sos": predicted.tolist(),
             "storage_verified": False,
             "model": self.profile.coefficient_format,
@@ -163,6 +165,12 @@ class Minidsp:
                 continue  # without readback, restoration cannot justify unmuting
             self.command(*command)
         return False
+
+    def bypass(self, case: dict) -> list[str]:
+        self.profile.route(case["route"], case["channel"], case["rate"])
+        command = [case["route"], str(case["channel"]), "peq", "all", "bypass", "on"]
+        self.command(*command)
+        return command
 
 
 def camilla_filters(sos: np.ndarray) -> tuple[dict, list[str]]:
