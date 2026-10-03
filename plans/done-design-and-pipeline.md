@@ -748,6 +748,23 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## Windows output encoding and fit-pool sizing (3 October 2026)
+
+`11fe3b9`: `beqforge.cli.main` reconfigures stdout and stderr to UTF-8 (the dispatch bypassed
+each tool's own `__main__` reconfigure, so piped output on Windows was cp1252), and
+`filters._physical_cores` asks Windows (`GetLogicalProcessorInformationEx`) and macOS
+(`sysctl hw.physicalcpu`) for physical cores instead of falling back to `cpu_count()`. The
+Linux `/proc/cpuinfo` path is untouched. Verified on Windows 11 when committed (full suite,
+and extract/summarise/design end to end through a pipe).
+
+* **Probe on the Linux baseline (2026-10-03).** "Before" at `a3eae69` in a worktree with its
+  own `data/` of symlinks; "after" on `2f4fcb7`, whose `beqforge/` is identical to
+  `11fe3b9`'s (the F2 commits since touch only `beqforge_device_check/`). All eleven
+  `data/*.npz` titles: `compare --tol 0` reports nothing on any title, and the two snapshots
+  are byte-identical. No real runs or synthetic protocol needed — nothing reaches a decision.
+  Full suite on Linux: 684 passed, 2 skipped.
+
+
 ## Server startup configuration (30 September 2026)
 
 `serve-designer --cache-dir DIR` previously created its directory on the first cache write;
