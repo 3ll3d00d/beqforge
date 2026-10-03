@@ -241,5 +241,5 @@ def register(directory: Path) -> None:
             )
     atomic_json(
         directory / "files.json",
-        {str(p.relative_to(directory)): file_hash(p) for p in files},
+        {p.relative_to(directory).as_posix(): file_hash(p) for p in files},
     )

@@ -53,7 +53,9 @@ def provenance() -> dict:
     result["implementation"] = (
         stamp.read_text().strip()
         if stamp.exists()
-        else digest({p.name: p.read_text() for p in sorted(root.glob("*.py"))})
+        else digest(
+            {p.name: p.read_text(encoding="utf-8") for p in sorted(root.glob("*.py"))}
+        )
     )
     result["libraries"] = {}
     for name in ("numpy", "scipy", "pyfar", "sounddevice", "websocket-client"):
