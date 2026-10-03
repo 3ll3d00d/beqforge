@@ -78,3 +78,15 @@ def test_the_pool_leaves_a_physical_core_free() -> None:
     assert 1 <= physical <= cpu_count()
     assert F.FIT_WORKERS <= max(1, physical - 1)
     assert F.FIT_WORKERS >= 1
+
+
+def test_physical_cores_come_from_the_platform_not_the_fallback() -> None:
+    """Off Linux there is no `/proc/cpuinfo`; the platform's own query must answer, or the pool
+    is sized in hardware threads again."""
+    import sys
+
+    if sys.platform == "win32":
+        assert F._windows_physical_cores() == F._physical_cores()
+    elif sys.platform == "darwin":
+        assert F._macos_physical_cores() == F._physical_cores()
+    assert F._physical_cores() >= 1

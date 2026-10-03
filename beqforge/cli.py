@@ -39,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(_usage())
         sys.stderr.write(f"beqforge: unknown subcommand {subcommand!r}\n")
         return 2
+    # Each script forces UTF-8 under its own `__main__` guard, which this dispatch bypasses:
+    # without it a redirected/piped stdout on Windows is the system codepage, and a summarise
+    # sparkline or a non-ASCII title crashes the print rather than reaching the reader. Stderr
+    # too, where the log goes, so `2>&1` into one file is one encoding.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     module = importlib.import_module(module_name)
     sys.argv = [f"beqforge {subcommand}", *rest]
     return module.main()

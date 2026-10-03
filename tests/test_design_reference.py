@@ -112,7 +112,12 @@ def test_a_symlink_out_of_the_root_is_refused(tmp_path) -> None:
     root.mkdir()
     outside.mkdir()
     write_wav(outside / "secret.wav", np.zeros((10, 1), dtype=int), "s16")
-    os.symlink(outside, root / "link")
+    try:
+        os.symlink(outside, root / "link")
+    except OSError as refused:
+        # Windows grants symlink creation only with Developer Mode or elevation (WinError
+        # 1314); CI's runners have it, an ordinary account does not
+        pytest.skip(f"cannot create a symlink here: {refused}")
     with pytest.raises(UnusableReference, match="outside the root"):
         resolve(root, "link/secret.wav", "LFE")
 

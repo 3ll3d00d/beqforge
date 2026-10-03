@@ -289,8 +289,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Windows defaults a redirected/piped stdout to the system codepage rather than
+    # Windows defaults a redirected/piped stdout (and stderr, where the log goes) to the system codepage rather than
     # UTF-8, which crashes on any non-ASCII output; force UTF-8 so a print never dies
     # on the encoding rather than the content.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

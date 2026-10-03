@@ -14,6 +14,8 @@ Everything below the public boundary takes plain ndarrays.
 import logging
 import math
 import os
+import subprocess
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
@@ -350,8 +352,13 @@ def _physical_cores() -> int:
     `cpu_count()` reports threads: on an 8-core machine with SMT it says 16. Sizing a pool of
     CPU-bound fits by that number oversubscribes the machine two to one — capping at "all but
     one" of 16 put 15 processes on 8 cores and saturated it completely, which is the opposite
-    of leaving headroom.
+    of leaving headroom. `/proc/cpuinfo` on Linux, the processor-core relation on Windows,
+    `hw.physicalcpu` on macOS; `cpu_count()` only if the platform's own answer is unavailable.
     """
+    if sys.platform == "win32":
+        return _windows_physical_cores() or cpu_count()
+    if sys.platform == "darwin":
+        return _macos_physical_cores() or cpu_count()
     try:
         seen: set[tuple[str, str]] = set()
         physical = core = None
@@ -371,6 +378,54 @@ def _physical_cores() -> int:
     except OSError:
         pass
     return cpu_count()
+
+
+def _windows_physical_cores() -> int | None:
+    """`GetLogicalProcessorInformationEx(RelationProcessorCore)`: one record per core.
+
+    Records are variable-length, so walk them by each one's own `Size` field.
+    """
+    import ctypes
+
+    relation_processor_core = 0
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        length = ctypes.c_uint32(0)
+        kernel32.GetLogicalProcessorInformationEx(
+            relation_processor_core, None, ctypes.byref(length)
+        )
+        if not length.value:
+            return None
+        buffer = ctypes.create_string_buffer(length.value)
+        if not kernel32.GetLogicalProcessorInformationEx(
+            relation_processor_core, buffer, ctypes.byref(length)
+        ):
+            return None
+    except (AttributeError, OSError):
+        return None
+    cores = offset = 0
+    while offset < length.value:
+        # SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX: DWORD Relationship, DWORD Size, ...
+        size = int.from_bytes(buffer.raw[offset + 4 : offset + 8], "little")
+        if size <= 0:
+            break
+        cores += 1
+        offset += size
+    return cores or None
+
+
+def _macos_physical_cores() -> int | None:
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "hw.physicalcpu"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return int(out.stdout.strip()) or None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 FIT_WORKERS = int(os.environ.get("BEQ_FIT_WORKERS") or max(1, _physical_cores() - 1))
