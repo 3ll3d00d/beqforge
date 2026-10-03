@@ -18,6 +18,14 @@ v1.1 §7.1 binding (`beqforge/designer.py` + `tools/designer_server.py`) — eve
 still holds: no other API, no other service, and the server is a thin transport around the same
 `beqforge.pipeline.run`, not a second implementation.
 
+The one separate tool is `beqforge-device-check` (`beqforge_device_check/`, guide in
+[docs/device-check.md](docs/device-check.md), plan in `plans/F2-device-precision-validation.md`):
+a bench harness that measures whether a frozen cascade plays on a real DSP as predicted. It
+reads the designer's publication arithmetic (`BiquadSpec`, `biquad.py`,
+`filters.publication_filters`) but never feeds a decision back into the pipeline. Changes
+confined to `beqforge_device_check/` don't need the probe; changes to the `beqforge/`
+modules it imports still do.
+
 ## Layout
 
 | File | Contents |
@@ -53,6 +61,10 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `refit_probe.py` (refits every title from its cached analysis and judges in both modes — the fast check for a fitter change), `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — historical review A1), `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original; `--noise-db` adds a delivery noise floor after the filter, so where the programme drowns is known exactly) and `score_injected.py` (scores those variants' runs against that truth: shortfall inside the recoverable band, gain where noise dominates); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on `design/`"), and a tracking floor that requires confident tracking (`t8_floor_rules.py`, historical review T8: more conservative, no more stable). |
 | `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
 | `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
+| `beqforge_device_check/` | `beqforge-device-check`: device profiles, frozen coefficient manifests (including frozen catalogue cascades), sweep capture and response recovery, recoverable measurement transactions, qualification stages, miniDSP and CamillaDSP adapters, analysis, reports and evidence bundles. Independent of the designer; see [docs/device-check.md](docs/device-check.md). Needs the `device-check` extra. |
+| `beqforge-device-check.spec` | PyInstaller recipe for the device-check preview, onedir or onefile (`BEQFORGE_DEVICE_BUILD_MODE`), bundling the native miniDSP helper. Built by `.github/workflows/build-device-check.yml`. |
+| `tools/prepare_device_check_helper.py` | Fetches the hash-pinned, target-native minidsp-rs helper and its licence for the device-check build. |
+| `tools/smoke_test_device_check.py` | Frozen self-test of a built device-check executable (no live signal); assembles the checksum-bearing preview directory. |
 | `tests/` | `uv run pytest`. |
 
 [TODO.md](TODO.md) is the sole prioritised backlog, including open decision questions and

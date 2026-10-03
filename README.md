@@ -211,6 +211,26 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 `multiprocessing` `spawn` inside a frozen executable, which only a real fit exercises. To build
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
+## Device check (preview)
+
+`beqforge-device-check` is a separate tool from the designer. It measures whether a frozen
+cascade actually plays on a DSP as predicted: miniDSP 2x4 HD, CamillaDSP, or a numerical
+float64 control. It sweeps the device, recovers its response and compares that with the
+response the frozen coefficients predict. It does not judge whether a BEQ is right for a
+soundtrack, and nothing it measures feeds back into the designer's decisions.
+
+```bash
+uv sync --extra device-check          # or: pip install 'beqforge[device-check]'
+beqforge-device-check self-test --out self-test/     # offline, no live signal
+```
+
+A run goes through `setup` → `plan` → `qualify` → `run` → `analyse` → `bundle`. It can also
+measure frozen catalogue cascades and import offline evidence bundles. Standalone preview
+executables (unsigned, hardware qualification still outstanding) are built by
+`.github/workflows/build-device-check.yml`. See the [device-check guide](docs/device-check.md)
+for the bench wiring, qualification stages, catalogue runs and packaging, and the
+[F2 measurement plan](plans/F2-device-precision-validation.md) for the design behind it.
+
 ## How a filter is designed
 
 The idea in one line: **find out how much low bass the film's own soundtrack is missing, work
