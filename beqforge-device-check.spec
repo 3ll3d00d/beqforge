@@ -38,10 +38,18 @@ for package in ("pyfar", "sofar"):
     datas += collect_data_files(package)
 for distribution in ("numpy", "scipy", "matplotlib", "pyfar", "sounddevice", "websocket-client"):
     datas += copy_metadata(distribution, recursive=True)
+# On macOS PyInstaller re-signs (and may rewrite load commands of) every collected Mach-O
+# binary, so the bundled helper would no longer be the pinned upstream bytes `self-test`
+# checks against helper.json. Entries added to `a.datas` after Analysis skip both its
+# binary/data reclassification and binary processing, and keep the source's executable bit.
+# Elsewhere the helper stays a binary: on Linux that is what collects its libusb/libudev.
+macos = host_target().startswith("macos")
 a = Analysis([str(root / "beqforge_device_check/cli.py")], pathex=[str(root)],
-             binaries=[(str(helper / name), "helpers")], datas=datas,
+             binaries=[] if macos else [(str(helper / name), "helpers")], datas=datas,
              hiddenimports=["_cffi_backend", "sounddevice", "websocket", "pyfar"],
              excludes=["pytest", "tests", "IPython"], noarchive=False)
+if macos:
+    a.datas.append((f"helpers/{name}", str(helper / name), "DATA"))
 pyz = PYZ(a.pure)
 mode = os.environ.get("BEQFORGE_DEVICE_BUILD_MODE", "onefile")
 if mode not in ("onefile", "onedir"):
