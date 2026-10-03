@@ -4,6 +4,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -24,11 +25,20 @@ def smoke(
         command.append("--skip-audio-discovery")
     result = subprocess.run(
         command,
-        check=True,
+        check=False,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
     )
+    if result.returncode:
+        # the executable reports why on stderr; captured, it would otherwise never reach the log
+        sys.stderr.write(
+            f"self-test stderr:\n{result.stderr}\nself-test stdout:\n{result.stdout}\n"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, command, result.stdout, result.stderr
+        )
     payload = json.loads(result.stdout)
     if (
         not payload["passed"]
