@@ -2,6 +2,9 @@ name: Build device-check preview
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - '**'
   pull_request:
     paths:
       - 'beqforge_device_check/**'

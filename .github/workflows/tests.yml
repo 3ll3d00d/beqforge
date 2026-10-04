@@ -39,5 +39,29 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
 
+      # the device-check tests run in their own job below, in parallel, with the extra installed
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest --ignore-glob='tests/test_device_check_*.py'
+
+  device-check:
+    name: Device check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      # without the extra, most of these tests skip on importorskip('pyfar') rather than fail
+      - name: Install dependencies
+        run: uv sync --locked --all-groups --extra device-check
+
+      - name: Run device-check tests
+        shell: bash
+        run: uv run pytest tests/test_device_check_*.py
