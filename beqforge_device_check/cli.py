@@ -832,7 +832,8 @@ def dispatch(args) -> dict | list:
             writer.writeheader()
             writer.writerows(predictions["entries"])
         (args.out / "report.html").write_text(
-            catalogue_page(predictions, args.threshold_db, args.out), encoding="utf-8"
+            catalogue_page(predictions, args.threshold_db, args.out, manifest),
+            encoding="utf-8",
         )
         chosen = sample(manifest, predictions, args.sample, worst=args.worst)
         atomic_json(args.out / "sample-cases.json", chosen)

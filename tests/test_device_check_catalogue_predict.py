@@ -77,6 +77,12 @@ def test_catalogue_predict_flags_entries_and_writes_a_sweepable_sample(
         assert len(list(csv.DictReader(f))) == 6
     page = (out / "report.html").read_text(encoding="utf-8")
     assert "Catalogue coefficient error" in page
+    # Every predicted entry is a row that can be plotted from the shipped coefficients.
+    assert page.count("<tr data-c=") == 5
+    script = (out / "cascades.js").read_text()
+    cascades = json.loads(script.removeprefix("window.CASCADES=").rstrip().rstrip(";"))
+    assert len(cascades) == 4
+    assert all(len(flat) % 5 == 0 for flat, _ in cascades)
     # The sample is a runnable manifest: three real cascades including the worst,
     # each loaded once, one control reloaded, one level.
     manifest = json.loads((out / "sample-cases.json").read_text())

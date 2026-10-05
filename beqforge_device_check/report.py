@@ -70,6 +70,19 @@ def label(row: dict) -> str:
     return f"{row['name']} ({len(row['filters'])} sections)"
 
 
+# Responses are drawn as beqdesigner and the catalogue draw them: linear, 1-160 Hz.
+FREQUENCY_AXIS_HZ = (1, 160)
+FREQUENCY_TICKS_HZ = (1, 20, 40, 60, 80, 100, 120, 140, 160)
+
+
+def plain(axis) -> None:
+    """Label a log axis with real values (0.01, 0.1, 1, 10), not powers of ten."""
+    from matplotlib.ticker import FuncFormatter, NullFormatter
+
+    axis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
+    axis.set_minor_formatter(NullFormatter())
+
+
 def style(ax) -> None:
     ax.set_facecolor(SURFACE)
     ax.grid(True, which="both", color=GRID, linewidth=0.6)
@@ -94,24 +107,24 @@ def filter_chart(row: dict, requirement: float, path: Path) -> None:
         gridspec_kw={"height_ratios": [3, 1.4]},
         facecolor=SURFACE,
     )
-    top.semilogx(f, curves["intended"], color=INTENDED, lw=2, ls="--", label="Intended")
-    top.semilogx(
+    top.plot(f, curves["intended"], color=INTENDED, lw=2, ls="--", label="Intended")
+    top.plot(
         f, curves["predicted"], color=PREDICTED, lw=2, label="Predicted (coefficients)"
     )
-    # FFT bins are linear in frequency: pick markers evenly on the log axis instead.
-    valid = np.flatnonzero(np.isfinite(measured))
+    # Markers evenly across the visible band, not one per (dense) FFT bin.
+    valid = np.flatnonzero(np.isfinite(measured) & (f <= FREQUENCY_AXIS_HZ[1]))
     picks = (
         np.unique(
             valid[
                 np.searchsorted(
-                    f[valid], np.geomspace(f[valid][0], f[valid][-1], 48)
+                    f[valid], np.linspace(f[valid][0], f[valid][-1], 40)
                 ).clip(0, len(valid) - 1)
             ]
         )
         if len(valid)
         else valid
     )
-    top.semilogx(
+    top.plot(
         f[picks],
         measured[picks],
         color=MEASURED,
@@ -128,10 +141,12 @@ def filter_chart(row: dict, requirement: float, path: Path) -> None:
         loc="left",
     )
     top.legend(frameon=False, fontsize=8, labelcolor=INK)
-    bottom.semilogx(f, error, color=MEASURED, lw=1.5)
+    bottom.plot(f, error, color=MEASURED, lw=1.5)
     bottom.axhspan(-requirement, requirement, color=GRID, alpha=0.6, lw=0)
     bottom.set_ylabel("Measured − predicted\n(dB)", color=MUTED, fontsize=8)
     bottom.set_xlabel("Frequency (Hz)", color=MUTED, fontsize=9)
+    bottom.set_xlim(*FREQUENCY_AXIS_HZ)
+    bottom.set_xticks(FREQUENCY_TICKS_HZ)
     for ax in (top, bottom):
         style(ax)
     fig.tight_layout()
@@ -183,8 +198,10 @@ def sweep_chart(title: str, vary: str, members: list[dict], requirement: float, 
     )
     ax.axhline(requirement, color=MUTED, lw=1, ls=":", label=f"{requirement:g} dB")
     ax.set_yscale("log")
+    plain(ax.yaxis)
     if vary == "q":
         ax.set_xscale("log")
+        plain(ax.xaxis)
     ax.set_xlabel("Centre frequency (Hz)" if vary == "freq_hz" else "Q", color=MUTED)
     ax.set_ylabel(f"Worst error (dB; < {floor:g} drawn at it)", color=MUTED, fontsize=9)
     ax.set_title(title, color=INK, fontsize=10, loc="left")
@@ -214,6 +231,8 @@ def model_chart(rows: list[dict], requirement: float, path: Path) -> None:
     )
     ax.set_xscale("log")
     ax.set_yscale("log")
+    plain(ax.xaxis)
+    plain(ax.yaxis)
     ax.set_xlabel("Predicted coefficient error (dB)", color=MUTED, fontsize=9)
     ax.set_ylabel(
         f"Device error vs prediction (dB; < {floor:g} drawn at it)",
@@ -332,7 +351,9 @@ def page(report: dict, output: Path, details: str) -> str:
     return "\n".join(lines)
 
 
-def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
+def catalogue_page(
+    predictions: dict, threshold_db: float, output: Path, manifest: dict
+) -> str:
     """Every catalogue entry's predicted coefficient error, worst first, for people."""
     import matplotlib
 
@@ -364,6 +385,7 @@ def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
         fontsize=9,
     )
     ax.set_xscale("log")
+    plain(ax.xaxis)
     ax.set_xlabel(
         f"Predicted worst error over {low:g}-{high:g} Hz (dB)", color=MUTED, fontsize=9
     )
@@ -379,15 +401,14 @@ def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
     fig.savefig(output / "charts" / "catalogue-errors.png", dpi=130, facecolor=SURFACE)
     plt.close(fig)
     source = predictions["source"]
+    index = write_cascades(manifest, predictions, output)
     rows = "".join(
-        "<tr><td>{title}</td><td>{edition}</td><td>{year}</td><td>{author}</td>"
-        "<td>{sections}</td><td><b>{worst:.2f}</b></td><td>{hz:.1f}</td>"
-        "<td>{above:.2f}</td></tr>".format(
-            title=(
-                f"<a href='{html.escape(e['url'])}'>{html.escape(e['title'])}</a>"
-                if e.get("url")
-                else html.escape(e["title"])
-            ),
+        "<tr data-c='{c}'{flag}><td>{title}</td><td>{edition}</td><td>{year}</td>"
+        "<td>{author}</td><td>{sections}</td><td><b>{worst:.2f}</b></td>"
+        "<td>{hz:.1f}</td><td>{above:.2f}</td><td>{link}</td></tr>".format(
+            c=index[e["case"]],
+            flag=" class='hi'" if e["worst_db"] > threshold_db else "",
+            title=html.escape(e["title"]),
             edition=html.escape(e.get("edition") or ""),
             year=html.escape(str(e.get("year") or "")),
             author=html.escape(e.get("author") or ""),
@@ -395,8 +416,10 @@ def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
             worst=e["worst_db"],
             hz=e["worst_hz"],
             above=e["from_10_hz_db"],
+            link=f"<a href='{html.escape(e['url'])}'>page</a>" if e.get("url") else "",
         )
-        for e in flagged
+        for e in entries
+        if e["case"] in index
     )
     percentiles = np.percentile(errors, [50, 90, 99])
     return "\n".join(
@@ -407,7 +430,13 @@ def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
                 f"padding:0 16px;color:{INK};background:{SURFACE}}}table{{border-collapse:collapse;"
                 f"width:100%}}td,th{{text-align:left;padding:4px 8px;border-bottom:1px solid {GRID}}}"
                 f"th{{color:{MUTED}}}.muted{{color:{MUTED}}}img{{max-width:100%}}"
-                "input{font:inherit;padding:4px 8px;width:100%;max-width:360px}</style>"
+                "input[type=search]{font:inherit;padding:4px 8px;width:100%;max-width:360px}"
+                f"tbody tr{{cursor:pointer}}tbody tr:hover{{background:{GRID}}}"
+                f"tr.sel{{outline:2px solid {INTENDED}}}#plot{{position:sticky;top:0;"
+                f"background:{SURFACE};padding:8px 0;border-bottom:1px solid {GRID};z-index:1}}"
+                f"#tip{{position:absolute;pointer-events:none;background:{SURFACE};border:1px "
+                f"solid {GRID};padding:4px 8px;font-size:12px;display:none}}"
+                f"svg text{{fill:{MUTED};font-size:11px}}</style>"
             ),
             "<h1>Catalogue coefficient error</h1>",
             (
@@ -429,17 +458,179 @@ def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
                 "<p><img alt='Share of entries above each predicted error' "
                 "src='charts/catalogue-errors.png'></p>"
             ),
-            f"<h2>Entries above {threshold_db:g} dB</h2>",
+            "<h2>Entries</h2>",
             (
-                "<p><input id='q' placeholder='Filter by title, author or year' "
-                "oninput=\"for(const r of document.querySelectorAll('tbody tr'))"
-                'r.hidden=!r.textContent.toLowerCase().includes(this.value.toLowerCase())">'
-                " <a href='predictions.csv'>All entries (CSV)</a></p>"
+                "<p class='muted'>Click an entry to plot its intended response against the "
+                f"response its {predictions['coefficient_format']} coefficients produce."
+                "</p><div id='plot'><div id='title' style='font-weight:600'></div>"
+                "<svg id='chart' viewBox='0 0 800 360' width='100%'"
+                " role='img' aria-label='Intended and predicted response'></svg></div>"
+                "<div id='tip'></div>"
+            ),
+            (
+                "<p><input type='search' id='q' placeholder='Filter by title, author or year'>"
+                f" <label><input type='checkbox' id='only' checked> only above {threshold_db:g}"
+                " dB</label> <a href='predictions.csv'>All entries (CSV)</a></p>"
             ),
             (
                 "<table><thead><tr><th>Title</th><th>Edition</th><th>Year</th><th>Author</th>"
                 "<th>Sections</th><th>Worst (dB)</th><th>At (Hz)</th><th>Worst from 10 Hz (dB)"
-                f"</th></tr></thead><tbody>{rows}</tbody></table>"
+                f"</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
             ),
+            "<script src='cascades.js'></script>",
+            "<script>"
+            + VIEWER_JS.replace("__RATE__", str(predictions["rate"]))
+            .replace("__INTENDED__", INTENDED)
+            .replace("__PREDICTED__", PREDICTED)
+            .replace("__GRID__", GRID)
+            .replace("__INK__", INK)
+            + "</script>",
         ]
     )
+
+
+def write_cascades(manifest: dict, predictions: dict, output: Path) -> dict[str, int]:
+    """Every predicted cascade's coefficients, for the page to plot without a server.
+
+    Exact coefficients at full round-trip precision; the page rounds them to float32
+    with Math.fround, as numpy does. Where a published coefficient rounds to a different
+    float32 than the exact one, that section's float32 coefficients are stored too, so
+    the plot shows exactly what was predicted.
+    """
+    import json
+
+    index, data = {}, []
+    for case in manifest["cases"][1:]:
+        if case["id"] not in predictions["cases"]:
+            continue
+        exact = np.asarray(case["exact_sos"], dtype=np.float64).reshape(-1, 6)
+        sent = np.asarray(case.get("transport_sos", exact), dtype=np.float64)
+        sent = sent.reshape(-1, 6).astype(np.float32)[:, [0, 1, 2, 4, 5]]
+        exact5 = exact[:, [0, 1, 2, 4, 5]]
+        overrides = [
+            [i, *map(float, sent[i])]
+            for i in range(len(exact5))
+            if not np.array_equal(exact5[i].astype(np.float32), sent[i])
+        ]
+        index[case["id"]] = len(data)
+        data.append([exact5.ravel().tolist(), overrides])
+    (output / "cascades.js").write_text(
+        "window.CASCADES=" + json.dumps(data, separators=(",", ":")) + ";\n",
+        encoding="utf-8",
+    )
+    return index
+
+
+# Plots one cascade: intended (exact) vs predicted (float32) magnitude over 2-200 Hz,
+# with the difference beneath; a crosshair tooltip reads all three at any frequency.
+VIEWER_JS = r"""
+(() => {
+const RATE = __RATE__, LO = 1, HI = 160, N = 640;
+const F = Array.from({length: N}, (_, i) => LO + (HI - LO) * i / (N - 1));
+const W = 800, L = 52, R = 16, T = 12, TOPH = 220, GAP = 30, BOTH = 80;
+const svg = document.getElementById('chart'), tip = document.getElementById('tip');
+function db(sections) {
+  return F.map(f => {
+    const w = 2 * Math.PI * f / RATE, c1 = Math.cos(w), s1 = -Math.sin(w);
+    const c2 = Math.cos(2 * w), s2 = -Math.sin(2 * w);
+    let mag = 1;
+    for (const [b0, b1, b2, a1, a2] of sections) {
+      const nr = b0 + b1 * c1 + b2 * c2, ni = b1 * s1 + b2 * s2;
+      const dr = 1 + a1 * c1 + a2 * c2, di = a1 * s1 + a2 * s2;
+      mag *= Math.sqrt((nr * nr + ni * ni) / (dr * dr + di * di));
+    }
+    return 20 * Math.log10(mag);
+  });
+}
+function curves(c) {
+  const [flat, overrides] = window.CASCADES[c];
+  const exact = [], stored = [];
+  for (let i = 0; i < flat.length; i += 5) {
+    const s = flat.slice(i, i + 5);
+    exact.push(s);
+    stored.push(s.map(Math.fround));
+  }
+  for (const [i, ...s] of overrides) stored[i] = s;
+  return [db(exact), db(stored)];
+}
+const x = f => L + (W - L - R) * (f - LO) / (HI - LO);
+function scale(values, top, height) {
+  let lo = Math.min(...values), hi = Math.max(...values);
+  if (hi - lo < 1) { lo -= 0.5; hi += 0.5; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  return {lo, hi, y: v => top + height * (hi - v) / (hi - lo)};
+}
+function ticks(lo, hi) {
+  const span = hi - lo, step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20].find(s => span / s <= 6) || 50;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(+v.toFixed(2));
+  return out;
+}
+function path(values, sy) {
+  return values.map((v, i) => (i ? 'L' : 'M') + x(F[i]).toFixed(1) + ' ' + sy.y(v).toFixed(1)).join('');
+}
+let current = null;
+function draw(row) {
+  const [intended, predicted] = curves(+row.dataset.c);
+  const diff = predicted.map((v, i) => v - intended[i]);
+  const top = scale(intended.concat(predicted), T, TOPH);
+  const bot = scale(diff.concat([0]), T + TOPH + GAP, BOTH);
+  const parts = [];
+  for (const f of [1, 20, 40, 60, 80, 100, 120, 140, 160]) {
+    parts.push(`<line x1="${x(f)}" x2="${x(f)}" y1="${T}" y2="${T + TOPH + GAP + BOTH}" stroke="__GRID__"/>`);
+    parts.push(`<text x="${x(f)}" y="${T + TOPH + GAP + BOTH + 16}" text-anchor="middle">${f}</text>`);
+  }
+  for (const s of [top, bot]) {
+    for (const v of ticks(s.lo, s.hi)) {
+      parts.push(`<line x1="${L}" x2="${W - R}" y1="${s.y(v)}" y2="${s.y(v)}" stroke="__GRID__"/>`);
+      parts.push(`<text x="${L - 6}" y="${s.y(v) + 4}" text-anchor="end">${v}</text>`);
+    }
+  }
+  parts.push(`<path d="${path(intended, top)}" fill="none" stroke="__INTENDED__" stroke-width="2" stroke-dasharray="6 4"/>`);
+  parts.push(`<path d="${path(predicted, top)}" fill="none" stroke="__PREDICTED__" stroke-width="2"/>`);
+  parts.push(`<path d="${path(diff, bot)}" fill="none" stroke="__PREDICTED__" stroke-width="2"/>`);
+  parts.push(`<line x1="${L}" x2="${W - R}" y1="${bot.y(0)}" y2="${bot.y(0)}" stroke="__INK__" stroke-width="0.5"/>`);
+  parts.push(`<text x="${W - R}" y="${T + 12}" text-anchor="end"><tspan fill="__INTENDED__">- - intended</tspan>  <tspan fill="__PREDICTED__">— float32 (miniDSP)</tspan></text>`);
+  parts.push(`<text x="${L + 4}" y="${T + TOPH + GAP - 6}">float32 − intended (dB)</text>`);
+  parts.push(`<text x="${W - R}" y="${T + TOPH + GAP + BOTH + 16}" text-anchor="end" dy="14">Hz</text>`);
+  parts.push(`<line id="cross" y1="${T}" y2="${T + TOPH + GAP + BOTH}" stroke="__INK__" stroke-width="0.5" visibility="hidden"/>`);
+  parts.push(`<rect x="${L}" y="${T}" width="${W - L - R}" height="${TOPH + GAP + BOTH}" fill="transparent" id="hit"/>`);
+  svg.innerHTML = parts.join('');
+  const cells = row.querySelectorAll('td');
+  document.getElementById('title').textContent =
+    `${cells[0].textContent}${cells[1].textContent ? ' (' + cells[1].textContent + ')' : ''} — ${cells[4].textContent} sections, worst ${cells[5].textContent} dB at ${cells[6].textContent} Hz`;
+  if (current) current.classList.remove('sel');
+  current = row; row.classList.add('sel');
+  const hit = document.getElementById('hit'), cross = document.getElementById('cross');
+  hit.onmousemove = ev => {
+    const box = svg.getBoundingClientRect(), px = (ev.clientX - box.left) * W / box.width;
+    const t = Math.max(0, Math.min(1, (px - L) / (W - L - R)));
+    const i = Math.round(t * (N - 1));
+    cross.setAttribute('x1', x(F[i])); cross.setAttribute('x2', x(F[i])); cross.setAttribute('visibility', 'visible');
+    tip.style.display = 'block';
+    tip.style.left = (ev.pageX + 12) + 'px'; tip.style.top = (ev.pageY + 12) + 'px';
+    tip.innerHTML = `${F[i].toFixed(1)} Hz<br>intended ${intended[i].toFixed(2)} dB<br>float32 ${predicted[i].toFixed(2)} dB<br>difference ${diff[i] >= 0 ? '+' : ''}${diff[i].toFixed(2)} dB`;
+  };
+  hit.onmouseleave = () => { tip.style.display = 'none'; cross.setAttribute('visibility', 'hidden'); };
+}
+const rows = Array.from(document.querySelectorAll('tbody tr'));
+const q = document.getElementById('q'), only = document.getElementById('only');
+function filter() {
+  const text = q.value.toLowerCase();
+  let first = null;
+  for (const r of rows) {
+    r.hidden = (only.checked && !r.classList.contains('hi')) || !r.textContent.toLowerCase().includes(text);
+    if (!r.hidden && !first) first = r;
+  }
+  if (text && first) draw(first);
+}
+q.oninput = filter; only.onchange = filter;
+document.querySelector('tbody').onclick = ev => {
+  if (ev.target.closest('a')) return;
+  const row = ev.target.closest('tr');
+  if (row) draw(row);
+};
+filter();
+if (rows.length) draw(rows[0]);
+})();
+"""
