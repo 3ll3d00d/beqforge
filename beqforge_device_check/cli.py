@@ -525,7 +525,14 @@ def parser() -> argparse.ArgumentParser:
     command = sub.add_parser("self-test")
     command.add_argument("--out", type=Path, required=True)
     command.add_argument("--skip-audio-discovery", action="store_true")
-    for name in ("plan", "qualify", "run", "catalogue-plan", "catalogue-entry"):
+    for name in (
+        "plan",
+        "qualify",
+        "run",
+        "catalogue-plan",
+        "catalogue-entry",
+        "catalogue-predict",
+    ):
         command = sub.add_parser(name)
         command.add_argument("--config", type=Path, required=True)
         command.add_argument("--out", type=Path, required=True)
@@ -569,6 +576,25 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--attribution", required=True)
             command.add_argument("--complete-snapshot", action="store_true")
             command.add_argument("--no-deduplicate", action="store_true")
+            if name == "catalogue-predict":
+                command.add_argument(
+                    "--threshold-db",
+                    type=float,
+                    default=1.0,
+                    help="flag entries predicted to err by more than this (default 1)",
+                )
+                command.add_argument(
+                    "--sample",
+                    type=int,
+                    default=50,
+                    help="real cascades to put in the hardware sample (default 50)",
+                )
+                command.add_argument(
+                    "--worst",
+                    type=int,
+                    default=5,
+                    help="of which, the largest predicted errors (default 5)",
+                )
             if name == "catalogue-entry":
                 command.add_argument("--entry", required=True)
                 command.add_argument("--qualification", type=Path)
@@ -763,6 +789,64 @@ def dispatch(args) -> dict | list:
             "cases": len(manifest["cases"]),
             "supported": sum(c["status"] == "planned" for c in manifest["cases"]),
             "manifest_hash": manifest["hash"],
+        }
+    if args.command == "catalogue-predict":
+        import csv
+
+        from beqforge_device_check.catalogue import predict, sample
+        from beqforge_device_check.report import catalogue_page
+
+        manifest, inventory = import_snapshot(
+            args.catalogue,
+            profile,
+            rate=config["rate"],
+            route=config["route"],
+            channel=config["channel"],
+            complete=args.complete_snapshot,
+            attribution=args.attribution,
+            revision=args.revision,
+            deduplicate=not args.no_deduplicate,
+        )
+        predictions = predict(manifest, inventory, profile)
+        args.out.mkdir(parents=True, exist_ok=True)
+        atomic_json(args.out / "predictions.json", predictions)
+        columns = (
+            "title",
+            "edition",
+            "year",
+            "author",
+            "sections",
+            "worst_db",
+            "worst_hz",
+            "below_10_hz_db",
+            "from_10_hz_db",
+            "lowest_hz",
+            "maximum_q",
+            "status",
+            "url",
+        )
+        with (args.out / "predictions.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as f:
+            writer = csv.DictWriter(f, columns, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(predictions["entries"])
+        (args.out / "report.html").write_text(
+            catalogue_page(predictions, args.threshold_db, args.out), encoding="utf-8"
+        )
+        chosen = sample(manifest, predictions, args.sample, worst=args.worst)
+        atomic_json(args.out / "sample-cases.json", chosen)
+        measured = [e for e in predictions["entries"] if "worst_db" in e]
+        return {
+            "entries": len(predictions["entries"]),
+            "predicted": len(measured),
+            "distinct_cascades": len(predictions["cases"]),
+            "above_threshold": sum(e["worst_db"] > args.threshold_db for e in measured),
+            "threshold_db": args.threshold_db,
+            "report": str(args.out / "report.html"),
+            "sample_manifest": str(args.out / "sample-cases.json"),
+            "sample": chosen["sample"],
+            "next": "verify --config BENCH --manifest sample-cases.json",
         }
     if args.command in ("catalogue-plan", "catalogue-entry"):
         manifest, inventory = import_snapshot(

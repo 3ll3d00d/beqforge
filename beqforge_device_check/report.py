@@ -63,6 +63,13 @@ def describe(filters: list[dict]) -> str:
     )
 
 
+def label(row: dict) -> str:
+    """A single section by its parameters; a real cascade by its title."""
+    if len(row["filters"]) == 1:
+        return describe(row["filters"])
+    return f"{row['name']} ({len(row['filters'])} sections)"
+
+
 def style(ax) -> None:
     ax.set_facecolor(SURFACE)
     ax.grid(True, which="both", color=GRID, linewidth=0.6)
@@ -115,7 +122,7 @@ def filter_chart(row: dict, requirement: float, path: Path) -> None:
     )
     top.set_ylabel("Response (dB)", color=MUTED, fontsize=9)
     top.set_title(
-        f"{describe(row['filters'])} at {row['level_dbfs']:.1f} dBFS",
+        f"{label(row)} at {row['level_dbfs']:.1f} dBFS",
         color=INK,
         fontsize=10,
         loc="left",
@@ -188,6 +195,37 @@ def sweep_chart(title: str, vary: str, members: list[dict], requirement: float, 
     plt.close(fig)
 
 
+def model_chart(rows: list[dict], requirement: float, path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    floor = 1e-4
+    x = [max(r["representation"]["worst_db"], floor) for r in rows]
+    y = [max(r["device_worst_db"] or floor, floor) for r in rows]
+    fig, ax = plt.subplots(figsize=(8, 4), facecolor=SURFACE)
+    ax.scatter(x, y, s=36, color=MEASURED, edgecolor=SURFACE, linewidth=1.5, zorder=3)
+    ax.axhline(requirement, color=MUTED, lw=1, ls=":")
+    ax.annotate(
+        f"requirement {requirement:g} dB",
+        (min(x), requirement),
+        xytext=(0, 4),
+        textcoords="offset points",
+        color=MUTED,
+        fontsize=8,
+    )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Predicted coefficient error (dB)", color=MUTED, fontsize=9)
+    ax.set_ylabel(
+        f"Device error vs prediction (dB; < {floor:g} drawn at it)",
+        color=MUTED,
+        fontsize=9,
+    )
+    style(ax)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130, facecolor=SURFACE)
+    plt.close(fig)
+
+
 def page(report: dict, output: Path, details: str) -> str:
     import matplotlib
 
@@ -235,6 +273,16 @@ def page(report: dict, output: Path, details: str) -> str:
             "muted: coefficients cannot be read back to verify restoration.</li></ul>"
         ),
     ]
+    if len(rows) >= 5:
+        lines.append("<h2>Device error against predicted coefficient error</h2>")
+        model_chart(rows, requirement, charts / "model.png")
+        lines.append(
+            "<p class='muted'>Each point is one filter. If the device plays its"
+            " coefficients as predicted, every point sits below the requirement line"
+            " however large the coefficient error is.</p>"
+            "<p><img alt='Device error against predicted coefficient error'"
+            " src='charts/model.png'></p>"
+        )
     families = sweeps(rows)
     if families:
         lines.append("<h2>Characterisation</h2>")
@@ -265,7 +313,7 @@ def page(report: dict, output: Path, details: str) -> str:
         chart = f"filter-{row['case'][:12]}-{row['level_dbfs']:g}.png"
         filter_chart(row, requirement, charts / chart)
         lines.append(
-            f"<tr><td><a href='charts/{chart}'>{html.escape(describe(row['filters']))}"
+            f"<tr><td><a href='charts/{chart}'>{html.escape(label(row))}"
             f"</a></td><td>{row['level_dbfs']:.1f} dBFS</td><td>{len(row['loads'])}</td>"
             f"<td>{device}</td><td>{coefficients}</td></tr>"
         )
@@ -273,7 +321,7 @@ def page(report: dict, output: Path, details: str) -> str:
     for row in rows:
         chart = f"filter-{row['case'][:12]}-{row['level_dbfs']:g}.png"
         lines.append(
-            f"<p><img alt='{html.escape(describe(row['filters']))}' src='charts/{chart}'></p>"
+            f"<p><img alt='{html.escape(label(row))}' src='charts/{chart}'></p>"
         )
     lines.append(
         "<details><summary>Technical detail</summary>"
@@ -282,3 +330,116 @@ def page(report: dict, output: Path, details: str) -> str:
         " (report.json)</a></p></details>"
     )
     return "\n".join(lines)
+
+
+def catalogue_page(predictions: dict, threshold_db: float, output: Path) -> str:
+    """Every catalogue entry's predicted coefficient error, worst first, for people."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    entries = [e for e in predictions["entries"] if "worst_db" in e]
+    entries.sort(key=lambda e: e["worst_db"], reverse=True)
+    errors = np.array([e["worst_db"] for e in entries])
+    flagged = [e for e in entries if e["worst_db"] > threshold_db]
+    distinct = len(predictions["cases"])
+    low, high = predictions["band_hz"]
+    (output / "charts").mkdir(parents=True, exist_ok=True)
+    levels = np.geomspace(max(errors.min(), 1e-3), errors.max(), 200)
+    fig, ax = plt.subplots(figsize=(8, 3.8), facecolor=SURFACE)
+    ax.plot(
+        levels,
+        [100 * np.mean(errors > level) for level in levels],
+        color=PREDICTED,
+        lw=2,
+    )
+    ax.axvline(threshold_db, color=MUTED, lw=1, ls=":")
+    ax.annotate(
+        f"{100 * len(flagged) / len(entries):.0f}% above {threshold_db:g} dB",
+        (threshold_db, 100 * len(flagged) / len(entries)),
+        xytext=(8, 8),
+        textcoords="offset points",
+        color=INK,
+        fontsize=9,
+    )
+    ax.set_xscale("log")
+    ax.set_xlabel(
+        f"Predicted worst error over {low:g}-{high:g} Hz (dB)", color=MUTED, fontsize=9
+    )
+    ax.set_ylabel("Entries above it (%)", color=MUTED, fontsize=9)
+    ax.set_title(
+        f"{predictions['coefficient_format']} coefficients at {predictions['rate']} Hz",
+        color=INK,
+        fontsize=10,
+        loc="left",
+    )
+    style(ax)
+    fig.tight_layout()
+    fig.savefig(output / "charts" / "catalogue-errors.png", dpi=130, facecolor=SURFACE)
+    plt.close(fig)
+    source = predictions["source"]
+    rows = "".join(
+        "<tr><td>{title}</td><td>{edition}</td><td>{year}</td><td>{author}</td>"
+        "<td>{sections}</td><td><b>{worst:.2f}</b></td><td>{hz:.1f}</td>"
+        "<td>{above:.2f}</td></tr>".format(
+            title=(
+                f"<a href='{html.escape(e['url'])}'>{html.escape(e['title'])}</a>"
+                if e.get("url")
+                else html.escape(e["title"])
+            ),
+            edition=html.escape(e.get("edition") or ""),
+            year=html.escape(str(e.get("year") or "")),
+            author=html.escape(e.get("author") or ""),
+            sections=e["sections"],
+            worst=e["worst_db"],
+            hz=e["worst_hz"],
+            above=e["from_10_hz_db"],
+        )
+        for e in flagged
+    )
+    percentiles = np.percentile(errors, [50, 90, 99])
+    return "\n".join(
+        [
+            "<!doctype html><meta charset='utf-8'><title>Catalogue coefficient error</title>",
+            (
+                "<style>body{font:14px/1.45 system-ui,sans-serif;max-width:1100px;margin:24px auto;"
+                f"padding:0 16px;color:{INK};background:{SURFACE}}}table{{border-collapse:collapse;"
+                f"width:100%}}td,th{{text-align:left;padding:4px 8px;border-bottom:1px solid {GRID}}}"
+                f"th{{color:{MUTED}}}.muted{{color:{MUTED}}}img{{max-width:100%}}"
+                "input{font:inherit;padding:4px 8px;width:100%;max-width:360px}</style>"
+            ),
+            "<h1>Catalogue coefficient error</h1>",
+            (
+                f"<p class='muted'>Predicted, not measured: each entry's published "
+                f"coefficients rounded to {predictions['coefficient_format']} at "
+                f"{predictions['rate']} Hz, against its intended filters. Snapshot "
+                f"{html.escape(str(source.get('revision')))} ({source.get('entries')} "
+                f"entries, sha256 {str(source.get('sha256'))[:12]}).</p>"
+            ),
+            (
+                f"<p><b>{len(flagged)} of {len(entries)} entries</b> "
+                f"({100 * len(flagged) / len(entries):.0f}%; {distinct} distinct cascades) "
+                f"are predicted to err by more than {threshold_db:g} dB somewhere in "
+                f"{low:g}-{high:g} Hz. Median {percentiles[0]:.2f} dB, 90th percentile "
+                f"{percentiles[1]:.2f} dB, 99th {percentiles[2]:.2f} dB, worst "
+                f"{errors.max():.2f} dB.</p>"
+            ),
+            (
+                "<p><img alt='Share of entries above each predicted error' "
+                "src='charts/catalogue-errors.png'></p>"
+            ),
+            f"<h2>Entries above {threshold_db:g} dB</h2>",
+            (
+                "<p><input id='q' placeholder='Filter by title, author or year' "
+                "oninput=\"for(const r of document.querySelectorAll('tbody tr'))"
+                'r.hidden=!r.textContent.toLowerCase().includes(this.value.toLowerCase())">'
+                " <a href='predictions.csv'>All entries (CSV)</a></p>"
+            ),
+            (
+                "<table><thead><tr><th>Title</th><th>Edition</th><th>Year</th><th>Author</th>"
+                "<th>Sections</th><th>Worst (dB)</th><th>At (Hz)</th><th>Worst from 10 Hz (dB)"
+                f"</th></tr></thead><tbody>{rows}</tbody></table>"
+            ),
+        ]
+    )

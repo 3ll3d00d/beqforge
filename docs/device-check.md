@@ -230,6 +230,31 @@ new identity. A surviving `.run.lock` needs operator inspection, not automatic d
 
 ## Frozen catalogue
 
+### Predicting the whole catalogue, then verifying a sample
+
+A device that plays its coefficients as predicted (the Device verdict) lets every catalogue
+entry's error be computed from its coefficients alone. Download the catalogue at a pinned
+commit, then predict it:
+
+```bash
+SHA=$(curl -s https://api.github.com/repos/3ll3d00d/beqcatalogue/commits/master | jq -r .sha)
+curl -sL -o database.json https://raw.githubusercontent.com/3ll3d00d/beqcatalogue/$SHA/docs/database.json
+beqforge-device-check catalogue-predict --config bench.json --catalogue database.json --revision $SHA --attribution 'beqcatalogue docs/database.json, MIT licence' --complete-snapshot --out predicted/
+beqforge-device-check verify --config bench.json --manifest predicted/sample-cases.json
+```
+
+`catalogue-predict` rounds the coefficients each entry publishes for the bench's rate to the
+profile's coefficient format and compares them with the intended filters over 2–200 Hz.
+`predicted/report.html` gives the distribution, the share of entries above `--threshold-db`
+(default 1 dB) and a searchable table of those entries, worst first; `predictions.csv` has
+every entry. `sample-cases.json` is a characterisation manifest of `--sample` real cascades
+(default 50) spread evenly through the predicted error plus the `--worst` largest (default 5),
+each loaded once; cascades that settle too slowly to sweep are predicted but not sampled.
+Verifying that sample is what licenses the prediction for the rest: its report adds a chart of
+device error against predicted coefficient error.
+
+### Measuring catalogue entries directly
+
 Supply a local ezbeq `database.json` snapshot and explicit source revision and attribution:
 
 ```bash

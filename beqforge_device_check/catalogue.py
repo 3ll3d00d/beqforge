@@ -1,5 +1,6 @@
 """Frozen ezbeq catalogue inventories; published filters are never refitted."""
 
+import copy
 import hashlib
 import json
 from dataclasses import asdict
@@ -222,3 +223,137 @@ def import_snapshot(
         "unique_cases": len(cases) - 1,
         "deduplicated": deduplicate,
     }
+
+
+# A catalogue entry's predicted error is judged over the whole sweep band.
+PREDICTION_BAND_HZ = (2.0, 200.0)
+# Longer settling cannot be swept (measure's control bound); such entries are
+# predicted but never sampled for hardware.
+SAMPLE_MAX_SETTLING_S = 60.0
+
+
+def predict(manifest: dict, inventory: dict, profile: DeviceProfile) -> dict:
+    """Predicted coefficient error for every catalogue entry, without hardware.
+
+    The coefficients ezbeq sends (published, else RBJ at the rate) rounded to the
+    device's coefficient format, against the intended filter. The device check is what
+    shows a unit plays rounded coefficients as predicted; this applies that to all.
+    """
+    from beqforge_device_check.coefficients import response
+
+    if profile.coefficient_format == "unknown":
+        raise ValueError(
+            "the profile's coefficient format is unknown; nothing to predict"
+        )
+    frequencies = np.geomspace(*PREDICTION_BAND_HZ, 2048)
+    cases = {}
+    for case in manifest["cases"][1:]:
+        if case["status"] != "planned":
+            continue
+        exact = np.asarray(case["exact_sos"]).reshape(-1, 6)
+        sent = np.asarray(case.get("transport_sos", exact)).reshape(-1, 6)
+        stored = rounded(sent, profile.coefficient_format)
+        error = 20 * np.log10(
+            np.abs(
+                response(stored, frequencies, case["rate"])
+                / response(exact, frequencies, case["rate"])
+            )
+        )
+        worst = int(np.argmax(np.abs(error)))
+        below = frequencies < 10
+        sections = case["publication_filters"]
+        cases[case["id"]] = {
+            "worst_db": float(abs(error[worst])),
+            "signed_worst_db": float(error[worst]),
+            "worst_hz": float(frequencies[worst]),
+            "below_10_hz_db": float(np.max(np.abs(error[below]))),
+            "from_10_hz_db": float(np.max(np.abs(error[~below]))),
+            "sections": len(sections),
+            "lowest_hz": min(s["freq_hz"] for s in sections),
+            "maximum_q": max(s["q"] for s in sections),
+            "settling_seconds": case["settling_seconds"],
+        }
+    entries = []
+    for item in inventory["entries"]:
+        record = item.get("source_record", {})
+        prediction = cases.get(item.get("case"))
+        entries.append(
+            {
+                "id": item["id"],
+                "case": item.get("case"),
+                "title": item.get("title", ""),
+                "edition": item.get("edition", ""),
+                "year": record.get("year"),
+                "author": record.get("author", ""),
+                "url": item.get("source_url", ""),
+                "status": item.get("status"),
+                "reason": item.get("reason"),
+                **(prediction or {}),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "source": inventory["source"],
+        "profile": profile.id,
+        "coefficient_format": profile.coefficient_format,
+        "rate": manifest["cases"][0]["rate"],
+        "band_hz": list(PREDICTION_BAND_HZ),
+        "scope": "predicted from coefficients alone; hardware agreement is shown by the device check",
+        "cases": cases,
+        "entries": entries,
+    }
+
+
+def sample(manifest: dict, predictions: dict, count: int, *, worst: int = 5) -> dict:
+    """A characterisation manifest of real cascades spread across the predicted error.
+
+    Picks are evenly spaced through the predicted-error distribution of distinct
+    cascades, plus the `worst` largest, so a hardware run checks the prediction where
+    it is small, typical and extreme. Each is loaded once (one control reloaded), at
+    -30 dBFS nominal, with an identity every four loads, like the generated suites.
+    """
+    usable = sorted(
+        (
+            (p["worst_db"], case_id)
+            for case_id, p in predictions["cases"].items()
+            if (p["settling_seconds"] or 0) <= SAMPLE_MAX_SETTLING_S
+        ),
+    )
+    if count < 2 or len(usable) < count:
+        raise ValueError(f"cannot sample {count} of {len(usable)} sweepable cascades")
+    tail = [case_id for _, case_id in usable[-worst:]] if worst else []
+    spread = [
+        usable[int(index)][1]
+        for index in np.linspace(0, len(usable) - 1 - len(tail), count - len(tail))
+    ]
+    chosen = list(dict.fromkeys(spread + tail))
+    by_id = {case["id"]: case for case in manifest["cases"]}
+    result = {
+        key: value
+        for key, value in manifest.items()
+        if key not in ("cases", "order", "hash", "levels_dbfs", "level_screen")
+    }
+    result.update(
+        {
+            "suite": "catalogue-sample",
+            "repeats": 1,
+            "control_repeats": 3,
+            "identity_bracket_every": 4,
+            # Copies: freezing levels annotates cases, and the full manifest is not ours.
+            "cases": copy.deepcopy([manifest["cases"][0], *(by_id[c] for c in chosen)]),
+            "sample": {
+                "count": len(chosen),
+                "worst": worst,
+                "of_sweepable_cascades": len(usable),
+                "excluded_unsweepable": len(predictions["cases"]) - len(usable),
+                "method": "evenly spaced through predicted worst error, plus the largest",
+            },
+        }
+    )
+    remapping = freeze_levels(result, (-30.0,))
+    chosen = [remapping.get(c, c) for c in chosen]
+    result["control"] = chosen[0]
+    result["order"] = [c for c in chosen for _ in range(3 if c == chosen[0] else 1)]
+    np.random.default_rng(result.get("seed", 101)).shuffle(result["order"])
+    result["hash"] = digest({k: v for k, v in result.items() if k != "hash"})
+    return result

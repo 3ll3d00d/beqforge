@@ -19,7 +19,7 @@ from beqforge_device_check.analyse import analyse
 from beqforge_device_check.manifest import digest, validate
 from beqforge_device_check.measurement import SweepSettings
 from beqforge_device_check.qualification import BypassReference, complete, convergence
-from beqforge_device_check.report import MARKS, describe, grouped
+from beqforge_device_check.report import MARKS, grouped, label
 from beqforge_device_check.transactions import bench_hash, qualify, run
 
 logger = logging.getLogger(__name__)
@@ -211,7 +211,7 @@ def verify(
     for row in grouped(report["results"]):
         rep = row["representation"]
         result = {
-            "filter": describe(row["filters"]),
+            "filter": label(row),
             "level_dbfs": row["level_dbfs"],
             "loads": len(row["loads"]),
             "device": MARKS[row["device"]],
