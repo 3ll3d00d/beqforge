@@ -2,7 +2,7 @@
 name = "beqforge"
 version = "0.1.0"
 description = "Derives a corrective BEQ filter from a film's own audio, with the evidence behind it"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.0",

@@ -14,7 +14,7 @@ instead — the two share only the RBJ biquad arithmetic (`beqforge/biquad.py`).
 
 ## Prerequisites
 
-* Python 3.13 (pinned in `pyproject.toml`)
+* Python 3.13 or 3.14 (pinned in `pyproject.toml`)
 * [`uv`](https://docs.astral.sh/uv/) for dependency management
 * `ffmpeg` on `PATH` — the only non-Python dependency, needed by `tools/extract.py`
 

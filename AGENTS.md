@@ -91,8 +91,8 @@ to the script it names above, so `--help` on either form shows the same thing.
 
 Notes:
 
-* Python is pinned `>=3.13,<3.14` in `pyproject.toml`. If the venv's base interpreter has gone
-  missing, `uv sync` will silently recreate `.venv` against a uv-managed 3.13.
+* Python is pinned `>=3.13,<3.15` in `pyproject.toml`. If the venv's base interpreter has gone
+  missing, `uv sync` will silently recreate `.venv` against another interpreter in that range.
 * `tools/extract.py` needs `ffmpeg` on `PATH`; nothing else here shells out.
 * `uv run pytest` is the whole feedback loop — `uv run python tools/design_beq.py` is not a
   substitute for it, but is the way to sanity-check a change against real material (see "Running
