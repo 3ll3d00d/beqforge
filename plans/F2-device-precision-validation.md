@@ -760,3 +760,72 @@ detection bounds, JRiver feasibility, explicitly characterised channel-specific 
 schemas, community-bundle redaction, cross-platform build/bench verification. A complete
 catalogue inventory may legitimately account for unsupported entries; those entries are never
 silently dropped, clamped or truncated. No hardware/model/Q-limit validation is claimed.
+
+### 10. minidsp-rs 0.1.12 helper and batched device commands
+
+The helper pin moved from minidsp-rs 0.1.9 to 0.1.12 (`engines.MINIDSP_VERSION`, used by the
+adapter, setup, self-test and `tools/prepare_device_check_helper.py`). Release archives carry no
+published digest, so the four target archives were downloaded and hashed on 2026-10-05; the
+Windows `minidsp.exe` inside matches an independently downloaded copy byte for byte. Every
+archive still has the binary at its root, and the upstream LICENSE is unchanged.
+
+The source diff v0.1.9..v0.1.12 was reviewed for the claims this adapter makes. Unchanged:
+`FilterCommand::Set` parses `Vec<f32>` (the earlier citation named it `PeqCommand::Set`, a
+mislabel now corrected); `protocol/src/device/m2x4hd.rs` is byte-identical, still `Float32LE`;
+the input/output PEQ handler is untouched; `probe` output and master `status` only changed
+formatting idiom. The changes are a new Flex HTx device, crossover `group` accepting `all`,
+and pending commands failing promptly when the transport closes. The 0.1.12 `--help` was read
+for every command shape the adapter issues; all match.
+
+Loading and restoration now go through one helper process using minidsp-rs's `-f FILE`
+(one command per line, run in order against the `-d` device, stopping at the first failure),
+after one serial check. A four-section load was nine helper processes, each preceded by a
+probe; it is now one probe and one helper process. Failure semantics are unchanged: a failed
+batch is a partially applied one and the transaction restores. Restoration's batch mutes first.
+
+Python's range widened to `>=3.13,<3.15`; the lock adds only 3.14 wheels at unchanged versions.
+
+Validation (Windows 11, Python 3.14.8): 49 device-check tests passed, one skipped. The full suite
+ran 632 passed, 53 skipped, one failed: `test_material_round_trips_through_the_extractor` needs
+`ffmpeg`, absent on this host. Ruff passes on every changed file.
+Serial 914267 was only probed and its master status read (preset 0, USB, 0 dB, unmuted); nothing
+on it was changed.
+
+An opt-in bench route followed (`engines.usb_loopback_route`, setup's `CONFIGURE` answer,
+`engine.route_commands`): every setting on the DUT and reference paths stated explicitly, applied
+as one batch at the start of each live stage except direct loopback, recorded in the snapshot,
+and the default restoration set. It neither saves nor reads back the prior configuration. The
+owner's bench is a pure USB loopback (USB playback → 2x4 HD → USB capture), one device clock.
+
+Console progress followed: every sweep logs its case, level, counter, sweep/tail length, usable
+bins, lowest usable SNR, delay and drift; stages log their plan and estimated time, per-level
+results, route application and restoration (stderr; stdout stays the JSON result).
+
+Sweep timing changed from a fixed 2 s pre-roll + 30 s sweep + 15 s tail (47 s for every case)
+to a 0.5 s pre-roll + 5 s sweep + a tail of at least 1 s, extended per cascade to its own
+settling time (decay to -120 dB; `SweepSettings.for_settling`). The 15 s tail existed only for
+the slowest cascade. Convergence's tail variant doubles `settling_multiple` with `tail_s`, so an
+extended tail is doubled too. Pilot identity stage: 10 sweeps of 6.5 s instead of 47 s. The
+pre-roll still bounds the transport delay and is the noise estimate; neither the shorter sweep
+nor the shorter pre-roll is asserted adequate: the convergence stage is what tests them.
+
+### 11. One-command verification with stored stages
+
+`beqforge-device-check verify --config bench.json [--manifest ...]` qualifies, assembles, runs
+and analyses in one command (`beqforge_device_check/verify.py`). Identity and device bypass are
+measured against a derived identity-only manifest and stored beside the bench, keyed on bench,
+engine identity, sweep settings, accuracy requirement and that derived manifest (identity case,
+levels, repeats); any manifest sharing those reuses them. Convergence records now list the
+cascades they cover; `complete` accepts several, combines their per-level budgets by maximum,
+and records `identity_case` and `convergence_covers`; `run` accepts a qualification built for
+another manifest only when it covers that manifest (same identity case and levels, every
+planned cascade converged). Repeating a verification measures only the run itself.
+
+Fixed with it: per-cascade tails (section 10) gave a long-settling cascade a longer capture and
+so a finer FFT grid than the identity sweeps it is divided by, which broke convergence
+(`operands could not be broadcast`, met on the bench) and would have broken analysis. The
+identity is now recovered again from its saved raw sweep at the cascade's FFT length
+(`transactions.recompute`, `recover(size=...)`): exact, since both signals are finite. Zero-
+padding the stored impulse response was tried first and is wrong: the 2-200 Hz deconvolution
+band edges make that response ring and wrap (identity magnitude 0.02-1.03 instead of 1).
+Qualification budgets are carried onto the finer grid conservatively (`measurement.carried`).

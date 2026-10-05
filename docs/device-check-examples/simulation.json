@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "id": "simulation-float64",
+    "name": "Offline float64 control",
+    "engine": "simulation",
+    "internal_rates": [
+      48000,
+      96000
+    ],
+    "coefficient_format": "float64",
+    "arithmetic": "SciPy float64 SOS simulation",
+    "claim_source": "Harness implementation; numerical control, no live device",
+    "routes": [
+      {
+        "name": "filter",
+        "channels": 1,
+        "sections": 100
+      }
+    ],
+    "coefficient_readback": true
+  },
+  "rate": 96000,
+  "route": "filter",
+  "channel": 0,
+  "engine_mode": "simulation",
+  "electrical_bench_acknowledged": false,
+  "common_clock": true,
+  "clock_basis": "numerical control: stimulus and capture share one sample axis",
+  "all_digital": true,
+  "all_digital_basis": "numerical control: no interface at all"
+}

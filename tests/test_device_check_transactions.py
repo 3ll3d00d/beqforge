@@ -9,7 +9,7 @@ from beqforge_device_check.evidence import bundle, import_bundle, run_lock
 from beqforge_device_check.manifest import digest, generate
 from beqforge_device_check.measurement import CaptureInterrupted, SweepSettings
 from beqforge_device_check.profiles import PROFILES
-from beqforge_device_check.transactions import Simulation, qualify, run
+from beqforge_device_check.transactions import Simulation, measure, qualify, run
 
 
 @pytest.fixture
@@ -204,3 +204,27 @@ def test_storage_conversion_and_recursive_arithmetic_are_separate_controls():
     expected = sosfilt(np.asarray(payload["readback_sos"], dtype=np.float32), samples)
     assert np.array_equal(second[:, 0], expected)
     assert np.max(np.abs(first[:, 0] - second[:, 0])) > 1e-7
+
+
+def test_each_cascade_is_swept_with_its_own_settling_tail(tmp_path):
+    pytest.importorskip("pyfar")
+    manifest = generate(PROFILES["simulation-float64"], rate=48000)
+    engine = Simulation(48000)
+    settings = SweepSettings(rate=48000, duration_s=1, tail_s=0.5, preroll_s=0.25)
+    identity = next(c for c in manifest["cases"] if c["name"] == "identity")
+    slow = max(manifest["cases"], key=lambda c: c["settling_seconds"] or 0)
+    assert slow["settling_seconds"] > settings.tail_s
+    for case in (identity, slow):
+        result = measure(tmp_path, case, settings, engine, engine)
+        metadata = json.loads(
+            (tmp_path / "stimuli" / f"{result['attempt']}.json").read_text()
+        )
+        # The identity keeps the short minimum; the ringing cascade gets its decay.
+        assert metadata["settings"]["tail_s"] == max(
+            settings.tail_s, case["settling_seconds"] or 0
+        )
+    # Convergence's tail variant doubles an extended tail too, not just the minimum.
+    doubled = replace(settings, tail_s=1, settling_multiple=2)
+    assert doubled.for_settling(slow["settling_seconds"]).tail_s == pytest.approx(
+        2 * slow["settling_seconds"]
+    )

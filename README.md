@@ -222,13 +222,27 @@ soundtrack, and nothing it measures feeds back into the designer's decisions.
 ```bash
 uv sync --extra device-check          # or: pip install 'beqforge[device-check]'
 beqforge-device-check self-test --out self-test/     # offline, no live signal
+beqforge-device-check verify --config docs/device-check-examples/simulation.json  # whole flow, no hardware
 ```
 
-A run goes through `setup` → `plan` → `qualify` → `run` → `analyse` → `bundle`. It can also
-measure frozen catalogue cascades and import offline evidence bundles. Standalone preview
-executables (unsigned, hardware qualification still outstanding) are built by
+A verification is one command against a bench file describing the device and audio route:
+
+```bash
+beqforge-device-check verify --config bench.json                        # the pilot suite
+beqforge-device-check verify --config bench.json --manifest cases.json  # a frozen manifest
+```
+
+It qualifies the bench, runs the cases and writes a report under `results/` beside the bench,
+printing progress and a per-case verdict against the accuracy requirement (0.1 dB by default).
+Qualification stages are stored and reused, so it measures only what this bench, helper build
+and sweep settings have not already proven; a repeat measures just the cases. Start a bench
+file from `beqforge-device-check setup` or from an example in
+[`docs/device-check-examples/`](docs/device-check-examples/), such as a miniDSP 2x4 HD measured
+as a pure USB loopback. The individual stages (`plan`, `qualify`, `complete-qualification`,
+`run`, `analyse`, `bundle`) remain available, as do frozen catalogue runs and offline evidence
+bundles. Standalone preview executables (unsigned) are built by
 `.github/workflows/build-device-check.yml`. See the [device-check guide](docs/device-check.md)
-for the bench wiring, qualification stages, catalogue runs and packaging, and the
+for the bench file, wiring, qualification stages, catalogue runs and packaging, and the
 [F2 measurement plan](plans/F2-device-precision-validation.md) for the design behind it.
 
 ## How a filter is designed

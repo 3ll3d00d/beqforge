@@ -49,9 +49,25 @@ def resolve(selection: dict, inventory: dict, direction: str) -> int:
     return matches[0]
 
 
+def exclusive(config: dict) -> bool:
+    """WASAPI exclusive mode: no Windows mixer, so no resampling or mixing in the path."""
+    value = config.get("exclusive", False)
+    if not isinstance(value, bool):
+        raise TypeError("audio exclusive must be a boolean")
+    if value and any(
+        config[side]["host_api"] != WASAPI for side in ("input", "output")
+    ):
+        raise ValueError(f"exclusive mode needs {WASAPI} for both input and output")
+    return value
+
+
+WASAPI = "Windows WASAPI"
+
+
 class StreamCapture:
     def __init__(self, config: dict, inventory: dict):
         self.config = config
+        self.exclusive = exclusive(config)
         self.input_index = resolve(config["input"], inventory, "input")
         self.output_index = resolve(config["output"], inventory, "output")
 
@@ -72,14 +88,37 @@ class StreamCapture:
             "maximum_bytes", 512 * 1024**2
         ):
             raise ValueError("capture exceeds configured RAM buffer bound")
+        extra = sd.WasapiSettings(exclusive=True) if self.exclusive else None
         sd.check_input_settings(
-            device=self.input_index, channels=inputs, dtype="float32", samplerate=rate
+            device=self.input_index,
+            channels=inputs,
+            dtype="float32",
+            samplerate=rate,
+            extra_settings=extra,
         )
         sd.check_output_settings(
-            device=self.output_index, channels=outputs, dtype="float32", samplerate=rate
+            device=self.output_index,
+            channels=outputs,
+            dtype="float32",
+            samplerate=rate,
+            extra_settings=extra,
         )
         playback = np.zeros((len(stimulus), outputs), dtype=np.float32)
         playback[:, out_channel] = stimulus
+        # A timing reference path the bench feeds from its own playback channel (e.g.
+        # a USB loopback) needs the same stimulus; an externally split one does not.
+        reference_out = config["output"].get("reference_channel")
+        if reference_out is not None:
+            if (
+                not isinstance(reference_out, int)
+                or isinstance(reference_out, bool)
+                or not 0 <= reference_out < outputs
+                or reference_out == out_channel
+            ):
+                raise ValueError(
+                    "reference playback channel must be a separate configured output"
+                )
+            playback[:, reference_out] = stimulus
         recorded = np.zeros((len(stimulus), inputs), dtype=np.float32)
         # Preallocated status/timestamp storage: no FFT, control, file I/O or queue waits
         # in the callback. Completed capture storage happens on the caller's thread.
@@ -134,12 +173,14 @@ class StreamCapture:
                 dtype="float32",
                 blocksize=blocksize,
                 latency=config.get("latency", "high"),
+                extra_settings=(extra, extra) if extra else None,
                 callback=callback,
                 finished_callback=done.set,
             ) as stream:
                 actual = {
                     "samplerate": stream.samplerate,
                     "latency": list(stream.latency),
+                    "exclusive": self.exclusive,
                 }
                 if stream.samplerate != rate:
                     stream.abort()

@@ -3,6 +3,7 @@
 import argparse
 import importlib.metadata
 import json
+import logging
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import numpy as np
 
 from beqforge_device_check.analyse import analyse, compare
 from beqforge_device_check.catalogue import import_snapshot
+from beqforge_device_check.engines import MINIDSP_VERSION
 from beqforge_device_check.evidence import (
     atomic_bytes,
     atomic_json,
@@ -93,10 +95,27 @@ def validate_config(config: dict) -> DeviceProfile:
             )
         if not config.get("audio"):
             raise ValueError("explicit audio routes are required")
+        from beqforge_device_check.audio import exclusive
+
+        exclusive(config["audio"])
+        if mode == "minidsp":
+            from beqforge_device_check.engines import setting_commands
+
+            # The adapter itself requires a restoration set; here only check what is given.
+            options = config.get("engine", {})
+            for key in ("route_commands", "restore_commands"):
+                if options.get(key) is not None:
+                    setting_commands(options[key], key.replace("_", " "))
         if not isinstance(config.get("common_clock", False), bool):
             raise ValueError("common_clock must be a boolean")
         if config.get("common_clock") and not config.get("clock_basis"):
             raise ValueError("describe the established common-clock basis")
+        if not isinstance(config.get("all_digital", False), bool):
+            raise TypeError("all_digital must be a boolean")
+        if config.get("all_digital") and not config.get("all_digital_basis"):
+            raise ValueError(
+                "describe why the bench is all-digital (the DUT is the audio interface)"
+            )
         reference = config.get("reference_channel")
         if reference is not None:
             selection = config["audio"]["input"]
@@ -125,6 +144,11 @@ def factory(config: dict, directory: Path, *, stage: str = "identity"):
         )
         return engine, engine
     options = config["engine"]
+    if stage == "direct-loopback" and config.get("all_digital"):
+        raise ValueError(
+            "an all-digital bench has no separate interface to loop back; "
+            "complete-qualification records the waiver instead"
+        )
     if stage == "direct-loopback":
         from beqforge_device_check.audio import StreamCapture, devices
         from beqforge_device_check.qualification import DirectReference
@@ -146,7 +170,8 @@ def factory(config: dict, directory: Path, *, stage: str = "identity"):
             Helper(helper_path(options["executable"]), options["version"]),
             profile,
             serial=options["serial"],
-            restore_commands=options["restore_commands"],
+            restore_commands=options.get("restore_commands"),
+            route_commands=options.get("route_commands"),
         )
     from beqforge_device_check.audio import StreamCapture, devices
 
@@ -192,7 +217,7 @@ def setup(args) -> dict:
         "executable": executable
         if executable == "bundled"
         else str(Path(executable).resolve()),
-        "version": "0.1.9" if mode == "minidsp" else "4.1.3",
+        "version": MINIDSP_VERSION if mode == "minidsp" else "4.1.3",
     }
     if offline:
         validate_config(config)
@@ -216,10 +241,33 @@ def setup(args) -> dict:
         config["engine"]["serial"] = input(
             "miniDSP serial (explicit selection): "
         ).strip()
-        restore = Path(
-            input("Complete miniDSP restoration argument-arrays JSON file: ").strip()
+        from beqforge_device_check.engines import usb_loopback_route
+
+        print(
+            "For a pure USB loopback, device-check can set the miniDSP's signal path itself"
         )
-        config["engine"]["restore_commands"] = json.loads(restore.read_text())
+        print(
+            "at the start of every live stage: USB source, input 0 -> output 0 (DUT),"
+            " input 1 -> output 1 (timing reference),"
+        )
+        print(
+            "other outputs muted, every other stage on the used outputs neutral or bypassed."
+        )
+        if (
+            input("Type CONFIGURE to let device-check set that route: ").strip()
+            == "CONFIGURE"
+        ):
+            config["engine"]["route_commands"] = usb_loopback_route(profile)
+        restore = input(
+            "Complete miniDSP restoration argument-arrays JSON file"
+            + (
+                " (blank re-applies the route): "
+                if "route_commands" in config["engine"]
+                else ": "
+            )
+        ).strip()
+        if restore:
+            config["engine"]["restore_commands"] = json.loads(Path(restore).read_text())
     else:
         config["engine"]["endpoint"] = input("CamillaDSP websocket URL: ").strip()
         config["engine"]["template"] = read(
@@ -243,6 +291,13 @@ def setup(args) -> dict:
     config["clock_basis"] = input(
         "Clock basis (shared interface/digital clocking, or unknown): "
     ).strip()
+    basis = input(
+        "If playback and capture are the DUT's own digital audio interface (no separate"
+        " interface or converters), say how; blank otherwise: "
+    ).strip()
+    if basis:
+        config["all_digital"] = True
+        config["all_digital_basis"] = basis
     timing = input(
         "Independent timing-reference input channel (zero-based; blank if absent): "
     ).strip()
@@ -268,7 +323,7 @@ def self_test(directory: Path, *, audio_discovery: bool = True) -> dict:
     bundled_helper = None
     if getattr(sys, "frozen", False):
         binary = helper_path("bundled")
-        Helper(binary, "0.1.9")
+        Helper(binary, MINIDSP_VERSION)
         from beqforge_device_check.evidence import file_hash
 
         bundled_helper = read(binary.parent / "helper.json")
@@ -284,7 +339,7 @@ def self_test(directory: Path, *, audio_discovery: bool = True) -> dict:
             raise ValueError("helper subprocess bounds lost")
         commands.append(args)
         stdout = (
-            "minidsp 0.1.9"
+            f"minidsp {MINIDSP_VERSION}"
             if args[-1] == "--version"
             else (
                 "0: Found 2x4HD with serial 123456 at usb:0"
@@ -295,7 +350,7 @@ def self_test(directory: Path, *, audio_discovery: bool = True) -> dict:
         return subprocess.CompletedProcess(args, 0, stdout, "")
 
     adapter = Minidsp(
-        Helper(mock, "0.1.9", runner=runner),
+        Helper(mock, MINIDSP_VERSION, runner=runner),
         PROFILES["minidsp-2x4hd"],
         serial="123456",
         restore_commands=[["config", "0"]],
@@ -310,7 +365,7 @@ def self_test(directory: Path, *, audio_discovery: bool = True) -> dict:
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     try:
-        Helper(mock, "0.1.9", runner=timeout_runner)
+        Helper(mock, MINIDSP_VERSION, runner=timeout_runner)
     except subprocess.TimeoutExpired:
         if len(calls) != 1:
             raise ValueError("timed-out helper was retried") from None
@@ -473,8 +528,14 @@ def parser() -> argparse.ArgumentParser:
         elif name == "qualify":
             command.add_argument("--manifest", type=Path, required=True)
             command.add_argument("--accuracy-db", type=float, required=True)
-            command.add_argument("--duration", type=float, default=30)
-            command.add_argument("--tail", type=float, default=15)
+            command.add_argument("--duration", type=float, default=5)
+            command.add_argument("--preroll", type=float, default=0.5)
+            command.add_argument(
+                "--tail",
+                type=float,
+                default=1,
+                help="minimum tail; each cascade's is extended to its settling time",
+            )
             command.add_argument("--low-hz", type=float, default=2)
             command.add_argument("--high-hz", type=float, default=200)
             command.add_argument(
@@ -496,6 +557,37 @@ def parser() -> argparse.ArgumentParser:
             if name == "catalogue-entry":
                 command.add_argument("--entry", required=True)
                 command.add_argument("--qualification", type=Path)
+    command = sub.add_parser(
+        "verify",
+        help="qualify (reusing every stored stage), run and analyse in one command",
+    )
+    command.add_argument("--config", type=Path, required=True)
+    command.add_argument(
+        "--manifest", type=Path, help="frozen cases; default: generate --suite"
+    )
+    command.add_argument("--suite", choices=("pilot", "matrix"), default="pilot")
+    command.add_argument(
+        "--accuracy-db",
+        type=float,
+        default=0.1,
+        help="predeclared engineering requirement (default 0.1 dB)",
+    )
+    command.add_argument(
+        "--out", type=Path, help="results; default: results/<UTC time> beside the bench"
+    )
+    command.add_argument(
+        "--store", type=Path, help="proven stages; default: store/ beside the bench"
+    )
+    command.add_argument(
+        "--direct-loopback",
+        metavar="PATH_DESCRIPTION",
+        help="record the direct-loopback stage now (analogue benches, rewired)",
+    )
+    command.add_argument("--duration", type=float, default=5)
+    command.add_argument("--preroll", type=float, default=0.5)
+    command.add_argument("--tail", type=float, default=1)
+    command.add_argument("--low-hz", type=float, default=2)
+    command.add_argument("--high-hz", type=float, default=200)
     command = sub.add_parser("complete-qualification")
     command.add_argument("directory", type=Path)
     command.add_argument("--supporting", type=Path, action="append", required=True)
@@ -515,6 +607,13 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    # Progress goes to stderr, so stdout stays the command's JSON result.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-5s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
     try:
         result = dispatch(args)
         print(json.dumps(result, indent=2, allow_nan=False))
@@ -547,7 +646,12 @@ def dispatch(args) -> dict | list:
             config.get("common_clock") and config.get("clock_basis")
         )
         record = complete(
-            args.directory, args.supporting, clock_verified=clock_verified
+            args.directory,
+            args.supporting,
+            clock_verified=clock_verified,
+            direct_loopback_waiver=config.get("all_digital_basis")
+            if config.get("all_digital")
+            else None,
         )
         return {k: v for k, v in record.items() if k != "results"}
     if args.command in ("devices", "_audio-devices"):
@@ -582,6 +686,44 @@ def dispatch(args) -> dict | list:
         }
     config = read(args.config)
     profile = validate_config(config)
+    if args.command == "verify":
+        from beqforge_device_check.verify import default_out, verify
+
+        if args.manifest:
+            manifest = read(args.manifest)
+        else:
+            # Deterministic: the same suite gives the same cases, so stored stages apply.
+            manifest = generate(
+                profile,
+                rate=config["rate"],
+                route=config["route"],
+                channel=config["channel"],
+                suite=args.suite,
+            )
+        validate(manifest)
+        if DeviceProfile.from_dict(manifest["profile"]) != profile:
+            raise ValueError("bench and manifest profiles disagree")
+        out = args.out or default_out(args.config)
+        store = args.store or args.config.resolve().parent / "store"
+        engine, capture = factory(config, out)
+        return verify(
+            config,
+            manifest,
+            store,
+            out,
+            engine,
+            capture,
+            SweepSettings(
+                rate=config["rate"],
+                duration_s=args.duration,
+                preroll_s=args.preroll,
+                tail_s=args.tail,
+                low_hz=args.low_hz,
+                high_hz=args.high_hz,
+            ),
+            accuracy_db=args.accuracy_db,
+            direct_path=args.direct_loopback,
+        )
     if args.command == "plan":
         manifest = generate(
             profile,
@@ -673,6 +815,7 @@ def dispatch(args) -> dict | list:
             SweepSettings(
                 rate=config["rate"],
                 duration_s=args.duration,
+                preroll_s=args.preroll,
                 tail_s=args.tail,
                 low_hz=args.low_hz,
                 high_hz=args.high_hz,

@@ -127,3 +127,58 @@ def test_convergence_failure_restores_and_keeps_raw_evidence(tmp_path):
     assert json.loads((tmp_path / "run.json").read_text())["restored"]
     assert list((tmp_path / "stimuli").glob("*.npz"))
     assert not (tmp_path / "qualification.json").exists()
+
+
+def test_all_digital_bench_completes_without_direct_loopback_and_says_so(tmp_path):
+    pytest.importorskip("pyfar")
+    manifest = generate(PROFILES["simulation-float64"], rate=48000)
+    manifest["cases"] = manifest["cases"][:2]
+    manifest["levels_dbfs"] = [-30]
+    manifest["order"] = [manifest["cases"][1]["id"]]
+    manifest["hash"] = digest({k: v for k, v in manifest.items() if k != "hash"})
+    config = {"rate": 48000}
+    engine = Simulation(48000)
+    settings = SweepSettings(rate=48000, duration_s=1, tail_s=2, preroll_s=0.25)
+    for stage in ("identity", "device-bypass"):
+        qualify(
+            config,
+            manifest,
+            tmp_path / stage,
+            engine,
+            engine,
+            settings,
+            accuracy_db=0.1,
+            stage=stage,
+            path_description="numerical control",
+        )
+    convergence(
+        config,
+        manifest,
+        tmp_path / "convergence",
+        engine,
+        engine,
+        settings,
+        accuracy_db=0.1,
+    )
+    supporting = [tmp_path / "device-bypass", tmp_path / "convergence"]
+    # Without the bench's own all-digital basis, the missing stage still refuses.
+    with pytest.raises(ValueError, match="direct-loopback"):
+        complete(tmp_path / "identity", supporting, clock_verified=True)
+    basis = "the DUT's own USB audio interface"
+    # The waiver covers only direct loopback: bypass and convergence stay required.
+    with pytest.raises(ValueError, match="device-bypass and convergence"):
+        complete(
+            tmp_path / "identity",
+            supporting[:1],
+            clock_verified=True,
+            direct_loopback_waiver=basis,
+        )
+    result = complete(
+        tmp_path / "identity",
+        supporting,
+        clock_verified=True,
+        direct_loopback_waiver=basis,
+    )
+    assert result["qualified"]
+    assert result["waived_stages"] == {"direct-loopback": basis}
+    assert "waived" in result["scope"]

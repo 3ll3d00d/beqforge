@@ -14,6 +14,8 @@ from beqforge_device_check.evidence import (
     register,
 )
 from beqforge_device_check.manifest import digest, validate
+from beqforge_device_check.measurement import carried, worst
+from beqforge_device_check.transactions import recompute
 
 
 def summarise(
@@ -86,6 +88,8 @@ def analyse(directory: Path, output: Path) -> dict:
     if run.get("manifest_hash") != manifest["hash"]:
         raise ValueError("run manifest identity differs")
     cases = {case["id"]: case for case in manifest["cases"]}
+    bench_path = directory / "bench.json"
+    bench = json.loads(bench_path.read_text()) if bench_path.is_file() else {}
     results = []
     output.mkdir(parents=True, exist_ok=True)
     for completed in run["completed"]:
@@ -106,155 +110,150 @@ def analyse(directory: Path, output: Path) -> dict:
             results.append(item)
             continue
         attempt = completed["result"]["attempt"]
-        with (
-            np.load(
-                directory / "analysis" / f"{attempt}.npz", allow_pickle=False
-            ) as data,
-            np.load(
-                directory / "analysis" / f"{completed['before']}.npz",
-                allow_pickle=False,
-            ) as left,
-            np.load(
-                directory / "analysis" / f"{completed['after']}.npz", allow_pickle=False
-            ) as right,
-        ):
-            frequencies = data["frequencies"]
-            if not np.array_equal(
-                frequencies, left["frequencies"]
-            ) or not np.array_equal(frequencies, right["frequencies"]):
-                raise ValueError("reference frequency axes differ")
-            mask = data["mask"] & left["mask"] & right["mask"]
-            level = completed["result"]["level_dbfs"]
-            with np.load(
-                directory / "analysis" / f"qualification-{level:g}.npz",
-                allow_pickle=False,
-            ) as qualified:
-                if not np.array_equal(frequencies, qualified["frequencies"]):
-                    raise ValueError("qualification frequency axis differs")
-                mask &= qualified["mask"]
-                uncertainty = qualified["uncertainty_db"].copy()
-            uncertainty += data["inversion_bias_db"] + np.maximum(
-                left["inversion_bias_db"], right["inversion_bias_db"]
+
+        def trace(name: str) -> dict:
+            path = directory / "analysis" / f"{name}.npz"
+            with np.load(path, allow_pickle=False) as arrays:
+                return {key: arrays[key].copy() for key in arrays.files}
+
+        data = trace(attempt)
+        frequencies = data["frequencies"]
+        # A long-settling cascade's longer tail gives it a finer grid than its identity
+        # brackets: they are recovered again on it from their raw sweeps.
+        left, right = (
+            bracket
+            if np.array_equal(bracket["frequencies"], frequencies)
+            else recompute(directory, name, bench, len(data["impulse"]))
+            for name, bracket in (
+                (name, trace(name))
+                for name in (completed["before"], completed["after"])
             )
-            # Geometric magnitude and circular phase midpoint preserve gain and phase;
-            # unlike averaging complex values they cannot attenuate a delayed reference.
-            baseline = np.sqrt(np.abs(left["response"] * right["response"])) * np.exp(
-                1j
-                * (
-                    np.angle(left["response"])
-                    + np.angle(right["response"] * np.conj(left["response"])) / 2
-                )
+        )
+        mask = data["mask"] & left["mask"] & right["mask"]
+        level = completed["result"]["level_dbfs"]
+        qualified = trace(f"qualification-{level:g}")
+        lower, upper, exact, valid = carried(
+            qualified["frequencies"], frequencies, qualified["mask"]
+        )
+        mask &= valid
+        uncertainty = worst(qualified["uncertainty_db"], lower, upper, exact)
+        uncertainty += data["inversion_bias_db"] + np.maximum(
+            left["inversion_bias_db"], right["inversion_bias_db"]
+        )
+        # Geometric magnitude and circular phase midpoint preserve gain and phase;
+        # unlike averaging complex values they cannot attenuate a delayed reference.
+        baseline = np.sqrt(np.abs(left["response"] * right["response"])) * np.exp(
+            1j
+            * (
+                np.angle(left["response"])
+                + np.angle(right["response"] * np.conj(left["response"])) / 2
             )
-            safe = np.maximum(np.abs(baseline), 1e-300) * np.exp(
-                1j * np.angle(baseline)
-            )
-            measured = data["response"] / safe
-            exact = response(
-                np.asarray(case["exact_sos"]).reshape(-1, 6), frequencies, case["rate"]
-            )
-            transport = json.loads(
-                (directory / "transport" / f"{attempt}.json").read_text()
-            )
-            sent = np.asarray(transport["sent_sos"]).reshape(-1, 6)
-            sent_h = response(sent, frequencies, case["rate"])
-            model = transport.get("model", manifest["profile"]["coefficient_format"])
-            stored = transport.get("readback_sos")
-            stored_sos = (
-                np.asarray(stored).reshape(-1, 6)
-                if stored is not None
-                else rounded(sent, model)
-            )
-            stored_h = response(stored_sos, frequencies, case["rate"])
-            delta = 20 * np.log10(np.maximum(np.abs(measured / exact), 1e-300))
-            stored_delta = 20 * np.log10(
-                np.maximum(np.abs(measured / stored_h), 1e-300)
-            )
-            predicted = 20 * np.log10(np.maximum(np.abs(stored_h / exact), 1e-300))
-            identity_drift = 20 * np.log10(
-                np.maximum(np.abs(right["response"] / left["response"]), 1e-300)
-            )
-            item.update(
-                {
-                    "attempt": attempt,
-                    "level_dbfs": completed["result"]["level_dbfs"],
-                    "exact": summarise(
-                        frequencies, delta, mask, qualification["accuracy_db"]
-                    ),
-                    "stored_model": summarise(
-                        frequencies, stored_delta, mask, qualification["accuracy_db"]
-                    ),
-                    "storage_verified": transport["storage_verified"],
-                    "storage_model": model,
-                    "uncertainty_db": uncertainty.tolist(),
-                    "phase_limitation": completed["result"]["phase_limitation"],
-                    "identity_drift_max_db": float(np.max(np.abs(identity_drift[mask])))
-                    if np.any(mask)
-                    else None,
-                    "frequencies": frequencies.tolist(),
-                    "mask": mask.tolist(),
-                    "delta_exact_db": [
-                        float(v) if m else None
-                        for v, m in zip(delta, mask, strict=True)
-                    ],
-                    "delta_stored_db": [
-                        float(v) if m else None
-                        for v, m in zip(stored_delta, mask, strict=True)
-                    ],
-                    "predicted_quantisation_db": predicted.tolist(),
-                    "sent_error_db": (
-                        20 * np.log10(np.maximum(abs(sent_h / exact), 1e-300))
-                    ).tolist(),
-                    "phase_delta_degrees": [
-                        float(v) if m else None
-                        for v, m in zip(
-                            np.angle(measured / exact, deg=True), mask, strict=True
-                        )
-                    ],
-                }
-            )
-            valid_error = np.abs(delta[mask])
-            valid_budget = uncertainty[mask]
-            item["accuracy_assessment"] = {
-                "scope": "qualified magnitude bins only; not a recursive arithmetic claim",
-                "requirement_db": qualification["accuracy_db"],
-                "within_requirement_bins": int(
-                    np.sum(valid_error + valid_budget <= qualification["accuracy_db"])
+        )
+        safe = np.maximum(np.abs(baseline), 1e-300) * np.exp(1j * np.angle(baseline))
+        measured = data["response"] / safe
+        exact = response(
+            np.asarray(case["exact_sos"]).reshape(-1, 6), frequencies, case["rate"]
+        )
+        transport = json.loads(
+            (directory / "transport" / f"{attempt}.json").read_text()
+        )
+        sent = np.asarray(transport["sent_sos"]).reshape(-1, 6)
+        sent_h = response(sent, frequencies, case["rate"])
+        model = transport.get("model", manifest["profile"]["coefficient_format"])
+        stored = transport.get("readback_sos")
+        stored_sos = (
+            np.asarray(stored).reshape(-1, 6)
+            if stored is not None
+            else rounded(sent, model)
+        )
+        stored_h = response(stored_sos, frequencies, case["rate"])
+        delta = 20 * np.log10(np.maximum(np.abs(measured / exact), 1e-300))
+        stored_delta = 20 * np.log10(np.maximum(np.abs(measured / stored_h), 1e-300))
+        predicted = 20 * np.log10(np.maximum(np.abs(stored_h / exact), 1e-300))
+        identity_drift = 20 * np.log10(
+            np.maximum(np.abs(right["response"] / left["response"]), 1e-300)
+        )
+        item.update(
+            {
+                "attempt": attempt,
+                "level_dbfs": completed["result"]["level_dbfs"],
+                "exact": summarise(
+                    frequencies, delta, mask, qualification["accuracy_db"]
                 ),
-                "exceeds_requirement_bins": int(
-                    np.sum(valid_error - valid_budget > qualification["accuracy_db"])
+                "stored_model": summarise(
+                    frequencies, stored_delta, mask, qualification["accuracy_db"]
                 ),
-                "unresolved_bins": int(
-                    np.sum(
-                        (valid_error + valid_budget > qualification["accuracy_db"])
-                        & (valid_error - valid_budget <= qualification["accuracy_db"])
+                "storage_verified": transport["storage_verified"],
+                "storage_model": model,
+                "uncertainty_db": uncertainty.tolist(),
+                "phase_limitation": completed["result"]["phase_limitation"],
+                "identity_drift_max_db": float(np.max(np.abs(identity_drift[mask])))
+                if np.any(mask)
+                else None,
+                "frequencies": frequencies.tolist(),
+                "mask": mask.tolist(),
+                "delta_exact_db": [
+                    float(v) if m else None for v, m in zip(delta, mask, strict=True)
+                ],
+                "delta_stored_db": [
+                    float(v) if m else None
+                    for v, m in zip(stored_delta, mask, strict=True)
+                ],
+                "predicted_quantisation_db": predicted.tolist(),
+                "sent_error_db": (
+                    20 * np.log10(np.maximum(abs(sent_h / exact), 1e-300))
+                ).tolist(),
+                "phase_delta_degrees": [
+                    float(v) if m else None
+                    for v, m in zip(
+                        np.angle(measured / exact, deg=True), mask, strict=True
                     )
-                ),
-                "unqualified_bins": int(np.sum(~mask)),
+                ],
             }
-            assessment = item["accuracy_assessment"]
-            assessment["outcome"] = (
-                "under-range"
-                if not len(valid_error)
-                else "exceeds-requirement"
-                if assessment["exceeds_requirement_bins"]
-                else "unresolved"
-                if assessment["unresolved_bins"]
-                else "within-requirement"
-            )
-            item["characteristics"] = {
-                "sections": len(case["publication_filters"]),
-                "lowest_corner_hz": min(
-                    (f["freq_hz"] for f in case["publication_filters"]), default=None
-                ),
-                "maximum_q": max(
-                    (f["q"] for f in case["publication_filters"]), default=None
-                ),
-                "rate": case["rate"],
-                "predicted_quantisation": summarise(
-                    frequencies, predicted, mask, qualification["accuracy_db"]
-                ),
-            }
-            item["status"] = item["exact"]["status"]
+        )
+        valid_error = np.abs(delta[mask])
+        valid_budget = uncertainty[mask]
+        item["accuracy_assessment"] = {
+            "scope": "qualified magnitude bins only; not a recursive arithmetic claim",
+            "requirement_db": qualification["accuracy_db"],
+            "within_requirement_bins": int(
+                np.sum(valid_error + valid_budget <= qualification["accuracy_db"])
+            ),
+            "exceeds_requirement_bins": int(
+                np.sum(valid_error - valid_budget > qualification["accuracy_db"])
+            ),
+            "unresolved_bins": int(
+                np.sum(
+                    (valid_error + valid_budget > qualification["accuracy_db"])
+                    & (valid_error - valid_budget <= qualification["accuracy_db"])
+                )
+            ),
+            "unqualified_bins": int(np.sum(~mask)),
+        }
+        assessment = item["accuracy_assessment"]
+        assessment["outcome"] = (
+            "under-range"
+            if not len(valid_error)
+            else "exceeds-requirement"
+            if assessment["exceeds_requirement_bins"]
+            else "unresolved"
+            if assessment["unresolved_bins"]
+            else "within-requirement"
+        )
+        item["characteristics"] = {
+            "sections": len(case["publication_filters"]),
+            "lowest_corner_hz": min(
+                (f["freq_hz"] for f in case["publication_filters"]), default=None
+            ),
+            "maximum_q": max(
+                (f["q"] for f in case["publication_filters"]), default=None
+            ),
+            "rate": case["rate"],
+            "predicted_quantisation": summarise(
+                frequencies, predicted, mask, qualification["accuracy_db"]
+            ),
+        }
+        item["status"] = item["exact"]["status"]
         results.append(item)
     report = {
         "schema_version": 1,

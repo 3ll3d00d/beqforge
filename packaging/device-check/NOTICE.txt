@@ -1,8 +1,8 @@
 beqforge-device-check: experimental measurement preview, not hardware-qualified.
 
-The bundled miniDSP helper is minidsp-rs 0.1.9, Copyright 2021 Mathieu Rene,
+The bundled miniDSP helper is minidsp-rs 0.1.12, Copyright 2021 Mathieu Rene,
 licensed under Apache-2.0. See helpers/minidsp-LICENSE.txt and helper.json.
-Source: https://github.com/mrene/minidsp-rs/tree/v0.1.9
+Source: https://github.com/mrene/minidsp-rs/tree/v0.1.12
 
 Python, NumPy, SciPy, matplotlib, pyfar, sounddevice, CFFI, websocket-client and
 transitive Python packages retain their installed distribution metadata/licences

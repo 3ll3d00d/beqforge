@@ -54,7 +54,7 @@ def test_independent_delay_and_clock_drift(stimulus):
     x, metadata = stimulus
     delay = 300
     reference = np.pad(x[:-delay], (delay, 0))
-    measured_delay, drift = reference_delay(x, reference, 48000)
+    measured_delay, drift = reference_delay(x, reference, metadata)
     assert measured_delay == delay and abs(drift) < 0.1
     result = recover(x, reference, metadata, reference=reference)
     assert result["valid"]
@@ -71,3 +71,35 @@ def test_noise_masks_under_range_without_fitting_away_gain(stimulus):
     assert np.mean(result["mask"]) < 0.5
     clean = recover(x, x * 0.1, metadata)
     np.testing.assert_allclose(np.abs(clean["response"][clean["mask"]]), 0.1, atol=1e-7)
+
+
+def test_silent_timing_reference_is_named_not_reported_as_drift(stimulus):
+    x, metadata = stimulus
+    y = x.astype(float)
+    # The reference path was never fed: only bench noise, ~90 dB below the sweep.
+    silent = np.random.default_rng(3).normal(0, 1e-6, len(x))
+    result = recover(x, y, metadata, reference=silent)
+    assert not result["valid"]
+    assert result["drift_ppm"] is None
+    assert any("carries no stimulus" in failure for failure in result["failures"])
+    # A fed reference still recovers.
+    assert recover(x, y, metadata, reference=y)["valid"]
+
+
+def test_long_delay_and_drift_on_a_short_low_frequency_sweep():
+    pytest.importorskip("pyfar")
+    # The bench's own case: a 5 s, 2-200 Hz sweep over a ~190 ms USB round trip.
+    # Segment correlation picked lags from 736 to 19244 samples here.
+    x, metadata = sweep(SweepSettings())
+    delay = 18287
+    for ppm in (0.0, 20.0):
+        stretched = resample_poly(x.astype(float), 1_000_000 + int(ppm), 1_000_000)
+        reference = np.pad(stretched, (delay, 0))[: len(x)]
+        measured_delay, drift = reference_delay(x, reference, metadata)
+        # Drift also scales frequency, which a log sweep cannot tell from a time shift of
+        # L * eps (L = duration / ln(high / low)): about 2 samples at 20 ppm, under half a
+        # sample within the 5 ppm a capture is accepted at.
+        sweep_constant = 5 / np.log(100)
+        allowance = 1 + sweep_constant * ppm * 1e-6 * 96000
+        assert abs(measured_delay - delay) <= allowance
+        assert drift == pytest.approx(ppm, abs=1.5)

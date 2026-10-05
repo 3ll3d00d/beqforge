@@ -1,6 +1,7 @@
 """Recoverable case transactions and qualified identity references."""
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import asdict, replace
@@ -28,6 +29,22 @@ from beqforge_device_check.measurement import (
     recover,
     sweep,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def sweep_seconds(settings: SweepSettings) -> float:
+    return settings.preroll_s + settings.duration_s + settings.tail_s
+
+
+def case_seconds(settings: SweepSettings, case: dict) -> float:
+    """Wall time of one measurement: its settling wait and its own sweep."""
+    settle = case["settling_seconds"] or 0
+    return settle + sweep_seconds(settings.for_settling(settle))
+
+
+def eta(sweeps: int, seconds: float) -> str:
+    return f"{sweeps} sweeps, about {seconds / 60:.1f} min"
 
 
 class Engine(Protocol):
@@ -106,6 +123,29 @@ class Simulation:
         return True
 
 
+def covers(qualification: dict, manifest: dict) -> bool:
+    """Whether a completed qualification proves this manifest, though built for another.
+
+    Identity, bypass and direct loopback never involve the cascades under test, so they
+    carry over whenever the identity case and levels match; convergence must have been
+    shown for every planned cascade here.
+    """
+    if not qualification.get("qualified") or "convergence_covers" not in qualification:
+        return False
+    identity = next(c["id"] for c in manifest["cases"] if c["name"] == "identity")
+    planned = {
+        c["id"]
+        for c in manifest["cases"]
+        if c["status"] == "planned" and c["name"] != "identity"
+    }
+    levels = {f"qualification-{level:g}.npz" for level in manifest["levels_dbfs"]}
+    return (
+        qualification.get("identity_case") == identity
+        and set(qualification["reference_files"]) == levels
+        and planned <= set(qualification["convergence_covers"])
+    )
+
+
 def bench_hash(config: dict) -> str:
     # Qualification identity includes the complete route, levels, stream settings,
     # engine build/firmware and restoration assumptions, not only a profile name.
@@ -114,6 +154,7 @@ def bench_hash(config: dict) -> str:
 
 def restore_state(engine: Engine, snapshot: dict) -> tuple[bool, list[str]]:
     errors = []
+    logger.info("Restoring device state")
     try:
         engine.mute(True)
         restored = engine.restore(snapshot)
@@ -125,7 +166,44 @@ def restore_state(engine: Engine, snapshot: dict) -> tuple[bool, list[str]]:
             engine.mute(True)
         except Exception as error:  # noqa: BLE001 - save any adapter failure during emergency restoration
             errors.append(f"could not verify final mute: {error}")
+    if errors:
+        logger.error("Restoration problems: %s", "; ".join(errors))
+    elif restored:
+        logger.info("Device state restored and verified")
+    else:
+        logger.info("Restoration commands sent, unverified; device left muted")
     return restored, errors
+
+
+def recompute(directory: Path, attempt: str, config: dict, size: int) -> dict:
+    """Recover a saved attempt again at FFT length `size`, from its raw sweep.
+
+    A cascade with a long settling time gets a long tail, so a longer capture and a finer
+    grid than the identity sweeps it is divided by. Re-deconvolving the identity's exact
+    stimulus and capture at that length puts it on the same grid exactly: both signals
+    are finite, so the longer zero-padding cannot wrap.
+    """
+    with np.load(directory / "stimuli" / f"{attempt}.npz", allow_pickle=False) as x:
+        stimulus = x["samples"].copy()
+    with np.load(directory / "captures" / f"{attempt}.npz", allow_pickle=False) as y:
+        captured = y["samples"].copy()
+    metadata = json.loads((directory / "stimuli" / f"{attempt}.json").read_text())
+    stream = json.loads((directory / "captures" / f"{attempt}.json").read_text())
+    dut = config.get("audio", {}).get("input", {}).get("channel", 0)
+    reference = config.get("reference_channel")
+    result = recover(
+        stimulus,
+        captured[:, dut],
+        metadata,
+        reference=captured[:, reference] if reference is not None else None,
+        statuses=[str(s) for s in stream.get("statuses", []) if s],
+        size=size,
+    )
+    if not result["valid"]:
+        raise ValueError(
+            f"saved attempt {attempt} no longer recovers: {result['failures']}"
+        )
+    return result
 
 
 def measure(
@@ -136,8 +214,26 @@ def measure(
     capture,
     *,
     reference_channel: int | None = None,
+    progress: str = "",
 ) -> dict:
     attempt = uuid.uuid4().hex
+    settle = case["settling_seconds"] or 0
+    if settle > 60:
+        raise ValueError("settling exceeds the supported 60-second control bound")
+    # The tail covers this cascade's own decay, not the slowest one in the manifest.
+    settings = settings.for_settling(settle)
+    label = f"{progress + ' ' if progress else ''}{case['name']} @ {settings.level_dbfs:g} dBFS"
+    started = time.monotonic()
+    logger.info(
+        "%s: loading %d section(s), then a %.1f s sweep (%g-%g Hz, %.1f s tail) [%s]",
+        label,
+        len(case["exact_sos"]),
+        sweep_seconds(settings),
+        settings.low_hz,
+        settings.high_hz,
+        settings.tail_s,
+        attempt[:8],
+    )
     log = directory / "attempts.jsonl"
     append(
         log,
@@ -155,11 +251,6 @@ def measure(
     x, metadata = sweep(settings)
     atomic_arrays(directory / "stimuli" / f"{attempt}.npz", samples=x)
     atomic_json(directory / "stimuli" / f"{attempt}.json", metadata)
-    settle = case["settling_seconds"] or 0
-    if settle > settings.tail_s:
-        raise ValueError("tail is shorter than the cascade's required linear decay")
-    if settle > 60:
-        raise ValueError("settling exceeds the supported 60-second control bound")
     engine.mute(False)
     if settle and getattr(engine, "live", True):
         time.sleep(settle)
@@ -177,6 +268,7 @@ def measure(
                 "partial_capture": True,
             },
         )
+        logger.error("%s: capture interrupted: %s", label, error)
         raise
     if y.ndim != 2 or y.shape[0] != len(x):
         raise ValueError("capture backend returned missing samples")
@@ -195,6 +287,7 @@ def measure(
         append(
             log, {"attempt": attempt, "state": "failed", "failures": result["failures"]}
         )
+        logger.error("%s: invalid: %s", label, "; ".join(result["failures"]))
         raise ValueError("; ".join(result["failures"]))
     arrays = {
         k: result.pop(k)
@@ -207,6 +300,19 @@ def measure(
             "impulse",
         )
     }
+    usable = arrays["mask"]
+    logger.info(
+        "%s: done in %.0f s; %d/%d bins usable, lowest usable SNR %s, delay %d samples%s",
+        label,
+        time.monotonic() - started,
+        int(np.count_nonzero(usable)),
+        len(usable),
+        f"{np.min(arrays['snr_db'][usable]):.1f} dB" if np.any(usable) else "n/a",
+        result["delay_samples"],
+        f", drift {result['drift_ppm']:.2f} ppm"
+        if result.get("drift_ppm") is not None
+        else "",
+    )
     atomic_arrays(directory / "analysis" / f"{attempt}.npz", **arrays)
     result.update(
         {"attempt": attempt, "case": case["id"], "level_dbfs": settings.level_dbfs}
@@ -250,6 +356,16 @@ def qualify(
     if accuracy_db <= 0 or not np.isfinite(accuracy_db):
         raise ValueError("predeclare a positive engineering accuracy requirement")
     identity = next(case for case in manifest["cases"] if case["name"] == "identity")
+    repeats = max(5, manifest["identity_repeats"])
+    total = repeats * len(manifest["levels_dbfs"])
+    logger.info(
+        "%s qualification: %d repeats at %s dBFS = %s; evidence in %s",
+        stage,
+        repeats,
+        ", ".join(f"{level:g}" for level in manifest["levels_dbfs"]),
+        eta(total, total * case_seconds(settings, identity)),
+        directory,
+    )
     results = []
     with run_lock(directory):
         snapshot = engine.snapshot()
@@ -258,7 +374,7 @@ def qualify(
         try:
             for level in manifest["levels_dbfs"]:
                 traces, masks, biases, noise_bounds = [], [], [], []
-                for _ in range(max(5, manifest["identity_repeats"])):
+                for _ in range(repeats):
                     result = measure(
                         directory,
                         identity,
@@ -266,6 +382,7 @@ def qualify(
                         engine,
                         capture,
                         reference_channel=config.get("reference_channel"),
+                        progress=f"[{len(results) + 1}/{total}]",
                     )
                     results.append(result)
                     with np.load(
@@ -290,6 +407,16 @@ def qualify(
                     + 2 * np.max(noise_bounds, axis=0)
                 )
                 valid = np.all(masks, axis=0) & (uncertainty < accuracy_db / 3)
+                logger.info(
+                    "%g dBFS: %d/%d bins within the %.3g dB uncertainty budget%s",
+                    level,
+                    int(np.count_nonzero(valid)),
+                    len(valid),
+                    accuracy_db / 3,
+                    f" ({frequencies[valid][0]:.2f}-{frequencies[valid][-1]:.1f} Hz)"
+                    if np.any(valid)
+                    else "",
+                )
                 atomic_arrays(
                     directory / "analysis" / f"qualification-{level:g}.npz",
                     frequencies=frequencies,
@@ -318,6 +445,11 @@ def qualify(
             }
             qualification["hash"] = digest(qualification)
             atomic_json(directory / "qualification.json", qualification)
+            logger.info(
+                "%s stage complete: %s (not qualified until every stage is assembled)",
+                stage,
+                directory / "qualification.json",
+            )
             return qualification
         finally:
             restored, errors = restore_state(engine, snapshot)
@@ -352,9 +484,9 @@ def run(
         {k: v for k, v in qualification.items() if k != "hash"}
     ):
         raise ValueError("qualification hash mismatch")
-    if (
-        qualification["bench_hash"] != bench_hash(config)
-        or qualification["manifest_hash"] != manifest["hash"]
+    if qualification["bench_hash"] != bench_hash(config) or (
+        qualification["manifest_hash"] != manifest["hash"]
+        and not covers(qualification, manifest)
     ):
         raise ValueError("qualification is stale for this bench/manifest")
     if not qualification["qualified"] and getattr(engine, "live", True):
@@ -423,6 +555,32 @@ def run(
                 raise ValueError("supporting qualification evidence changed")
             atomic_bytes(directory / relative, path.read_bytes())
         cases = {case["id"]: case for case in manifest["cases"]}
+        planned = [
+            cases[c] for c in manifest["order"] if cases[c]["status"] == "planned"
+        ]
+        total = len(manifest["levels_dbfs"]) * (1 + 2 * len(planned))
+        seconds = len(manifest["levels_dbfs"]) * (
+            case_seconds(settings, identity)
+            + sum(
+                case_seconds(settings, case) + case_seconds(settings, identity)
+                for case in planned
+            )
+        )
+        swept = [0]
+
+        def counter() -> str:
+            swept[0] += 1
+            return f"[{swept[0]}/{total}]"
+
+        logger.info(
+            "run: %d planned case(s) bracketed by identities at %s dBFS = up to %s%s",
+            len(planned),
+            ", ".join(f"{level:g}" for level in manifest["levels_dbfs"]),
+            eta(total, seconds),
+            f"; resuming with {len(summary['completed'])} already done"
+            if summary["completed"]
+            else "",
+        )
         try:
             for level in manifest["levels_dbfs"]:
                 # Resume always starts with a newly loaded identity, never trusting stale state.
@@ -433,6 +591,7 @@ def run(
                     engine,
                     capture,
                     reference_channel=config.get("reference_channel"),
+                    progress=counter(),
                 )
                 for ordinal, case_id in enumerate(manifest["order"]):
                     key = digest(
@@ -442,6 +601,13 @@ def run(
                         continue
                     case = cases[case_id]
                     if case["status"] != "planned":
+                        logger.info(
+                            "%s @ %g dBFS: %s, not measured (%s)",
+                            case["name"],
+                            level,
+                            case["status"],
+                            case["reason"],
+                        )
                         summary["completed"].append(
                             {
                                 "key": key,
@@ -459,6 +625,7 @@ def run(
                         engine,
                         capture,
                         reference_channel=config.get("reference_channel"),
+                        progress=counter(),
                     )
                     after = measure(
                         directory,
@@ -467,6 +634,7 @@ def run(
                         engine,
                         capture,
                         reference_channel=config.get("reference_channel"),
+                        progress=counter(),
                     )
                     with (
                         np.load(
@@ -484,11 +652,15 @@ def run(
                                 np.abs(right["response"] / left["response"]), 1e-300
                             )
                         )
-                        if (
-                            not np.any(mask)
-                            or np.max(np.abs(drift[mask]))
-                            > qualification["accuracy_db"] / 3
-                        ):
+                        worst = np.max(np.abs(drift[mask])) if np.any(mask) else None
+                        if worst is None or worst > qualification["accuracy_db"] / 3:
+                            logger.error(
+                                "%s @ %g dBFS: identity bracket drift %s exceeds %.3g dB",
+                                case["name"],
+                                level,
+                                "unmeasurable" if worst is None else f"{worst:.4f} dB",
+                                qualification["accuracy_db"] / 3,
+                            )
                             raise ValueError(
                                 "identity bracket drift exceeds frozen uncertainty budget"
                             )
@@ -504,9 +676,17 @@ def run(
                         }
                     )
                     atomic_json(prior, summary)
+                    logger.info(
+                        "%s @ %g dBFS: measured; identity bracket drift %.4f dB",
+                        case["name"],
+                        level,
+                        worst,
+                    )
                     before = after
             summary["complete"] = True
+            logger.info("run complete: %d case result(s)", len(summary["completed"]))
         except BaseException as error:
+            logger.error("run stopped: %s: %s", type(error).__name__, error)
             summary["failures"].append(
                 {"type": type(error).__name__, "reason": str(error)}
             )

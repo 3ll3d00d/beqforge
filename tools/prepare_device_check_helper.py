@@ -9,24 +9,25 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from beqforge_device_check.engines import MINIDSP_VERSION
 from beqforge_device_check.evidence import atomic_bytes, atomic_json, file_hash
 
 ASSETS = {
     "linux-x86_64": (
         "minidsp.x86_64-unknown-linux-gnu.tar.gz",
-        "0a3eaeec195fe1c6340b96a3ed30310a3da892299d4efed7b4a86167afd12a4e",
+        "37f9d1be8e41fd506fca7ce006d80a73bd83b954082ac6642162e2ba67e38fb2",
     ),
     "macos-arm64": (
         "minidsp.arm64-apple-darwin.tar.gz",
-        "f5acd2aa96b3c80ecb6917af1bbfc06ea95b8693ff23504c7ec373842a07dfc2",
+        "8fd92b7fccd8684eee44962d04f8b250e45d6b583b0284f79e92adeb6bc6bea3",
     ),
     "macos-x86_64": (
         "minidsp.x86_64-apple-darwin.tar.gz",
-        "653402a66036960e161623eabffd655cdb3cd466f735b7c23ae3100a8482d638",
+        "2c0630404ea6d408dd90c2c5506cd9992977a3c56fe7932087bdb9e9a6371692",
     ),
     "windows-x86_64": (
         "minidsp.x86_64-pc-windows-msvc.zip",
-        "52973146bc4e298495276a4b1db80fc89281cdbf3f3712214658ec44a490b0f3",
+        "516e27e1cc1a8752ba67fa99cd6023eda14a24cbfd8e0d2809e2c54d13691dda",
     ),
 }
 
@@ -57,7 +58,7 @@ def prepare(target: str, directory: Path, cache: Path) -> dict:
     asset, expected = ASSETS[target]
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / asset
-    url = f"https://github.com/mrene/minidsp-rs/releases/download/v0.1.9/{asset}"
+    url = f"https://github.com/mrene/minidsp-rs/releases/download/v{MINIDSP_VERSION}/{asset}"
     if not archive.exists():
         atomic_bytes(archive, download(url))
     if file_hash(archive) != expected:
@@ -87,10 +88,12 @@ def prepare(target: str, directory: Path, cache: Path) -> dict:
         text=True,
         timeout=10,
     ).stdout.strip()
-    if version != "minidsp 0.1.9":
+    if version != f"minidsp {MINIDSP_VERSION}":
         raise ValueError(f"unexpected native helper version: {version}")
-    licence_url = "https://raw.githubusercontent.com/mrene/minidsp-rs/v0.1.9/LICENSE"
-    licence = cache / "minidsp-0.1.9-LICENSE"
+    licence_url = (
+        f"https://raw.githubusercontent.com/mrene/minidsp-rs/v{MINIDSP_VERSION}/LICENSE"
+    )
+    licence = cache / f"minidsp-{MINIDSP_VERSION}-LICENSE"
     if not licence.exists():
         atomic_bytes(licence, download(licence_url))
     if b"Apache License" not in licence.read_bytes():

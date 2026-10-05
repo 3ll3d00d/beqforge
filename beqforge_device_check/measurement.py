@@ -1,11 +1,11 @@
 """Exact float32 stimuli and offline recovery; importing this module opens no audio."""
 
 import hashlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 from scipy.fft import next_fast_len
-from scipy.signal import correlate, welch
+from scipy.signal import welch
 
 from beqforge_device_check.profiles import finite
 
@@ -24,12 +24,16 @@ class SweepSettings:
     rate: int = 96000
     low_hz: float = 2
     high_hz: float = 200
-    duration_s: float = 30
-    preroll_s: float = 2
-    tail_s: float = 15
+    duration_s: float = 5
+    # Must exceed the transport delay; the silence before the sweep is the noise estimate.
+    preroll_s: float = 0.5
+    # The minimum tail. Each cascade's tail is extended to its own settling time
+    # (decay to -120 dB) times `settling_multiple`; see `for_settling`.
+    tail_s: float = 1
     level_dbfs: float = -30
     fade_s: float = 0.05
     maximum_bytes: int = 512 * 1024**2
+    settling_multiple: float = 1
 
     def __post_init__(self) -> None:
         for name in (
@@ -40,16 +44,33 @@ class SweepSettings:
             "tail_s",
             "level_dbfs",
             "fade_s",
+            "settling_multiple",
         ):
             finite(getattr(self, name), name)
         if not 0 < self.low_hz < self.high_hz < self.rate / 2:
             raise ValueError("invalid sweep frequency range")
-        if min(self.duration_s, self.preroll_s, self.tail_s, self.fade_s) <= 0:
-            raise ValueError("sweep, pre-roll, tail and fades must be positive")
+        if (
+            min(
+                self.duration_s,
+                self.preroll_s,
+                self.tail_s,
+                self.fade_s,
+                self.settling_multiple,
+            )
+            <= 0
+        ):
+            raise ValueError(
+                "sweep, pre-roll, tail, fades and settling multiple must be positive"
+            )
         if self.fade_s * 2 >= self.duration_s or self.level_dbfs > -3:
             raise ValueError("fade exceeds sweep duration or sweep level is too high")
         if self.sample_count * 4 > self.maximum_bytes:
             raise ValueError("stimulus exceeds configured buffer bound")
+
+    def for_settling(self, settling_s: float) -> "SweepSettings":
+        """The settings one cascade is swept with: its tail covers its own decay."""
+        tail = max(self.tail_s, settling_s * self.settling_multiple)
+        return self if tail == self.tail_s else replace(self, tail_s=tail)
 
     @property
     def sample_count(self) -> int:
@@ -94,6 +115,30 @@ def sweep(settings: SweepSettings) -> tuple[np.ndarray, dict]:
     }
 
 
+def carried(
+    source: np.ndarray, frequencies: np.ndarray, mask: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Map per-bin evidence onto a finer grid without inventing any.
+
+    Returns (lower, upper, exact, valid): a target bin between two source bins is valid
+    only if both are, and per-bin budgets take the worse neighbour (see `worst`).
+    """
+    source = np.asarray(source, dtype=float)
+    mask = np.asarray(mask, dtype=bool)
+    upper = np.minimum(np.searchsorted(source, frequencies), len(source) - 1)
+    lower = np.maximum(upper - 1, 0)
+    exact = source[upper] == frequencies
+    valid = (frequencies >= source[0]) & (frequencies <= source[-1])
+    valid &= np.where(exact, mask[upper], mask[lower] & mask[upper])
+    return lower, upper, exact, valid
+
+
+def worst(values, lower, upper, exact, *, larger: bool = True) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    pick = np.maximum if larger else np.minimum
+    return np.where(exact, values[upper], pick(values[lower], values[upper]))
+
+
 def capture_quality(
     samples: np.ndarray, expected_count: int, *, statuses: list[str] | None = None
 ) -> list[str]:
@@ -113,32 +158,49 @@ def capture_quality(
 
 
 def reference_delay(
-    stimulus: np.ndarray, reference: np.ndarray, rate: int
+    stimulus: np.ndarray, reference: np.ndarray, metadata: dict
 ) -> tuple[int, float]:
-    """Two independently captured reference segments expose relative clock mismatch.
+    """Transport delay and relative clock drift from a reference that bypasses the DUT.
 
-    Only use a reference that shares timing but bypasses the filter under test. Correlating
-    DUT audio would confuse its phase with delay. Never silently resample either capture.
+    The whole sweep is deconvolved, so the delay comes from a 2-200 Hz impulse response
+    rather than a short narrowband segment (whose correlation ripples are near-equal and
+    pick the wrong cycle). Drift is then read from phase: a log sweep plays frequency f
+    at time t(f), so a clock mismatch eps makes group delay tau0 + eps * t(f). Only use a
+    reference that bypasses the filter under test; never silently resample a capture.
     """
     if len(stimulus) != len(reference):
         raise ValueError("reference and stimulus lengths differ")
-    active = np.flatnonzero(stimulus)
-    if len(active) < rate:
+    settings = SweepSettings(**metadata["settings"])
+    rate, start, stop = settings.rate, metadata["sweep_start"], metadata["sweep_stop"]
+    if stop - start < rate:
         raise ValueError("insufficient timing-reference content")
-    width = min(rate * 2, (active[-1] - active[0]) // 3)
-    starts = [int(active[0]), int(active[-1]) - width]
-    delays = []
-    margin = rate // 2
-    for start in starts:
-        lo, hi = max(0, start - margin), min(len(reference), start + width + margin)
-        segment = stimulus[start : start + width]
-        observed = reference[lo:hi].astype(float)
-        correlation = correlate(observed, segment, mode="valid", method="fft")
-        energy = correlate(observed**2, np.ones(width), mode="valid", method="fft")
-        normalised = correlation / np.sqrt(np.maximum(energy, 1e-100))
-        delays.append(int(np.argmax(normalised) + lo - start))
-    ppm = (delays[1] - delays[0]) / (starts[1] - starts[0]) * 1e6
-    return delays[0], float(ppm)
+    size = next_fast_len(2 * len(stimulus))
+    frequencies = np.fft.rfftfreq(size, 1 / rate)
+    # Keep clear of the faded sweep ends, where the excitation is weakest.
+    band = (frequencies >= settings.low_hz * 1.2) & (
+        frequencies <= settings.high_hz / 1.2
+    )
+    transfer = np.zeros(len(frequencies), dtype=complex)
+    transfer[band] = (
+        np.fft.rfft(reference.astype(float), size)[band]
+        / np.fft.rfft(stimulus.astype(float), size)[band]
+    )
+    impulse = np.fft.irfft(transfer, size)[: len(stimulus)]
+    coarse = int(np.argmax(np.abs(impulse)))
+    f = frequencies[band]
+    phase = np.unwrap(np.angle(transfer[band] * np.exp(2j * np.pi * f * coarse / rate)))
+    played = start / rate + (stop - start) / rate * np.log(
+        f / settings.low_hz
+    ) / np.log(settings.high_hz / settings.low_hz)
+    # phase(f) = a - 2 pi tau0 f - 2 pi eps * integral of t(f) df
+    integral = np.concatenate(
+        [[0.0], np.cumsum(0.5 * (played[1:] + played[:-1]) * np.diff(f))]
+    )
+    basis = np.column_stack([np.ones_like(f), -2 * np.pi * f, -2 * np.pi * integral])
+    (_, tau0, eps), *_ = np.linalg.lstsq(basis, phase, rcond=None)
+    # Align at the start of the sweep, where the delay applies to the captured samples.
+    delay = coarse + (tau0 + eps * start / rate) * rate
+    return round(delay), float(eps * 1e6)
 
 
 def recover(
@@ -152,6 +214,7 @@ def recover(
     statuses: list[str] | None = None,
     minimum_snr_db: float = 40,
     maximum_bias_db: float = 0.01,
+    size: int | None = None,
 ) -> dict:
     """Regularised inversion at native FFT frequencies; preserve all filter decay.
 
@@ -165,8 +228,15 @@ def recover(
         raise ValueError("emitted stimulus hash mismatch")
     failures = capture_quality(captured, len(stimulus), statuses=statuses)
     drift = None
+    if reference is not None and np.max(np.abs(reference)) < 0.01 * metadata["peak"]:
+        # A silent reference gives a meaningless delay/drift estimate, not a small one.
+        failures.append(
+            "timing reference channel carries no stimulus (40 dB below the sweep);"
+            " check its routing and the reference playback channel"
+        )
+        reference = None
     if reference is not None:
-        delay_samples, drift = reference_delay(stimulus, reference, settings.rate)
+        delay_samples, drift = reference_delay(stimulus, reference, metadata)
         if abs(drift) > maximum_drift_ppm:
             failures.append(
                 f"clock drift {drift:.3f} ppm exceeds {maximum_drift_ppm:g} ppm"
@@ -180,7 +250,12 @@ def recover(
         }
     recorded = np.asarray(captured, dtype=float)
     aligned = np.pad(recorded[delay_samples:], (0, delay_samples))
-    size = next_fast_len(2 * len(stimulus))
+    # A longer sweep's FFT length puts this on its finer native grid: exact, since both
+    # signals are finite and zero-padding them cannot wrap.
+    minimum = next_fast_len(2 * len(stimulus))
+    if size is not None and size < minimum:
+        raise ValueError("analysis length is shorter than this capture needs")
+    size = size or minimum
     excitation = pf.Signal(
         np.pad(stimulus.astype(float), (0, size - len(stimulus))), settings.rate
     )

@@ -2,7 +2,9 @@
 
 import copy
 import json
+import logging
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -13,6 +15,11 @@ import numpy as np
 from beqforge_device_check.coefficients import rounded, stable
 from beqforge_device_check.evidence import file_hash
 from beqforge_device_check.profiles import DeviceProfile
+
+logger = logging.getLogger(__name__)
+
+# The external minidsp-rs CLI the adapter is written and reviewed against.
+MINIDSP_VERSION = "0.1.12"
 
 
 class Helper:
@@ -45,6 +52,77 @@ class Helper:
         return result.stdout
 
 
+SETTING_COMMANDS = ("input", "output", "source", "gain", "config", "dirac", "mute")
+
+
+def setting_commands(commands, what: str) -> list[list[str]]:
+    """Explicit miniDSP setting argument arrays; anything else is refused."""
+    if not isinstance(commands, list) or not all(
+        isinstance(command, list)
+        and command
+        and all(isinstance(word, str) for word in command)
+        and command[0] in SETTING_COMMANDS
+        for command in commands
+    ):
+        raise ValueError(f"{what} must be explicit miniDSP setting argument arrays")
+    return commands
+
+
+def usb_loopback_route(
+    profile: DeviceProfile,
+    *,
+    dut_input: int = 0,
+    dut_output: int = 0,
+    reference_input: int | None = 1,
+    reference_output: int | None = 1,
+) -> list[list[str]]:
+    """Every setting on a USB-loopback bench's signal path, stated explicitly.
+
+    The DUT input feeds only its output; the reference input, when there is one,
+    feeds only its own and never passes the DUT input's PEQ bank. Everything else
+    on the used outputs is neutral or bypassed (bypassed rather than cleared, so
+    nothing stored there is lost), and unused outputs are muted. The DUT PEQ bank
+    starts cleared and bypassed; each case loads it.
+    """
+    inputs = next(r.channels for r in profile.routes if r.name == "input")
+    outputs = next(r.channels for r in profile.routes if r.name == "output")
+    used = {dut_input: dut_output}
+    if reference_input is not None:
+        if reference_input == dut_input or reference_output in (None, dut_output):
+            raise ValueError("the reference needs its own input and output")
+        used[reference_input] = reference_output
+    if not all(0 <= i < inputs for i in used) or not all(
+        0 <= o < outputs for o in used.values()
+    ):
+        raise ValueError("route outside the profile's inputs/outputs")
+    # A unit left on another source would play nothing from USB: a silent capture.
+    commands = [["source", "usb"]]
+    for i in sorted(used):
+        commands += [["input", str(i), "gain", "0"], ["input", str(i), "mute", "off"]]
+        for o in range(outputs):
+            enabled = "true" if o == used[i] else "false"
+            commands.append(["input", str(i), "routing", str(o), "enable", enabled])
+        commands.append(["input", str(i), "routing", str(used[i]), "gain", "0"])
+    commands.append(["input", str(dut_input), "peq", "all", "clear"])
+    for i in sorted(used):
+        commands.append(["input", str(i), "peq", "all", "bypass", "on"])
+    for o in range(outputs):
+        if o not in used.values():
+            commands.append(["output", str(o), "mute", "on"])
+            continue
+        commands += [
+            ["output", str(o), "gain", "0"],
+            ["output", str(o), "mute", "off"],
+            ["output", str(o), "delay", "0"],
+            ["output", str(o), "invert", "off"],
+            ["output", str(o), "peq", "all", "bypass", "on"],
+            ["output", str(o), "fir", "bypass", "on"],
+            ["output", str(o), "crossover", "all", "all", "bypass", "on"],
+            ["output", str(o), "compressor", "--bypass", "on"],
+        ]
+    return commands
+
+
 class Minidsp:
     live = True
 
@@ -54,27 +132,20 @@ class Minidsp:
         profile: DeviceProfile,
         *,
         serial: str,
-        restore_commands: list[list[str]],
+        restore_commands: list[list[str]] | None = None,
+        route_commands: list[list[str]] | None = None,
     ):
+        # Restoration defaults to re-applying an opted-in bench route.
+        restore_commands = restore_commands or route_commands
         if profile.engine != "minidsp" or not serial or not restore_commands:
             raise ValueError(
                 "miniDSP needs an explicit serial and complete restoration commands"
             )
         self.helper, self.profile, self.serial = helper, profile, serial
-        self.restore_commands = restore_commands
-        for command in restore_commands:
-            if not command or command[0] not in (
-                "input",
-                "output",
-                "source",
-                "gain",
-                "config",
-                "dirac",
-                "mute",
-            ):
-                raise ValueError(
-                    "restore commands must be explicit miniDSP setting argument arrays"
-                )
+        self.restore_commands = setting_commands(restore_commands, "restore commands")
+        self.route_commands = (
+            setting_commands(route_commands, "route commands") if route_commands else []
+        )
         probe = helper.command("probe")
         matches = re.findall(
             r"(?m)^\s*(\d+):.*?serial\s+" + re.escape(serial) + r"(?:\s|$)", probe
@@ -84,7 +155,7 @@ class Minidsp:
         self.index = matches[0]
         self.probe = probe
 
-    def command(self, *arguments: str) -> str:
+    def _check_selected(self) -> None:
         probe = self.helper.command("probe")
         matches = re.findall(
             r"(?m)^\s*(\d+):.*?serial\s+" + re.escape(self.serial) + r"(?:\s|$)", probe
@@ -93,7 +164,25 @@ class Minidsp:
             raise ValueError(
                 "selected miniDSP changed/disconnected; stop rather than use discovery order"
             )
+
+    def command(self, *arguments: str) -> str:
+        self._check_selected()
         return self.helper.command("-d", self.index, *arguments)
+
+    def batch(self, commands: list[list[str]]) -> str:
+        """Send several commands through one helper process (`-f`), not one each.
+
+        The helper runs the file's lines in order against the `-d` device and stops
+        at the first failure, so a failed batch is partially applied, as before.
+        """
+        self._check_selected()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "commands.txt"
+            path.write_text(
+                "".join(shlex.join(command) + "\n" for command in commands),
+                encoding="utf-8",
+            )
+            return self.helper.command("-d", self.index, "-f", str(path))
 
     def identify(self) -> dict:
         return {
@@ -107,9 +196,25 @@ class Minidsp:
         }
 
     def snapshot(self) -> dict:
+        """Start of every live stage: record status, then apply any opted-in route."""
+        status = self.command("-o", "json", "status")
+        try:
+            master = json.loads(status).get("master", status)
+        except ValueError:
+            master = status
+        logger.info(
+            "miniDSP serial %s (%s), master status: %s",
+            self.serial,
+            self.helper.version,
+            master,
+        )
+        if self.route_commands:
+            logger.info("Applying the %d-command bench route", len(self.route_commands))
+            self.batch(self.route_commands)
         return {
-            "master_status": self.command("-o", "json", "status"),
+            "master_status": status,
             "restore_commands": self.restore_commands,
+            "route_commands_applied": self.route_commands,
             "scope": "master status plus user-supplied complete configuration; no coefficient readback",
         }
 
@@ -123,7 +228,7 @@ class Minidsp:
         ).reshape(-1, 6)
         if len(exact) > route.sections:
             raise ValueError("cascade exceeds selected route capacity")
-        # minidsp-rs v0.1.9 parses `set` as Vec<f32>, and its m2x4hd dialect
+        # minidsp-rs parses `set` as Vec<f32>, and its m2x4hd dialect
         # writes Float32LE. Decimal precision cannot bypass that conversion.
         # This establishes transport precision, not stored bits or arithmetic.
         sent = rounded(exact, "float32")
@@ -131,27 +236,25 @@ class Minidsp:
         if not stable(sent) or not stable(predicted):
             raise ValueError("unstable sent/stored-model cascade; refusing load")
         prefix = (case["route"], str(case["channel"]), "peq")
-        self.command(*prefix, "all", "clear")
         commands = [[*prefix, "all", "clear"]]
         for index, (b0, b1, b2, _, a1, a2) in enumerate(sent):
-            command = [
-                *prefix,
-                str(index),
-                "set",
-                "--",
-                *(f"{value:.17g}" for value in (b0, b1, b2, -a1, -a2)),
-            ]
-            self.command(*command)
-            commands.append(command)
-            command = [*prefix, str(index), "bypass", "off"]
-            self.command(*command)
-            commands.append(command)
+            commands.append(
+                [
+                    *prefix,
+                    str(index),
+                    "set",
+                    "--",
+                    *(f"{value:.17g}" for value in (b0, b1, b2, -a1, -a2)),
+                ]
+            )
+            commands.append([*prefix, str(index), "bypass", "off"])
+        self.batch(commands)
         return {
             "commands": commands,
             "requested_sos": exact.tolist(),
             "sent_sos": sent.tolist(),
             "transport_format": "float32",
-            "transport_precision_source": "minidsp-rs v0.1.9: minidsp/src/bin/minidsp/main.rs PeqCommand::Set Vec<f32>; protocol/src/device/m2x4hd.rs Float32LE",
+            "transport_precision_source": f"minidsp-rs v{MINIDSP_VERSION}: minidsp/src/bin/minidsp/main.rs FilterCommand::Set Vec<f32>; protocol/src/device/m2x4hd.rs Float32LE",
             "candidate_stored_sos": predicted.tolist(),
             "storage_verified": False,
             "model": self.profile.coefficient_format,
@@ -159,11 +262,17 @@ class Minidsp:
         }
 
     def restore(self, snapshot: dict) -> bool:
-        self.mute(True)
-        for command in snapshot["restore_commands"]:
-            if command[0] == "mute":
-                continue  # without readback, restoration cannot justify unmuting
-            self.command(*command)
+        logger.info(
+            "Muting, then sending %d restoration command(s); master stays muted",
+            len(self.restore_commands),
+        )
+        # Muted first; without readback, restoration cannot justify unmuting.
+        self.batch(
+            [
+                ["mute", "on"],
+                *(c for c in snapshot["restore_commands"] if c[0] != "mute"),
+            ]
+        )
         return False
 
     def bypass(self, case: dict) -> list[str]:
