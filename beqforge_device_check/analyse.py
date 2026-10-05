@@ -15,6 +15,7 @@ from beqforge_device_check.evidence import (
 )
 from beqforge_device_check.manifest import digest, validate
 from beqforge_device_check.measurement import carried, worst
+from beqforge_device_check.report import page
 from beqforge_device_check.transactions import recompute
 
 
@@ -240,6 +241,46 @@ def analyse(directory: Path, output: Path) -> dict:
             if assessment["unresolved_bins"]
             else "within-requirement"
         )
+        requirement = qualification["accuracy_db"]
+        # Device: does the hardware play what its coefficients predict?
+        device_error = np.abs(stored_delta[mask])
+        budget = uncertainty[mask]
+        item["device"] = {
+            "outcome": "under-range"
+            if not len(device_error)
+            else "fail"
+            if np.any(device_error - budget > requirement)
+            else "unresolved"
+            if np.any(device_error + budget > requirement)
+            else "pass",
+            "requirement_db": requirement,
+        }
+        if len(device_error):
+            peak = int(np.argmax(device_error))
+            item["device"]["worst_db"] = float(device_error[peak])
+            item["device"]["worst_hz"] = float(frequencies[mask][peak])
+        # Representation: can the coefficient format hold this filter? Predicted only.
+        represent = summarise(
+            frequencies, predicted, np.ones(len(frequencies), bool), requirement
+        )
+        item["representation"] = {
+            "model": model,
+            "worst_db": represent["worst_db"],
+            "worst_hz": represent["worst_hz"],
+            "outcome": "ok" if represent["worst_db"] <= requirement else "degraded",
+        }
+        item["curves_db"] = {
+            "intended": (20 * np.log10(np.maximum(np.abs(exact), 1e-300))).tolist(),
+            "predicted": (20 * np.log10(np.maximum(np.abs(stored_h), 1e-300))).tolist(),
+            "measured": [
+                float(v) if m else None
+                for v, m in zip(
+                    20 * np.log10(np.maximum(np.abs(measured), 1e-300)),
+                    mask,
+                    strict=True,
+                )
+            ],
+        }
         item["characteristics"] = {
             "sections": len(case["publication_filters"]),
             "lowest_corner_hz": min(
@@ -283,11 +324,12 @@ def analyse(directory: Path, output: Path) -> dict:
         rows.append(
             f"<tr><td>{html.escape(item['name'])}<details><summary>Published filters</summary><pre>{html.escape(json.dumps(item['filters'], indent=2))}</pre>Offset {item['gain_db']} dB: {item['gain_application']}</details></td><td>{item.get('accuracy_assessment', {}).get('outcome', item['status'])}</td><td>{stats.get('worst_db', '—')}</td><td>{stats.get('worst_hz', '—')}</td><td>{stats.get('coverage', '—')}</td></tr>"
         )
-    body = f"<!doctype html><meta charset='utf-8'><title>F2 device report</title><h1>F2 device response</h1><p>{html.escape(run['scope'])}. Qualified: {qualification['qualified']}. Complete: {report['complete']}. Restored: {run['restored']}.</p><p>{html.escape(report['limitations'])}</p><p>Positive delta means more output than the published cascade predicts. Invalid bins are missing, never zero.</p><table><tr><th>Case</th><th>Outcome</th><th>Worst absolute delta (dB)</th><th>Frequency (Hz)</th><th>Valid fraction</th></tr>{''.join(rows)}</table><p><a href='report.json'>Machine-readable signed curves and evidence IDs</a></p>"
-    body += "".join(
+    details = f"<p>{html.escape(run['scope'])}. Qualified: {qualification['qualified']}. Complete: {report['complete']}. Restoration verified: {run['restored']}.</p><p>{html.escape(report['limitations'])}</p><p>Against the exact (unrounded) filter, per load. Positive delta means more output than the published cascade predicts. Invalid bins are missing, never zero.</p><table><tr><th>Case</th><th>Outcome</th><th>Worst absolute delta (dB)</th><th>Frequency (Hz)</th><th>Valid fraction</th></tr>{''.join(rows)}</table>"
+    details += "".join(
         f"<p><img alt='Signed device response errors' src='{name}'></p>"
         for name in charts
     )
+    body = page(report, output, details)
     if "catalogue" in report:
         population = report["catalogue"]
         body += f"<h2>Catalogue population</h2><p>Complete inventory: {population['complete']}. Outcomes: {html.escape(json.dumps(population['counts']))}.</p>"

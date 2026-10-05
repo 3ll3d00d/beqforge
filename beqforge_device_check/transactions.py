@@ -558,13 +558,13 @@ def run(
         planned = [
             cases[c] for c in manifest["order"] if cases[c]["status"] == "planned"
         ]
-        total = len(manifest["levels_dbfs"]) * (1 + 2 * len(planned))
-        seconds = len(manifest["levels_dbfs"]) * (
-            case_seconds(settings, identity)
-            + sum(
-                case_seconds(settings, case) + case_seconds(settings, identity)
-                for case in planned
-            )
+        every = max(1, int(manifest.get("identity_bracket_every", 1)))
+        levels = manifest["levels_dbfs"]
+        brackets = -(-len(planned) // every)
+        total = len(levels) * (1 + len(planned) + brackets)
+        seconds = len(levels) * (
+            (1 + brackets) * case_seconds(settings, identity)
+            + sum(case_seconds(settings, case) for case in planned)
         )
         swept = [0]
 
@@ -572,27 +572,85 @@ def run(
             swept[0] += 1
             return f"[{swept[0]}/{total}]"
 
+        distinct = len({case["id"] for case in planned})
         logger.info(
-            "run: %d planned case(s) bracketed by identities at %s dBFS = up to %s%s",
+            "run: %d filter(s), %d load(s), an identity every %d load(s), at %s dBFS"
+            " = up to %s%s",
+            distinct,
             len(planned),
-            ", ".join(f"{level:g}" for level in manifest["levels_dbfs"]),
+            every,
+            ", ".join(f"{level:g}" for level in levels),
             eta(total, seconds),
             f"; resuming with {len(summary['completed'])} already done"
             if summary["completed"]
             else "",
         )
-        try:
-            for level in manifest["levels_dbfs"]:
-                # Resume always starts with a newly loaded identity, never trusting stale state.
-                before = measure(
-                    directory,
-                    identity,
-                    replace(settings, level_dbfs=level),
-                    engine,
-                    capture,
-                    reference_channel=config.get("reference_channel"),
-                    progress=counter(),
+
+        def identity_sweep(level: float) -> dict:
+            return measure(
+                directory,
+                identity,
+                replace(settings, level_dbfs=level),
+                engine,
+                capture,
+                reference_channel=config.get("reference_channel"),
+                progress=counter(),
+            )
+
+        def close(before: dict, pending: list, level: float) -> dict:
+            """Bracket the pending loads with one identity; complete them only then."""
+            after = identity_sweep(level)
+            with (
+                np.load(
+                    directory / "analysis" / f"{before['attempt']}.npz",
+                    allow_pickle=False,
+                ) as left,
+                np.load(
+                    directory / "analysis" / f"{after['attempt']}.npz",
+                    allow_pickle=False,
+                ) as right,
+            ):
+                mask = left["mask"] & right["mask"]
+                drift = 20 * np.log10(
+                    np.maximum(np.abs(right["response"] / left["response"]), 1e-300)
                 )
+                worst = np.max(np.abs(drift[mask])) if np.any(mask) else None
+            if worst is None or worst > qualification["accuracy_db"] / 3:
+                logger.error(
+                    "@ %g dBFS: identity bracket drift %s exceeds %.3g dB",
+                    level,
+                    "unmeasurable" if worst is None else f"{worst:.4f} dB",
+                    qualification["accuracy_db"] / 3,
+                )
+                raise ValueError(
+                    "identity bracket drift exceeds frozen uncertainty budget"
+                )
+            for key, case, result in pending:
+                summary["completed"].append(
+                    {
+                        "key": key,
+                        "case": case["id"],
+                        "status": "measured",
+                        "result": result,
+                        "before": before["attempt"],
+                        "after": after["attempt"],
+                    }
+                )
+            atomic_json(prior, summary)
+            logger.info(
+                "@ %g dBFS: %d load(s) bracketed; identity drift %.4f dB",
+                level,
+                len(pending),
+                worst,
+            )
+            pending.clear()
+            return after
+
+        try:
+            for level in levels:
+                # Resume always starts with a newly loaded identity, never trusting stale state.
+                before = identity_sweep(level)
+                pending = []
                 for ordinal, case_id in enumerate(manifest["order"]):
                     key = digest(
                         [manifest["hash"], bench_hash(config), level, ordinal, case_id]
@@ -627,62 +685,11 @@ def run(
                         reference_channel=config.get("reference_channel"),
                         progress=counter(),
                     )
-                    after = measure(
-                        directory,
-                        identity,
-                        replace(settings, level_dbfs=level),
-                        engine,
-                        capture,
-                        reference_channel=config.get("reference_channel"),
-                        progress=counter(),
-                    )
-                    with (
-                        np.load(
-                            directory / "analysis" / f"{before['attempt']}.npz",
-                            allow_pickle=False,
-                        ) as left,
-                        np.load(
-                            directory / "analysis" / f"{after['attempt']}.npz",
-                            allow_pickle=False,
-                        ) as right,
-                    ):
-                        mask = left["mask"] & right["mask"]
-                        drift = 20 * np.log10(
-                            np.maximum(
-                                np.abs(right["response"] / left["response"]), 1e-300
-                            )
-                        )
-                        worst = np.max(np.abs(drift[mask])) if np.any(mask) else None
-                        if worst is None or worst > qualification["accuracy_db"] / 3:
-                            logger.error(
-                                "%s @ %g dBFS: identity bracket drift %s exceeds %.3g dB",
-                                case["name"],
-                                level,
-                                "unmeasurable" if worst is None else f"{worst:.4f} dB",
-                                qualification["accuracy_db"] / 3,
-                            )
-                            raise ValueError(
-                                "identity bracket drift exceeds frozen uncertainty budget"
-                            )
-                    # Do not complete a case until both reference brackets are saved.
-                    summary["completed"].append(
-                        {
-                            "key": key,
-                            "case": case_id,
-                            "status": "measured",
-                            "result": result,
-                            "before": before["attempt"],
-                            "after": after["attempt"],
-                        }
-                    )
-                    atomic_json(prior, summary)
-                    logger.info(
-                        "%s @ %g dBFS: measured; identity bracket drift %.4f dB",
-                        case["name"],
-                        level,
-                        worst,
-                    )
-                    before = after
+                    pending.append((key, case, result))
+                    if len(pending) >= every:
+                        before = close(before, pending, level)
+                if pending:
+                    before = close(before, pending, level)
             summary["complete"] = True
             logger.info("run complete: %d case result(s)", len(summary["completed"]))
         except BaseException as error:

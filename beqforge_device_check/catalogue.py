@@ -40,7 +40,19 @@ def import_snapshot(
             "expected ezbeq database.json array; pages/shards must be resolved explicitly"
         )
     route = route or profile.routes[0].name
-    manifest = generate(profile, rate=rate, route=route, channel=channel)
+    # The catalogue keeps its population design: every cascade reloaded, both levels,
+    # every cascade bracketed by identities.
+    manifest = generate(
+        profile,
+        rate=rate,
+        route=route,
+        channel=channel,
+        repeats=3,
+        levels=(-30.0, -50.0),
+        bracket_every=1,
+    )
+    manifest.pop("control", None)
+    manifest.pop("control_repeats", None)
     manifest["suite"] = "catalogue"
     cases = [manifest["cases"][0]]
     seen = {}

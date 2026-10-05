@@ -60,3 +60,41 @@ def test_rounding_can_make_low_frequency_high_q_unstable():
     sos = coefficients([BiquadSpec("peaking_eq", 0.01, 12, 8)], 96000)
     assert stable(sos)
     assert not stable(rounded(sos, "float32"))
+
+
+def test_characterisation_suites_load_each_filter_once_with_one_reloaded_control():
+    profile = PROFILES["minidsp-2x4hd"]
+    grid = generate(profile, suite="grid")
+    validate(grid)
+    filters = grid["cases"][1:]
+    # 10-20 Hz at Q 0.707, plus each type's other realistic Qs at 10 Hz.
+    assert len(filters) == 2 * 11 + 5 + 4
+    assert min(c["publication_filters"][0]["freq_hz"] for c in filters) == 10
+    shelves = [c for c in filters if c["publication_filters"][0]["type"] == "low_shelf"]
+    assert max(c["publication_filters"][0]["q"] for c in shelves) <= 1.0
+    assert max(c["publication_filters"][0]["q"] for c in filters) <= 2.0
+    loads = {case_id: grid["order"].count(case_id) for case_id in grid["order"]}
+    assert loads[grid["control"]] == 3
+    assert sorted(set(loads.values())) == [1, 3]
+    assert len(grid["levels_dbfs"]) == 1
+    assert grid["identity_bracket_every"] == 4
+    both = generate(profile, suite="pilot", levels=(-30.0, -50.0))
+    assert both["levels_dbfs"] == [-30.0, -50.0]
+
+
+def test_boundary_suite_spans_the_predicted_coefficient_error_targets():
+    from beqforge_device_check.manifest import BOUNDARY_TARGETS_DB, predicted_error_db
+
+    manifest = generate(PROFILES["minidsp-2x4hd"], suite="boundary")
+    errors = sorted(
+        predicted_error_db([BiquadSpec(**c["publication_filters"][0])], 96000)
+        for c in manifest["cases"][1:]
+    )
+    # Realistic filters only, chosen either side of the requirement, ~0.01 to ~10 dB.
+    specs = [c["publication_filters"][0] for c in manifest["cases"][1:]]
+    assert all(10 <= s["freq_hz"] <= 60 for s in specs)
+    assert all(s["q"] <= (1.0 if s["type"] == "low_shelf" else 2.0) for s in specs)
+    # Realistic filters reach a few dB at most; the targets they can reach are hit.
+    assert errors[0] < 0.02 and errors[-1] > 2
+    for target in (t for t in BOUNDARY_TARGETS_DB if t <= 1):
+        assert min(abs(np.log(e / target)) for e in errors) < np.log(2)

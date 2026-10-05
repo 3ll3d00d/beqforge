@@ -19,6 +19,7 @@ from beqforge_device_check.analyse import analyse
 from beqforge_device_check.manifest import digest, validate
 from beqforge_device_check.measurement import SweepSettings
 from beqforge_device_check.qualification import BypassReference, complete, convergence
+from beqforge_device_check.report import MARKS, describe, grouped
 from beqforge_device_check.transactions import bench_hash, qualify, run
 
 logger = logging.getLogger(__name__)
@@ -205,40 +206,32 @@ def verify(
     logger.info("Qualification assembled in %s", qualification)
     summary = run(config, manifest, qualification, out / "run", engine, capture)
     report = analyse(out / "run", out / "report")
-    # One line per case and level: its reloads are dependent repeats, not more cases.
-    grouped: dict[tuple, dict] = {}
-    for item in report["results"]:
-        result = grouped.setdefault(
-            (item["name"], item.get("level_dbfs")),
-            {
-                "case": item["name"],
-                "level_dbfs": item.get("level_dbfs"),
-                "loads": 0,
-                "outcomes": {},
-                "worst_db": None,
-                "worst_hz": None,
-            },
-        )
-        outcome = item.get("accuracy_assessment", {}).get("outcome", item["status"])
-        result["loads"] += 1
-        result["outcomes"][outcome] = result["outcomes"].get(outcome, 0) + 1
-        worst = item.get("exact", {}).get("worst_db")
-        if worst is not None and (
-            result["worst_db"] is None or abs(worst) > abs(result["worst_db"])
-        ):
-            result["worst_db"] = worst
-            result["worst_hz"] = item["exact"].get("worst_hz")
-    results = list(grouped.values())
-    for result in results:
+    # One line per filter and level, with the report's two separate verdicts.
+    results = []
+    for row in grouped(report["results"]):
+        rep = row["representation"]
+        result = {
+            "filter": describe(row["filters"]),
+            "level_dbfs": row["level_dbfs"],
+            "loads": len(row["loads"]),
+            "device": MARKS[row["device"]],
+            "device_worst_db": row["device_worst_db"],
+            "coefficients": "OK" if rep["outcome"] == "ok" else "DEGRADED",
+            "coefficients_worst_db": rep["worst_db"],
+            "coefficients_worst_hz": rep["worst_hz"],
+        }
+        results.append(result)
         logger.info(
-            "%s @ %s dBFS, %d load(s): %s; worst %s",
-            result["case"],
-            "n/a" if result["level_dbfs"] is None else f"{result['level_dbfs']:g}",
-            result["loads"],
-            ", ".join(f"{n} {k}" for k, n in result["outcomes"].items()),
-            "n/a"
-            if result["worst_db"] is None
-            else f"{result['worst_db']:+.4f} dB at {result['worst_hz']:.2f} Hz",
+            "%s @ %.1f dBFS: device %s%s; coefficients %s (%.3f dB at %.1f Hz)",
+            result["filter"],
+            result["level_dbfs"],
+            result["device"],
+            ""
+            if result["device_worst_db"] is None
+            else f" (worst {result['device_worst_db']:.4f} dB)",
+            result["coefficients"],
+            rep["worst_db"],
+            rep["worst_hz"],
         )
     logger.info("Report: %s", out / "report" / "report.html")
     return {

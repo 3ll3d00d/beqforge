@@ -42,7 +42,13 @@ def test_offline_setup_and_plan_do_not_require_audio_or_device(tmp_path, capsys)
     assert main(["plan", "--config", str(config), "--out", str(manifest)]) == 0
     value = json.loads(manifest.read_text())
     assert len(value["cases"]) == 3
-    assert value["levels_dbfs"] == [-30, -50]
+    # One level unless asked; one load per filter plus a reloaded control.
+    assert value["levels_dbfs"] == [-30]
+    assert len(value["order"]) == 1 + 3
+    both = tmp_path / "both.json"
+    arguments = ["plan", "--config", str(config), "--out", str(both)]
+    assert main([*arguments, "--levels", "-30", "-50"]) == 0
+    assert json.loads(both.read_text())["levels_dbfs"] == [-30, -50]
     assert not json.loads(config.read_text())["electrical_bench_acknowledged"]
     capsys.readouterr()
 

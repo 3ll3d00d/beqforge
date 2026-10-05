@@ -68,6 +68,14 @@ def provenance() -> dict:
     return result
 
 
+SUITES = ("pilot", "grid", "boundary", "matrix")
+SUITE_HELP = (
+    "pilot: two filters; grid: 10-20 Hz at Q 0.707, then shelf Q 0.5-1 and peak Q"
+    " 0.5-2 at 10 Hz; boundary: filters chosen where float32 coefficient error spans"
+    " 0.01-10 dB; matrix: the original wide matrix"
+)
+
+
 def validate_config(config: dict) -> DeviceProfile:
     if config.get("schema_version") != 1:
         raise ValueError("unsupported bench schema")
@@ -523,7 +531,14 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--out", type=Path, required=True)
         if name == "plan":
             command.add_argument(
-                "--suite", choices=("pilot", "matrix"), default="pilot"
+                "--suite", choices=SUITES, default="pilot", help=SUITE_HELP
+            )
+            command.add_argument(
+                "--levels",
+                type=float,
+                nargs="+",
+                default=[-30.0],
+                help="nominal sweep levels in dBFS (default -30)",
             )
         elif name == "qualify":
             command.add_argument("--manifest", type=Path, required=True)
@@ -565,7 +580,14 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument(
         "--manifest", type=Path, help="frozen cases; default: generate --suite"
     )
-    command.add_argument("--suite", choices=("pilot", "matrix"), default="pilot")
+    command.add_argument("--suite", choices=SUITES, default="pilot", help=SUITE_HELP)
+    command.add_argument(
+        "--levels",
+        type=float,
+        nargs="+",
+        default=[-30.0],
+        help="nominal sweep levels in dBFS (default -30); ignored with --manifest",
+    )
     command.add_argument(
         "--accuracy-db",
         type=float,
@@ -699,6 +721,7 @@ def dispatch(args) -> dict | list:
                 route=config["route"],
                 channel=config["channel"],
                 suite=args.suite,
+                levels=tuple(args.levels),
             )
         validate(manifest)
         if DeviceProfile.from_dict(manifest["profile"]) != profile:
@@ -731,6 +754,7 @@ def dispatch(args) -> dict | list:
             route=config["route"],
             channel=config["channel"],
             suite=args.suite,
+            levels=tuple(args.levels),
         )
         manifest["provenance"] = provenance()
         manifest["hash"] = digest({k: v for k, v in manifest.items() if k != "hash"})

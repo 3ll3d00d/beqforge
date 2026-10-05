@@ -19,7 +19,7 @@ def manifest_of(full: dict, names: list[str]) -> dict:
 
 def test_verify_measures_only_what_no_stored_stage_proves(tmp_path):
     pytest.importorskip("pyfar")
-    full = generate(PROFILES["simulation-float64"], rate=48000)
+    full = generate(PROFILES["simulation-float64"], rate=48000, levels=(-30.0, -50.0))
     config = {
         "rate": 48000,
         "common_clock": True,
@@ -50,7 +50,12 @@ def test_verify_measures_only_what_no_stored_stage_proves(tmp_path):
         "convergence (1 cascade(s))",
     ]
     assert first["complete"] and first["restored"]
-    assert [r["case"] for r in first["results"]] == ["benign", "benign"]
+    # One row per filter and level, each with a device and a coefficient verdict.
+    assert [(r["filter"], r["level_dbfs"]) for r in first["results"]] == [
+        ("peak 60 Hz, +3 dB, Q 0.707", -30.0),
+        ("peak 60 Hz, +3 dB, Q 0.707", -50.0),
+    ]
+    assert {r["device"] for r in first["results"]} == {"PASS"}
     qualification = json.loads(
         (tmp_path / "first" / "qualification" / "qualification.json").read_text()
     )
@@ -65,7 +70,10 @@ def test_verify_measures_only_what_no_stored_stage_proves(tmp_path):
     # One new cascade: identity and bypass carry over; only it is converged.
     wider = once(manifest_of(full, ["benign", "sensitive"]), "wider")
     assert wider["measured"] == ["convergence (1 cascade(s))"]
-    assert {r["case"] for r in wider["results"]} == {"benign", "sensitive"}
+    assert {r["filter"] for r in wider["results"]} == {
+        "peak 60 Hz, +3 dB, Q 0.707",
+        "peak 5 Hz, +12 dB, Q 6",
+    }
 
     # Results never overwrite.
     with pytest.raises(ValueError, match="already exists"):

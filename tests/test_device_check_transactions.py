@@ -15,7 +15,9 @@ from beqforge_device_check.transactions import Simulation, measure, qualify, run
 @pytest.fixture
 def bench(tmp_path):
     pytest.importorskip("pyfar")
-    manifest = generate(PROFILES["simulation-float64"], rate=48000)
+    manifest = generate(
+        PROFILES["simulation-float64"], rate=48000, levels=(-30.0, -50.0)
+    )
     manifest["order"] = [manifest["cases"][1]["id"]] * 3
     manifest["hash"] = digest({k: v for k, v in manifest.items() if k != "hash"})
     engine = Simulation(48000)
@@ -228,3 +230,26 @@ def test_each_cascade_is_swept_with_its_own_settling_tail(tmp_path):
     assert doubled.for_settling(slow["settling_seconds"]).tail_s == pytest.approx(
         2 * slow["settling_seconds"]
     )
+
+
+def test_identities_bracket_groups_of_loads(tmp_path):
+    pytest.importorskip("pyfar")
+    manifest = generate(PROFILES["simulation-float64"], rate=48000)
+    benign = next(c["id"] for c in manifest["cases"] if c["name"] == "benign")
+    manifest["order"] = [benign] * 5
+    manifest["identity_bracket_every"] = 2
+    manifest["hash"] = digest({k: v for k, v in manifest.items() if k != "hash"})
+    engine = Simulation(48000)
+    config = {"profile": manifest["profile"], "route": "filter", "rate": 48000}
+    settings = SweepSettings(rate=48000, duration_s=1, tail_s=0.5, preroll_s=0.25)
+    qualify(config, manifest, tmp_path / "q", engine, engine, settings, accuracy_db=0.1)
+    summary = run(config, manifest, tmp_path / "q", tmp_path / "run", engine, engine)
+    assert summary["complete"]
+    groups = {}
+    for item in summary["completed"]:
+        groups.setdefault((item["before"], item["after"]), []).append(item)
+    # 5 loads, an identity after every 2: groups of 2, 2 and 1, sharing brackets.
+    assert sorted(len(g) for g in groups.values()) == [1, 2, 2]
+    befores = [before for before, _ in groups]
+    afters = [after for _, after in groups]
+    assert len(set(befores) | set(afters)) == 4

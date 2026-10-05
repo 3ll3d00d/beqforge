@@ -19,8 +19,34 @@ beqforge-device-check verify --config bench.json                        # the pi
 beqforge-device-check verify --config bench.json --manifest cases.json  # a frozen manifest
 ```
 
-It qualifies, assembles, runs and analyses, printing progress and a per-case summary, and
-writes `results/<UTC time>/` (qualification, run, report) beside the bench. It measures only
+It qualifies, assembles, runs and analyses, printing progress and a per-filter summary, and
+writes `results/<UTC time>/` (qualification, run, report) beside the bench.
+
+`--suite` picks the filters (default `pilot`); each filter is loaded once, except one control
+loaded three times so reload variability is still measured, and an identity sweep is taken
+after every four loads to bound bench drift. `--levels` sets the nominal sweep levels (default
+−30 dBFS; `--levels -30 -50` adds a quieter pass), lowered together if a filter's gain needs
+the headroom.
+
+| Suite | Filters |
+| --- | --- |
+| `pilot` | a benign 60 Hz peak and a sensitive 5 Hz Q 6 peak |
+| `grid` | low shelf and peak, +12 dB: 10–20 Hz in 1 Hz steps at Q 0.707, then at 10 Hz shelf Q 0.5–1 and peak Q 0.5–2 |
+| `boundary` | realistic low shelves (Q 0.5–1) and peaks (Q 0.5–2) at 10–60 Hz, +12 dB, chosen offline so that their predicted float32 coefficient error steps from ≈0.01 dB through the 0.1 dB requirement to the largest these filters reach (≈2–4 dB) |
+| `matrix` | the original wide matrix and multi-section cascades |
+
+`results/<time>/report/report.html` answers two separate questions per filter and level:
+
+* **Device** — PASS, FAIL or UNRESOLVED: does the hardware play the coefficients it was sent
+  as they predict, within the requirement including the bench's own uncertainty?
+* **Coefficients** — OK or DEGRADED: can the device's coefficient format represent the filter
+  at all? Predicted from the coefficients, not measured, so it holds for any unit.
+
+A filter can pass the first and fail the second: on the 2x4 HD at 96 kHz a 5 Hz, Q 6, +12 dB
+peak plays exactly as its float32 coefficients predict, and those coefficients put an 18.8 dB
+error into the response. Each filter has a chart of the intended, predicted and measured
+responses with the device error beneath; frequency and Q sweeps also get charts of both errors
+against the swept parameter. It measures only
 what nothing stored already proves. Identity and device bypass never involve the cascades
 under test, so they are kept in `store/` beside the bench, keyed on the bench, engine, sweep
 settings, accuracy requirement, identity case and levels, and reused by any manifest that

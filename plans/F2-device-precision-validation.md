@@ -829,3 +829,30 @@ identity is now recovered again from its saved raw sweep at the cascade's FFT le
 padding the stored impulse response was tried first and is wrong: the 2-200 Hz deconvolution
 band edges make that response ring and wrap (identity magnitude 0.02-1.03 instead of 1).
 Qualification budgets are carried onto the finer grid conservatively (`measurement.carried`).
+
+### 12. First hardware result, characterisation suites and a readable report
+
+The first verified pilot on the 2x4 HD (USB loopback, 96 kHz, minidsp-rs 0.1.12) answers the
+two questions F2 asks separately. The device plays exactly what its float32 coefficients
+predict: worst 0.0074 dB over 2-200 Hz for both filters, at -30 and -50 dBFS, with three reloads
+agreeing to about 0.003 dB. The coefficients are another matter: a 5 Hz, Q 6, +12 dB peak in
+float32 at 96 kHz moves its resonance to 3.7 Hz and errs by 18.8 dB; a 60 Hz, Q 0.707, +3 dB peak
+errs by 0.033 dB. Storage-model agreement is not proof of the internal arithmetic, but within
+this band it leaves nothing for the arithmetic to explain.
+
+Since reloads agreed and level made no difference, the generated suites now load each filter
+once, with one control loaded three times; take an identity every four loads (the manifest's
+`identity_bracket_every`, previously recorded but not implemented); default to one level
+(-30 dBFS, `--levels` to add more). New suites: `grid` (shelf and peak, 10-20 Hz in 1 Hz steps at
+Q 0.707, then shelf Q 0.5-1 and peak Q 0.5-2 at 10 Hz) and `boundary` (realistic shelves
+and peaks, 10-60 Hz, whose predicted float32 error steps from 0.01 dB to the 2-4 dB these filters
+reach at most). Nothing below 10 Hz: shelves and peaks are not used lower in practice. Even so,
+ordinary filters err well past the requirement in float32, and erratically: +12 dB, Q 0.707 low
+shelves are predicted to err by 1.67 dB at 10 Hz, 3.18 dB at 11 Hz, 0.44 dB at 12 Hz and 0.15 dB at
+20 Hz, and a +6 dB, Q 0.707 shelf at 15 Hz by 0.40 dB. Catalogue manifests keep their previous
+population design (three loads, both levels, every load bracketed).
+
+The report leads with a summary and one row per filter and level: Device PASS/FAIL/UNRESOLVED
+(measured vs predicted, with uncertainty) and Coefficients OK/DEGRADED (predicted vs intended),
+each with a chart of intended, predicted and measured responses; swept parameters get error
+charts. The per-load detail against the exact filter remains, collapsed, and in report.json.
