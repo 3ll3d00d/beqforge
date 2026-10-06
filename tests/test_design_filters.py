@@ -591,7 +591,7 @@ def test_batching_targets_does_not_change_any_of_them() -> None:
         ]
 
 
-def test_settling_skips_the_tier_that_is_most_of_the_budget() -> None:
+def test_settling_skips_the_tier_that_is_most_of_the_budget(monkeypatch) -> None:
     """Escalation has to actually escalate, or it is enumeration with extra steps.
 
     It defers the *top* section count only. That count is 59% of the budget on its own, and
@@ -600,19 +600,34 @@ def test_settling_skips_the_tier_that_is_most_of_the_budget() -> None:
     """
     freqs, target = escalation_target()
 
+    # This checks task submission and stopping, not optimiser convergence (the
+    # enumeration-equivalence test above exercises real searches). A controlled
+    # residual makes the settling/unreachable cases deterministic and cheap.
+    sections_fitted = []
+
+    def fitted(task):
+        sections_fitted.append(task[3] + task[4])
+        return [BiquadSpec("low_shelf", 25.0, 6.0, 0.707)], 1.0, 0.0, 0
+
+    monkeypatch.setattr(F, "PARALLEL_FITS", False)
+    monkeypatch.setattr(F, "_fit_task", fitted)
+
     F.FIT_STATS.reset()
     F.fit_minimal_biquads(
         target, freqs, 96000.0, 4, 50.0, band_hz=(5.0, 200.0), seeds=(0,)
     )
     # 50 dB is met by one section, so the top tier is never fitted: 1 + 2 + 3 splits
     assert F.FIT_STATS.calls == 6
+    assert sections_fitted == [1, 2, 2, 3, 3, 3]
 
     F.FIT_STATS.reset()
+    sections_fitted.clear()
     F.fit_minimal_biquads(
         target, freqs, 96000.0, 4, 0.0, band_hz=(5.0, 200.0), seeds=(0,)
     )
     # unreachable, so the whole budget is spent: 1 + 2 + 3 + 4 splits at one seed
     assert F.FIT_STATS.calls == 10
+    assert sections_fitted == [1, 2, 2, 3, 3, 3, 4, 4, 4, 4]
 
 
 def test_the_tier_groups_defer_only_the_top_section_count() -> None:

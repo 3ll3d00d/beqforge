@@ -44,3 +44,25 @@ Ruff check and formatting checks passed for all changed Python files, and
 `git diff --check` passed. Repository-wide Ruff reports 176 existing issues
 outside those files. No designer production module or shared arithmetic changed,
 so the real-material designer regression probe was not required.
+
+## Hosted-runner follow-up
+
+[Actions run 37482206312](https://github.com/3ll3d00d/beqforge/actions/runs/37482206312)
+passed on all platforms. Pytest times were 7m54s on Linux, 9m23s on macOS and
+11m26s on Windows. Linux's apparent remaining slowdown was installation:
+the ffmpeg step took 8m40s, downloading 94.1 MB across 99 packages from
+`azure.archive.ubuntu.com`. Actual Linux pytest time fell from 22m41s to 7m54s.
+
+The Linux installation now reuses existing ffmpeg/ffprobe commands when present,
+uses Ubuntu's archive mirror instead of the observed slow Azure mirror, and
+omits recommended packages. Real ffmpeg integration coverage remains enabled.
+The shell block passes `bash -n`; native installation timing awaits the next run.
+
+The escalation stopping test alone cost 44.78s on Linux (32.00s on macOS,
+57.69s on Windows). It now controls the fit residual and records submitted
+section counts, testing both early settling and full escalation without running
+the optimiser. The independent numerical enumeration-equivalence and parallel
+tests still execute real searches. Validation: all 47 filter/parallel tests passed
+in 52.64s with the inhibitor; the modified test's call took under 0.005s.
+Formatting and whitespace checks passed. Ruff reports three existing import/dict
+style issues elsewhere in `tests/test_design_filters.py`.

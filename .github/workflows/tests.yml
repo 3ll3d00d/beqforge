@@ -30,7 +30,15 @@ jobs:
       # falls back to ffmpeg's default resampler, so any ordinary ffmpeg install is fine here.
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: |
+          if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
+            exit 0
+          fi
+          # The Azure mirror took over eight minutes to download ffmpeg's
+          # dependencies on a hosted runner. Use Ubuntu's archive mirror.
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
