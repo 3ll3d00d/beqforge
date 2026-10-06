@@ -232,13 +232,16 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
 The same workflow builds and checks the Python wheel and source distribution, verifies all
-five dependency profiles, and runs the reusable tests workflow against the release commit.
+five dependency profiles, and reuses a successful branch-push run of `tests.yml` on `main`
+at the exact tagged commit. If matching tests are still running, it waits up to 15 minutes;
+without a successful result, it runs the reusable tests workflow against the release commit.
 GitHub release creation and executable builds require those tests to pass on Linux, macOS
 and Windows, including device-check tests and isolated dependency profiles. PyPI publication
 also requires every executable build to pass. Release tags must match
 `beq_common.__version__` exactly (`v0.1.0` for `0.1.0`);
 bump that version before creating a new release tag. Both distributions are also attached
-to the GitHub release. Manual workflow runs build artifacts without publishing to PyPI.
+to the GitHub release. Manual workflow runs always run fresh tests and build artifacts without
+publishing to PyPI.
 
 One-time setup: configure a PyPI Trusted Publisher for project `beqforge`, owner `3ll3d00d`,
 repository `beqforge`, workflow `build-executable.yml`, and GitHub environment `pypi`.

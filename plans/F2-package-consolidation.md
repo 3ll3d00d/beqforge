@@ -92,3 +92,21 @@ The manual-build condition explicitly requires successful tests and package vali
 skipped release-creation job cannot bypass a failed upstream check. Publication still requires
 all executable builds to pass and only runs for a release-tag push. Both changed workflows
 passed actionlint and whitespace checks; no release run or publication was triggered locally.
+
+### Reuse main tests for tagged releases (6 October 2026)
+
+Tagged builds now query `tests.yml` branch-push runs on `main` at the exact release SHA.
+A completed successful run satisfies the release test gate, with its run linked in the job
+summary. An active matching run is polled every 30 seconds for up to 15 minutes. Missing,
+failed or timed-out results, and API lookup errors, fall back to fresh release tests.
+Manual builds always run fresh tests. Release creation, executable builds and publication
+depend on a gate that accepts either verified reuse or successful fresh tests; package
+validation and executable smoke tests still run.
+
+Validation: actionlint passed for both workflows, as did whitespace checks. The actual
+lookup script passed 11 mocked scenarios covering exact SHA/branch/event matching,
+success, absence, failure, manual dispatch, API failure, waiting and timeout. The actual
+shell gate passed all 48 combinations of lookup result, reuse output and test result.
+No GitHub run or release was triggered. This changes CI orchestration only, so numerical
+designer regression runs were not required. No existing prioritised backlog item covered
+this change.

@@ -14,11 +14,86 @@ permissions:
   contents: write  # softprops/action-gh-release needs to create/attach to the release
 
 jobs:
+  previous_tests:
+    name: Check main test results
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    permissions:
+      actions: read
+    outputs:
+      reusable: ${{ steps.check.outputs.reusable }}
+    steps:
+      - name: Find successful tests for the tagged commit
+        id: check
+        uses: actions/github-script@v8
+        with:
+          script: |
+            core.setOutput('reusable', 'false');
+            if (context.eventName !== 'push' || !context.ref.startsWith('refs/tags/')) {
+              core.info('Manual builds run fresh tests.');
+              return;
+            }
+            const deadline = Date.now() + 15 * 60 * 1000;
+            try {
+              while (true) {
+                const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                  ...context.repo,
+                  workflow_id: 'tests.yml',
+                  head_sha: context.sha,
+                  branch: 'main',
+                  event: 'push',
+                  per_page: 100,
+                });
+                const matching = runs.filter(run =>
+                  run.head_sha === context.sha && run.head_branch === 'main' && run.event === 'push'
+                );
+                const passed = matching.find(run =>
+                  run.status === 'completed' && run.conclusion === 'success'
+                );
+                if (passed) {
+                  core.info(`Reusing successful main tests: ${passed.html_url}`);
+                  await core.summary.addLink('Reused main test run', passed.html_url).write();
+                  core.setOutput('reusable', 'true');
+                  return;
+                }
+                if (!matching.some(run => run.status !== 'completed') || Date.now() >= deadline) {
+                  core.info('No successful main test run available; running fresh release tests.');
+                  return;
+                }
+                core.info('Main tests are still running; checking again in 30 seconds.');
+                await new Promise(resolve => setTimeout(resolve, 30_000));
+              }
+            } catch (error) {
+              core.warning(`Unable to check main tests; running fresh release tests: ${error.message}`);
+            }
+
   tests:
     name: Release tests
+    needs: previous_tests
+    if: needs.previous_tests.outputs.reusable != 'true'
     uses: ./.github/workflows/tests.yml
     permissions:
       contents: read
+
+  validated_tests:
+    name: Validate release test gate
+    needs: [previous_tests, tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require reused or fresh successful tests
+        env:
+          REUSED: ${{ needs.previous_tests.outputs.reusable }}
+          CHECK_RESULT: ${{ needs.previous_tests.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: |
+          if [[ "$CHECK_RESULT" == success && "$REUSED" == true && "$TEST_RESULT" == skipped ]] ||
+             [[ "$TEST_RESULT" == success ]]; then
+            exit 0
+          fi
+          echo "Release tests have not passed (lookup=$CHECK_RESULT, reused=$REUSED, tests=$TEST_RESULT)" >&2
+          exit 1
 
   package:
     name: Build Python package
@@ -66,7 +141,7 @@ jobs:
 
   create_release:
     name: Create release
-    needs: [package, tests]
+    needs: [package, validated_tests]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -90,9 +165,9 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     # Manual runs skip release creation, but still require tests and package validation.
-    needs: [create_release, package, tests]
+    needs: [create_release, package, validated_tests]
     if: >-
-      !cancelled() && needs.tests.result == 'success' && needs.package.result == 'success' &&
+      !cancelled() && needs.validated_tests.result == 'success' && needs.package.result == 'success' &&
       (needs.create_release.result == 'success' || needs.create_release.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
@@ -147,7 +222,7 @@ jobs:
 
   publish:
     name: Publish Python package to PyPI
-    needs: [tests, package, build, create_release]
+    needs: [validated_tests, package, build, create_release]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment:
