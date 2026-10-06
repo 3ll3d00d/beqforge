@@ -150,7 +150,7 @@ def test_concurrent_writers_publish_complete_identical_results(store):
 
 
 def test_nonfinite_and_unsuccessful_results_round_trip(store):
-    reference = [Section("PeakingEQ", 5, 6, 12).sos(48000)]
+    reference = [Section("LowShelf", 3, 0.7, 10).sos(48000)]
     failed = optimise(reference, rate=48000, cache=store)
     assert failed.replacement is None
     assert optimise(reference, rate=48000, cache=store) == failed
@@ -292,3 +292,37 @@ def test_missing_numerical_sources_disable_cache(monkeypatch):
 
     monkeypatch.setattr(caching, "implementation_identity", missing)
     assert caching._request(request(), rate=48000) is None
+
+
+def improvement_request():
+    return [Section("PeakingEQ", 5, 6, 12).sos(48000)]
+
+
+def test_improvement_round_trips_through_the_cache(store, monkeypatch):
+    expected = optimise(improvement_request(), rate=48000, cache=store)
+    assert expected.outcome == "improvement"
+    monkeypatch.setattr(
+        caching.core, "optimise", lambda *a, **kw: pytest.fail("cache hit searched")
+    )
+    assert optimise(improvement_request(), rate=48000, cache=store) == expected
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        # no better than the original
+        lambda r: {"candidate_error_db": r.original_error_db},
+        # worse than the original outside the matching band
+        lambda r: {"guard_error_db": max(0.5, r.original_guard_error_db) + 1},
+        # missing coefficients
+        lambda r: {"replacement": None},
+    ],
+)
+def test_cached_improvement_violating_policy_is_rejected(store, tamper):
+    reference = improvement_request()
+    result = optimise(reference, rate=48000, cache=False)
+    assert result.outcome == "improvement"
+    from dataclasses import replace
+
+    with pytest.raises((ValueError, TypeError)):
+        store.seed(reference, replace(result, **tamper(result)), rate=48000)

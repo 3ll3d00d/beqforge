@@ -256,6 +256,7 @@ def render(entries, results, output, provenance):
         summaries[str(rate)] = {
             "outcomes": dict(outcomes),
             "replaced_entries": outcomes["replacement"],
+            "improved_entries": outcomes["improvement"],
             "improved_distinct_titles": len(improved_titles),
             "finite_curve_entries": len(before),
             "nonfinite_or_unstable_entries": nonfinite,
@@ -379,12 +380,12 @@ def render(entries, results, output, provenance):
         "",
         "This report compares the authored RBJ response with the response predicted after float32 coefficient loading. It uses only the published filters; it does not measure film audio or validate hardware.",
         "",
-        f"The complete pinned [BEQCatalogue](https://github.com/3ll3d00d/beqcatalogue) snapshot contains **{len(entries):,} entries** and **{document['distinct_title_count']:,} distinct title identities**. **{len(improved_entries):,} entries ({len(improved_titles):,} title identities) gained a publishable replacement at one or both rates.** Each entry is evaluated separately at 48 and 96 kHz, so replacements across rates must not be counted as unique titles.",
+        f"The complete pinned [BEQCatalogue](https://github.com/3ll3d00d/beqcatalogue) snapshot contains **{len(entries):,} entries** and **{document['distinct_title_count']:,} distinct title identities**. **{len(improved_entries):,} entries ({len(improved_titles):,} title identities) gained published coefficients (a replacement within the margin or an improvement on the original) at one or both rates.** Each entry is evaluated separately at 48 and 96 kHz, so replacements across rates must not be counted as unique titles.",
         "",
         "A title identity is title + year + content type + season + episode. Editions, languages, audio formats and authors can have separate catalogue entries. All statistics weight each catalogue entry once per rate.",
         "",
-        "| Rate | Already within 0.5 dB | Published replacements | No replacement | Unresolved | Unsupported |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Rate | Already within 0.5 dB | Published replacements | Published improvements | No replacement | Unresolved | Unsupported |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for rate in RATES:
         counts = summaries[str(rate)]["outcomes"]
@@ -395,6 +396,7 @@ def render(entries, results, output, provenance):
                 for k in (
                     "within_margin",
                     "replacement",
+                    "improvement",
                     "no_replacement",
                     "unresolved",
                     "unsupported",
@@ -406,7 +408,7 @@ def render(entries, results, output, provenance):
         "",
         "## Whole-catalogue error by frequency",
         "",
-        "“After” uses an optimised cascade only when it passes the 0.5 dB maximum-error margin across 2–200 Hz, stability, numerical convergence and the 0.5 dB out-of-band guard. Otherwise it retains the original. Unsuccessful candidate improvements are never included as replacements.",
+        "“After” uses an optimised cascade when it passes the 0.5 dB maximum-error margin across 2–200 Hz and the 0.5 dB out-of-band guard (a replacement), or when it misses those but is strictly better than the original across 2–200 Hz and no worse than the original out of band (an improvement). Both must be stable, converge numerically and survive publication. Otherwise it retains the original.",
         "",
         "The charts show pointwise absolute-error median, 95th and 99th percentiles, and maximum. The table reports those statistics of each entry’s maximum sampled error within each frequency band. These are different summaries: a pointwise percentile need not follow one particular entry. Chart axes use a logarithmic frequency scale and a symmetric logarithmic error scale to retain the tails.",
         "",

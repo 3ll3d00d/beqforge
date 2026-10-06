@@ -58,11 +58,37 @@ def test_replacement_meets_margin_after_publication(rate, q):
 
 
 @pytest.mark.parametrize("rate", [48000, 96000])
-def test_partial_improvement_does_not_return_replacement(rate):
-    result = optimise([Section("PeakingEQ", 5, 6, 12).sos(rate)], rate=rate)
-    assert result.outcome == "no_replacement"
+def test_partial_improvement_is_published(rate):
+    reference = [Section("PeakingEQ", 5, 6, 12).sos(rate)]
+    result = optimise(reference, rate=rate)
+    assert result.outcome == "improvement"
     assert 0.5 < result.candidate_error_db < result.original_error_db
-    assert result.replacement is None
+    assert result.guard_error_db <= max(0.5, result.original_guard_error_db)
+    stored = Float32().quantise(np.array(result.replacement))
+    assert stable(stored)
+    np.testing.assert_array_equal(stored, result.replacement)
+
+
+@pytest.mark.parametrize(
+    "rate,kind,freq,q,gain",
+    [(48000, "LowShelf", 3, 0.7, 10), (48000, "HighShelf", 5, 6, 12)],
+)
+def test_improvement_worse_than_original_outside_band_is_not_published(
+    rate, kind, freq, q, gain
+):
+    result = optimise([Section(kind, freq, q, gain).sos(rate)], rate=rate)
+    assert result.outcome == "no_replacement" and result.replacement is None
+    assert result.candidate_error_db < result.original_error_db
+    assert result.guard_error_db > max(0.5, result.original_guard_error_db)
+
+
+def test_unstable_original_accepts_any_better_stable_candidate():
+    result = optimise([Section("LowShelf", 3, 0.7, 10).sos(96000)], rate=96000)
+    assert np.isinf(result.original_error_db)
+    assert np.isinf(result.original_guard_error_db)
+    assert result.outcome == "improvement"
+    assert np.isfinite(result.candidate_error_db)
+    assert stable(np.array(result.replacement))
 
 
 def test_rates_are_independent():
@@ -81,15 +107,19 @@ def test_margin_and_numerical_boundary():
     )
     edge = optimise(ref, rate=48000, settings=Settings(margin_db=baseline))
     assert edge.outcome == "unresolved" and edge.replacement is None
+    # a candidate which can't meet a tight margin is still published if it improves on the original
     strict = optimise(ref, rate=48000, settings=Settings(margin_db=0.01))
-    assert strict.outcome == "no_replacement" and strict.replacement is None
+    assert strict.outcome == "improvement" and strict.replacement is not None
+    assert strict.candidate_error_db < strict.original_error_db
 
 
-def test_guard_can_reject_matching_candidate():
+def test_guard_demotes_matching_candidate_to_an_improvement():
     ref = [Section("PeakingEQ", 10, 0.7, 12).sos(96000)]
     r = optimise(ref, rate=96000, settings=Settings(guard_margin_db=0.0001))
     assert r.candidate_error_db < 0.5
-    assert r.outcome == "no_replacement" and r.replacement is None
+    # outside the guard margin, so not a replacement, but no worse than the original there
+    assert r.guard_error_db <= r.original_guard_error_db
+    assert r.outcome == "improvement" and r.replacement is not None
 
 
 def test_fixed_precision_protocol():
@@ -162,24 +192,30 @@ def test_cli_both_rates_and_no_unsuccessful_variant(tmp_path):
     source = tmp_path / "in.json"
     output = tmp_path / "out.json"
     source.write_text(
-        json.dumps({"filters": [{"type": "PeakingEQ", "freq": 5, "q": 6, "gain": 12}]})
+        json.dumps({"filters": [{"type": "LowShelf", "freq": 3, "q": 0.7, "gain": 10}]})
     )
-    assert main([str(source), "--out", str(output), "--passes", "1"]) == 0
+    assert main([str(source), "--out", str(output)]) == 0
     document = json.loads(output.read_text())
-    assert {r["rate"] for r in document["entries"]} == {48000, 96000}
-    assert all(r["variant"] is None for r in document["entries"])
+    entries = {r["rate"]: r for r in document["entries"]}
+    assert set(entries) == {48000, 96000}
+    # 48k only finds candidates worse than the original outside the band, 96k improves on an
+    # original which can't be represented
+    assert entries[48000]["result"]["outcome"] == "no_replacement"
+    assert entries[48000]["variant"] is None
+    assert entries[96000]["result"]["outcome"] == "improvement"
+    assert entries[96000]["variant"] is not None
 
 
 @pytest.mark.parametrize(
     "delta,outcome",
-    [(-0.0001, "no_replacement"), (0.0, "unresolved"), (0.0001, "replacement")],
+    [(-0.0001, "improvement"), (0.0, "unresolved"), (0.0001, "replacement")],
 )
 def test_candidate_margin_boundary(delta, outcome):
     ref = [Section("PeakingEQ", 10, 2, 12).sos(48000)]
     error = optimise(ref, rate=48000).candidate_error_db
     result = optimise(ref, rate=48000, settings=Settings(margin_db=error + delta))
     assert result.outcome == outcome
-    assert (result.replacement is not None) == (outcome == "replacement")
+    assert (result.replacement is not None) == (outcome != "unresolved")
 
 
 def test_cached_sent_baseline_and_repeated_sections():

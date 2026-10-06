@@ -173,7 +173,13 @@ def _restore(envelope: dict, request) -> Result:
         or result.margin_db != cfg.margin_db
         or result.band_hz != cfg.band_hz
         or result.outcome
-        not in ("within_margin", "replacement", "no_replacement", "unresolved")
+        not in (
+            "within_margin",
+            "replacement",
+            "improvement",
+            "no_replacement",
+            "unresolved",
+        )
         or np.isnan(result.original_error_db)
         or result.original_error_db < 0
         or result.evaluations < 0
@@ -185,7 +191,7 @@ def _restore(envelope: dict, request) -> Result:
         raise ValueError("invalid cached within-margin result")
     if result.outcome == "no_replacement" and result.original_error_db <= cfg.margin_db:
         raise ValueError("cached unsuccessful search was not licensed")
-    if result.outcome == "replacement":
+    if result.outcome in ("replacement", "improvement"):
         rows = np.asarray(result.replacement, dtype=float)
         if (
             result.original_error_db <= cfg.margin_db
@@ -193,16 +199,37 @@ def _restore(envelope: dict, request) -> Result:
             or not stable(rows)
             or result.candidate_error_db is None
             or not np.isfinite(result.candidate_error_db)
-            or not 0 <= result.candidate_error_db <= cfg.margin_db
-            or abs(result.candidate_error_db - cfg.margin_db)
-            < cfg.numerical_tolerance_db
+            or result.candidate_error_db < 0
             or result.guard_error_db is None
             or not np.isfinite(result.guard_error_db)
-            or not 0 <= result.guard_error_db <= cfg.guard_margin_db
+            or result.guard_error_db < 0
+        ):
+            raise ValueError("cached replacement violates publication policy")
+        if result.outcome == "replacement" and (
+            result.candidate_error_db > cfg.margin_db
+            or abs(result.candidate_error_db - cfg.margin_db)
+            < cfg.numerical_tolerance_db
+            or result.guard_error_db > cfg.guard_margin_db
             or abs(result.guard_error_db - cfg.guard_margin_db)
             < cfg.numerical_tolerance_db
         ):
             raise ValueError("cached replacement violates publication policy")
+        if result.outcome == "improvement":
+            allowed = max(
+                cfg.guard_margin_db,
+                result.original_guard_error_db
+                if result.original_guard_error_db is not None
+                else cfg.guard_margin_db,
+            )
+            if (
+                result.candidate_error_db
+                >= result.original_error_db - cfg.numerical_tolerance_db
+                or not (
+                    result.guard_error_db <= cfg.guard_margin_db
+                    or result.guard_error_db <= allowed - cfg.numerical_tolerance_db
+                )
+            ):
+                raise ValueError("cached improvement violates publication policy")
         loaded = np.array(
             [[float(format(value, ".17g")) for value in row] for row in rows]
         )

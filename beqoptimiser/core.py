@@ -146,6 +146,10 @@ class Settings:
             raise ValueError("invalid optimisation settings")
 
 
+# outcomes which carry coefficients to publish
+PUBLISHED_OUTCOMES = ("replacement", "improvement")
+
+
 @dataclass(frozen=True, slots=True)
 class Result:
     outcome: str
@@ -157,6 +161,7 @@ class Result:
     band_hz: tuple[float, float] = (2.0, 200.0)
     candidate_error_db: float | None = None
     guard_error_db: float | None = None
+    original_guard_error_db: float | None = None
     replacement: tuple[tuple[float, ...], ...] | None = None
     evaluations: int = 0
     source_digest: str = ""
@@ -204,7 +209,12 @@ def optimise(
     sent=None,
     settings: Settings | None = None,
 ) -> Result:
-    """Return custom SOS only when original exceeds, and replacement meets, the margin.
+    """Return custom SOS when the original exceeds the margin and a candidate improves on it.
+
+    Outcomes for a search: ``replacement`` when the candidate meets the margin and guard margin,
+    ``improvement`` when it does not meet them but is strictly better than the original in the
+    matching band and no worse than the original outside it (or within the guard margin there),
+    otherwise ``no_replacement``. Both ``replacement`` and ``improvement`` carry the coefficients.
 
     reference and sent use normalised SOS [b0,b1,b2,1,a1,a2], subtractive feedback.
     Maxima are dense-grid/refined numerical estimates, not certified uniform bounds.
@@ -319,38 +329,62 @@ def optimise(
         (cfg.band_hz[1], (cfg.band_hz[1] + rate / 2) / 2),
     ]
     bands.append((bands[-1][1], rate / 2))
-    guard_results = [_validated_maximum(ref, current, rate, b, cfg) for b in bands]
-    guard = max(value for value, _ in guard_results)
-    converged = converged and all(ok for _, ok in guard_results)
     endpoints = np.array([0.0, rate / 2])
-    endpoint_error = np.max(
-        np.abs(magnitude(current, endpoints, rate) - magnitude(ref, endpoints, rate))
-    )
-    guard = (
-        max(guard, float(endpoint_error))
-        if np.isfinite(endpoint_error)
-        else float("inf")
-    )
+
+    def guard_error(x) -> tuple[float, bool]:
+        results = [_validated_maximum(ref, x, rate, b, cfg) for b in bands]
+        value = max(v for v, _ in results)
+        endpoint_error = np.max(
+            np.abs(magnitude(x, endpoints, rate) - magnitude(ref, endpoints, rate))
+        )
+        value = (
+            max(value, float(endpoint_error))
+            if np.isfinite(endpoint_error)
+            else float("inf")
+        )
+        return value, all(ok for _, ok in results)
+
+    guard, guard_converged = guard_error(current)
+    converged = converged and guard_converged
     near = (
         abs(measured - cfg.margin_db) < cfg.numerical_tolerance_db
         or abs(guard - cfg.guard_margin_db) < cfg.numerical_tolerance_db
     )
-    outcome = (
-        "unresolved"
-        if near or not converged
-        else "replacement"
-        if measured <= cfg.margin_db
-        and guard <= cfg.guard_margin_db
-        and stable(current)
-        and np.array_equal(store(current), current)
-        else "no_replacement"
-    )
+    publishable = stable(current) and np.array_equal(store(current), current)
+    original_guard = None
+    if near or not converged:
+        outcome = "unresolved"
+    elif publishable and measured <= cfg.margin_db and guard <= cfg.guard_margin_db:
+        outcome = "replacement"
+    elif publishable and measured < baseline - cfg.numerical_tolerance_db:
+        # outside the margin but better than what would be loaded today, so accepted unless it is
+        # worse than the original outside the matching band. An unstable original is +inf there;
+        # an original whose guard error does not converge only allows the guard margin.
+        if stable(base):
+            original_guard, original_guard_converged = guard_error(base)
+            if not original_guard_converged:
+                original_guard = None
+        else:
+            original_guard = float("inf")
+        allowed = max(
+            cfg.guard_margin_db,
+            original_guard if original_guard is not None else cfg.guard_margin_db,
+        )
+        outcome = (
+            "improvement"
+            if guard <= cfg.guard_margin_db
+            or guard <= allowed - cfg.numerical_tolerance_db
+            else "no_replacement"
+        )
+    else:
+        outcome = "no_replacement"
     return result(
         outcome,
         candidate_error_db=measured,
         guard_error_db=guard,
+        original_guard_error_db=original_guard,
         replacement=tuple(tuple(float(v) for v in row) for row in current)
-        if outcome == "replacement"
+        if outcome in PUBLISHED_OUTCOMES
         else None,
         evaluations=evaluations,
     )

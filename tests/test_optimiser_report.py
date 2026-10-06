@@ -126,7 +126,7 @@ def test_checked_in_catalogue_report_is_complete_and_respects_publication_margin
     }
     for row in rows:
         if row["replacement"]:
-            assert row["outcome"] == "replacement"
+            assert row["outcome"] in ("replacement", "improvement")
             assert (
                 row["original_max_error_db"] is None
                 or row["original_max_error_db"] > 0.5

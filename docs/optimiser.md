@@ -42,17 +42,23 @@ precision models implement `quantise`, `neighbours` and a versioned identifying 
 in the initial device-motivated examples. No hardware validity follows from a format name.
 
 The default matching band is 2–200 Hz. The maximum absolute cascade magnitude error must
-exceed the configurable 0.5 dB margin before search begins. A replacement is returned only
-when its independently evaluated maximum error meets that margin, its outside-band error
-meets `guard_margin_db` (also 0.5 dB by default), it is stable, and publication/reloading
-preserves its stored coefficients. Guard checks include near-DC, DC and Nyquist.
+exceed the configurable 0.5 dB margin before search begins. A replacement is returned when its
+independently evaluated maximum error meets that margin, its outside-band error meets
+`guard_margin_db` (also 0.5 dB by default), it is stable, and publication/reloading through the
+configured transport and storage representations reproduces the evaluated coefficients exactly.
+A candidate that misses either margin is still returned, as an `improvement`, when it is
+strictly better than the original across the matching band and its outside-band error is no
+worse than the original's there (or within `guard_margin_db`); it must pass the same stability,
+convergence and publication checks. An original that cannot be represented (an infinite error)
+is improved by any qualifying stable candidate. Recalibrating the margin without a semantic
+reason is not part of this process. Guard checks include near-DC, DC and Nyquist.
 
-Outcomes are `within_margin`, `replacement`, `no_replacement` and `unresolved`.
+Outcomes are `within_margin`, `replacement`, `improvement`, `no_replacement` and `unresolved`.
 Invalid API inputs raise `ValueError`; the CLI reports unsupported entries individually.
-`replacement` is `None` for every unsuccessful outcome, even when a trial improves the
-original. Near-boundary numerical uncertainty or disagreement between validation grids
-returns `unresolved`. Equality is conceptually inside the margin, but floating-point
-estimates within the numerical uncertainty require resolution rather than a replacement.
+`replacement` is `None` for `within_margin`, `no_replacement` and `unresolved`. Near-boundary
+numerical uncertainty or disagreement between validation grids returns `unresolved`. Equality
+is conceptually inside the margin, but floating-point estimates within the numerical
+uncertainty require resolution rather than a replacement.
 
 Search is deterministic, bounded by `passes`, and keeps section count/order. Each section's
 five coefficients are searched jointly over neighbouring representable values, scoring the
@@ -68,7 +74,7 @@ No audio means no soundtrack clipping prediction; the original volume offset is 
 from beqoptimiser.cli import optimise_entry
 
 report = optimise_entry(authored_entry, rate=96000)
-# report["variant"] is None unless a qualifying replacement exists.
+# report["variant"] is None unless a qualifying replacement or improvement exists.
 ```
 
 The adapter accepts common catalogue shelf/PEQ filters, expands counts up to a total of ten
