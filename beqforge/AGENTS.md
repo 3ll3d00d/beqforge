@@ -1,0 +1,530 @@
+# Designer package
+
+Read the repository [AGENTS.md](../AGENTS.md) first. This guidance also applies to
+designer scripts in `tools/`, their tests and `beqforge.spec`. All shell commands and
+backticked repository paths below are relative to the repository root.
+
+Derives a corrective BEQ filter directly from a film's own audio track, rather than summarising
+a catalogue of existing hand-authored ones (that's the sibling `beqanalyser` project, which this
+repo was extracted from — they share only the RBJ biquad arithmetic). The pipeline runs
+material → extraction → diagnose → target → fit → verify, and prints the evidence beside the
+answer, abstaining when nothing measures up. See "Working on the designer" below for what it does
+and why, and [TODO.md](../TODO.md) for what's still open.
+
+One entry point for file-based use: `tools/design_beq.py`, also installed as `beqforge design`
+(`pip install "beqforge[designer]"` / `uv tool install "beqforge[designer]"`). The only other way in is
+`beqforge serve-designer`, an HTTP server implementing beqdesigner's `designer-interface.md`
+v1.1 §7.1 binding (`beqforge/designer.py` + `tools/designer_server.py`) — everything else here
+still holds: no other API, no other service, and the server is a thin transport around the same
+`beqforge.pipeline.run`, not a second implementation.
+
+## Layout
+
+| File | Contents |
+| --- | --- |
+| `beqforge/biquad.py` | Compatibility exports for the shared RBJ `Biquad` class hierarchy every filter this package builds is rendered through. Imports nothing else from the package. |
+| `beqforge/__init__.py` | Shared design types — `Alignment`, `HighPass`, `BiquadSpec`, `PolePair`, `DESIGN_GRID`, `BIQUAD_BUDGET`. |
+| `beqforge/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
+| `beqforge/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
+| `beqforge/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
+| `beqforge/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — on the path to a target only through the `parametric` strategy, which inverts what it identifies; diagnostic for everything else. See "Working on the designer" below.** |
+| `beqforge/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
+| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is about half of a run with the analysis cached (see "Performance"); `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
+| `beqforge/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
+| `beqforge/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
+| `beqforge/diagnose.py` | Per-channel decomposition: mix shares, the level-independence test (R2), band tracking, and each channel's own plateau reference. Where the evidence for a rolloff actually is. |
+| `beqforge/accept.py` | The acceptance model. The cliff, flatness, turnover and overshoot tests are comparative and so need no calibrated threshold; the shape request (`target_tilt_db_per_octave` and its tolerances) is a stated preference; realisability is judged on the curve the device will play rather than against a drift constant. Tilt, level and extent judge against *intent* (`before_db` + the evidence-priced target), not flat, so a partial correction is judged on whether it achieved what it was licensed to. `recovered_fraction` and `shaping_fraction` report how much of the deficit was licensed and how much of the correction's peak lies below the level-independence floor — record-only diagnostics, not in the designer response; `Candidate.confidence` is a separate, uncalibrated ordinal (`pipeline.correction_evidence_score`), not derived from either. Headroom (`required_offset_db`) is reported, never gated. |
+| `beqforge/pipeline.py` | The repeatable process — diagnose, propose, fit, judge. Holds the `STRATEGIES` registry. |
+| `beqforge/cache.py` | Stage cache — the analysis, and any strategy declaring `cache_modules`. On by default; keyed per stage so work on the fitter does not drop the analysis. |
+| `beqforge/charts.py` | Peak-vs-average charts in the catalogue's axes (linear 1-160 Hz, -10 to -80 dB), plus the loudest second. Fixed colour per channel across every chart. |
+| `beqforge/record.py` | The run record — a fingerprinted, gzipped JSON of everything a run produced, written every run. Ours, not beqdesigner's. |
+| `beqforge/beqd.py` | Export to a `.beq` beqdesigner project. A separate job from the record: idiomatic in their UI, allowed to be lossy. |
+| `beqforge/cli.py` | `beqforge <subcommand> ...` — the installed entry point. Strips the subcommand off argv and hands the rest to the matching script in `tools/` unchanged. |
+| `beqforge/explain.py` | The plain-language account a designer response leads with — `found` (reference plateau, which channels carry it and which are silent, down to where there is real bass content, judged band, goal), `correction` (the cascade, then frequency by frequency what was wanted, what the content supports and before → after), `clipping` (the sub-feed peak and how far to turn the sub down, on the request's or the assumed bass management) and `alternatives` (why each other candidate lost). Reads the `Report`; measures and decides nothing. |
+| `beqforge/designer.py` | The `design(request) -> response` adapter between beqdesigner's `designer-interface.md` v1.1 and `beqforge.pipeline.run` — request/response dataclasses (1.1: every candidate the judge failed goes back in `rejected` with its failures, review only, beside the answer or the decline), wire-format (de)serialisation and the field-by-field mapping onto `Report`/`Candidate`/`Verdict`. Also `validate_response`, an independent re-implementation of beqdesigner's own §3-§5 rules (that repo isn't importable — PyQt6), called by the server before a response ever goes on the wire. Pure and independently testable; no socket. |
+| `tools/design_beq.py` | **The entry point.** One command, a filter and its reasoning. `--charts DIR` for the pictures; writes a `.run.json.gz` record beside the material unless `--no-record`. |
+| `tools/designer_server.py` | `beqforge serve-designer` — the HTTP transport (`designer-interface.md` §7.1) around `beqforge/designer.py`. Server-wide flags for device realisation/strategies/exclusions; everything per-title comes from the request. Single-threaded (`http.server.HTTPServer`, not `ThreadingHTTPServer`) on purpose: the fitter forks worker processes (`beqforge.filters.PARALLEL_FITS`) when a fit escalates past one section count, and forking a multi-threaded process risks a deadlock. Costs nothing real — the contract is one synchronous POST per `design()` call. Every response names its build (`beqforge_revision`); `--record-dir DIR` also writes each request's run record, named by a digest of the request audio, so a review-queue entry can be replayed. `--cache-dir DIR` keeps the stage cache there (`cache.DirStore`, one file per entry, atomic): a repeat request for a title skips the analysis — 110 s cold, 50 s warm on a 2-hour 8-channel title. Each request logs a timing line (read, parse, decode, design, respond); `tools/experiments/request_timing.py` reports them. `--shared-root DIR` accepts audio by reference (contract 1.2, beqdesigner's `design/designer-by-reference.md` §3): an array names a WAV relative to DIR plus the SHA-256 of its decoded column, and `beqforge/reference.py` resolves, decodes and checks it; one that cannot be honoured is a 422 naming the array, never a decline. `GET /health` reports `contract_version` and `shared_root`. |
+| `tools/replay.py` | Redraw charts and export to beqdesigner from a record — no rerun, no extraction. Refuses on a stale record unless `--force`. |
+| `tools/extract.py` | ffmpeg → 1 kHz per-channel `.npz`. Requires an explicit supported channel layout; preserves layout provenance. Needs no beqdesigner. |
+| `tools/summarise.py` | Sanity-check an extraction before using it. |
+| `tools/render_ledger.py` | One HTML report across every `data/*.run.json.gz`. |
+| `tools/validate_evidence.py` | Runs the predeclared final-selection protocol against the synthetic harness; see "Evidence and confidence" below and `evidence_validation.json`. |
+| `tools/negative_corpus.py` | The negative corpus (historical review E2): `harness.corpus_case` titles across seven shapes, two channels each, truth known by construction. Reports false acceptances per shape with a 95% Clopper-Pearson interval, true positives and recovery on injected filters, and gates on the upper bound over the negatives a pipeline can tell from a filter (`natural_droop` is reported, not gated). The committed baseline is `negative_corpus.json`. |
+| `tools/experiments/` | Two kinds of thing. **The regression tools, which are in active use** — `probe.py`, `refit_probe.py` (refits every title from its cached analysis and judges in both modes — the fast check for a fitter change), `compare_verdicts.py`, `compare_records.py`, `a1_sweep.py` (re-assesses collected candidates under acceptance-tolerance variants without refitting — historical review A1), `inject_variants.py` (known high-passes injected into a real title's channels: ground truth on real programme texture without an unfiltered original; `--noise-db` adds a delivery noise floor after the filter, so where the programme drowns is known exactly) and `score_injected.py` (scores those variants' runs against that truth: shortfall inside the recoverable band, gain where noise dominates); see "Regression checking" below, which every behaviour change goes through. And approaches that were measured and not adopted, kept with their numbers so they are not rebuilt: the P14 surrogate fitter, the P18 greedy placement, the analytic Jacobian (see "Performance" under "Working on the designer"), and a tracking floor that requires confident tracking (`t8_floor_rules.py`, historical review T8: more conservative, no more stable). |
+| `tools/smoke_test_exe.py` | Drives a packaged `beqforge` executable's `serve-designer` over real HTTP — a health check, then one real accepted-candidate request (a known-injected rolloff, `strategies=("flatten",)`). Run by `.github/workflows/build-executable.yml` on every platform after packaging; the real request matters because it is the one thing that exercises the fitter's multiprocessing fork/spawn *inside a frozen executable*, PyInstaller's riskiest failure mode (worst on Windows, which re-execs the frozen binary itself under `spawn`) and invisible to `--help`/`/health` alone. |
+| `beqforge.spec` | The PyInstaller build recipe for the single `beqforge` onefile executable (every subcommand). Bakes `record.revision()` into a `BUILD_REVISION` data file, since a frozen build has neither a git checkout nor sources to digest. Reads its `hiddenimports` straight off `beqforge/cli.py`'s `_SUBCOMMANDS`, since PyInstaller's static scanner cannot follow `importlib.import_module(name)` with a runtime `name` — every dispatched-to `tools/*.py` module has to be named explicitly or the built executable fails at `beqforge <subcommand>` with a missing-module error. |
+
+## Running things
+
+```bash
+uv sync --extra designer                                # first time / after dependency changes
+uv run python tools/design_beq.py data/NAME.npz     # automated design, all strategies
+uv run python tools/design_beq.py data/NAME.npz --strategy flatten   # just one
+uv run python tools/replay.py data/NAME.run.json.gz --charts charts   # redraw, no rerun
+uv run python tools/replay.py data/NAME.run.json.gz --beq out/NAME.beq  # into beqdesigner
+uv run ruff check beqforge tools tests   # ruff is a dependency; there is no config section
+uv run ruff format beqforge tools tests
+```
+
+Once installed (`pip install "beqforge[designer]"` / `uv tool install "beqforge[designer]"`), the same pipeline runs as
+`beqforge design data/NAME.npz`, `beqforge replay ...`, `beqforge extract ...`, `beqforge
+summarise ...` and `beqforge ledger ...` — `beqforge/cli.py` dispatches each subcommand straight
+to the script it names above, so `--help` on either form shows the same thing.
+
+Notes:
+
+* Python is pinned `>=3.13,<3.15` in `pyproject.toml`. If the venv's base interpreter has gone
+  missing, `uv sync` will silently recreate `.venv` against another interpreter in that range.
+* `tools/extract.py` needs `ffmpeg` on `PATH`; nothing else here shells out.
+* `uv run pytest` is the whole feedback loop — `uv run python tools/design_beq.py` is not a
+  substitute for it, but is the way to sanity-check a change against real material (see "Running
+  a design run" below).
+
+## Regression checking
+
+**Every change to anything under `beqforge/` or designer-reachable shared primitives under `beq_common/` goes through this before it is committed.** The
+test suite checks the code does what it says; this checks what it now *decides* on real
+material. A full `design_beq.py` pass over the baseline set is ~20 minutes, so the workflow is
+tiered: a cheap probe on every title, and real runs only where the probe says they are needed.
+
+**The baseline set.** The titles listed in [plans/done-baseline-evidence.md](../plans/done-baseline-evidence.md) ("Baseline: 2026-09-26 track set") as `data/<Title>.npz`, extracted as that section describes, each with its run record
+`data/<Title>.run.json.gz`. **Those records are the baseline** the probe re-judges against:
+don't overwrite them with a check run. Give check runs `--record <scratch>/<Title>.run.json.gz`.
+Refresh them deliberately, all together, when a change is accepted as the new baseline.
+
+**1. Snapshot before you change anything**, on committed code:
+
+```bash
+uv run python tools/experiments/probe.py snapshot data/*.npz --out <scratch>/before.json
+```
+
+It runs one process per title and takes ~1.5 minutes with a warm stage cache. It takes ~4
+minutes when the analysis has to be recomputed, which is any change to a module in
+`cache.ANALYSIS_MODULES`. After each commit, keep that commit's snapshot as the next
+reference, so every comparison is against the commit before it.
+
+**2. Snapshot after, and compare:**
+
+```bash
+uv run python tools/experiments/probe.py snapshot data/*.npz --out <scratch>/after.json
+uv run python tools/experiments/probe.py compare <scratch>/before.json <scratch>/after.json
+```
+
+`compare` ignores numeric changes up to `--tol` (0.01 by default). A change claimed to be
+exact-preserving uses `--tol 0` and must show nothing. The snapshot records:
+
+* **analysis** — mix plateau, floors, judged band, blockers, frame counts, the evidence
+  ceiling, and each channel's plateau and contrast;
+* **targets** — every strategy's priced target curve;
+* **rejudge** — every recorded candidate's *published* filters put back through the current
+  `_judge` (headroom is skipped because it is never gated), and which candidate
+  `Report.accepted` would select.
+
+The probe runs default `PipelineParams`. A change to an opt-in path (`--content-edge`) needs a
+second pair of snapshots with `snapshot --content-edge`.
+
+**A change to the fitter or to fit selection: `refit_probe.py`, not a queue of real runs.** The
+probe above rejudges *recorded* filters, so it cannot see a fitter change. Real
+`design_beq.py` runs can, at 60-100 s a title per mode — with the steep variants that is over
+two hours. `tools/experiments/refit_probe.py` refits every title's proposals from the cached
+analysis and judges each cascade with and without `--content-edge` (the option changes only
+judging: targets and fits are identical either way, checked on 33 titles), skipping headroom,
+titles in parallel with serial fitting. It reproduces real runs' cascades, verdicts, failure
+text and winners exactly, in both modes (checked 2026-09-29):
+
+```bash
+uv run python tools/experiments/refit_probe.py snapshot data/*.npz data/variants/*.npz --out <scratch>/before.json.gz
+uv run python tools/experiments/refit_probe.py snapshot data/*.npz data/variants/*.npz --out <scratch>/after.json.gz
+uv run python tools/experiments/refit_probe.py compare <scratch>/before.json.gz <scratch>/after.json.gz
+uv run python tools/experiments/refit_probe.py records <scratch>/after.json.gz <scratch>/rec   # then score_injected.py --records
+```
+
+Take "before" on committed code in a worktree (a snapshot writes the stage cache beside each
+material, like a run), and keep it: it stays the reference for every fitter change until
+something that decides anything is committed. The synthetic protocol and corpus still apply to
+a decision-changing fitter change; run the two protocol seeds in parallel. `probe.py snapshot
+--content-edge --records DIR` likewise rejudges any scratch record set with the option on.
+
+**3. Act on what moved:**
+
+* **Nothing** → the change reaches no decision on this material. The test suite is still
+  required.
+* **A verdict or the accepted candidate** → look at every changed candidate's corrected curve
+  (charts, or the "Corrected low end" table of a real run) before believing it. "Never trust
+  a residual" applies to a verdict that flipped in your favour too.
+* **A target** → the probe's rejudge used the *recorded* target, so it proves nothing for that
+  title. `compare` names these titles: give each one a real run and check it with
+  `compare_verdicts.py` against its baseline record. A new accepted cascade can differ
+  section by section and still be the same answer — compare the corrected curves, not the
+  filters.
+* **An exact-preserving claim** → one real run and `compare_records.py` against its baseline
+  record. It must be byte-identical apart from the fingerprint and timings.
+
+**4. Any change that can turn a decline into an acceptance, or that touches evidence,
+ceiling, acceptance or selection** — also run the synthetic protocol, both seeds, before and
+after. False acceptances and selections must not get worse. The real titles contain no known
+negative, so they can show a wrong decline but never a wrong acceptance. Each seed is ~8
+minutes:
+
+```bash
+git worktree add <scratch>/wt_before HEAD   # "before", without stashing your change
+PY=$PWD/.venv/bin/python                    # the main venv; the worktree has none
+(cd <scratch>/wt_before && $PY tools/validate_evidence.py --seed 101 --output <scratch>/before_101.json)
+uv run python tools/validate_evidence.py --seed 101 --output <scratch>/after_101.json   # and --seed 947
+```
+
+Then the **negative corpus**. It is the only measure of a false-acceptance *rate* this repo
+has, so a change that claims to reduce false acceptances has to show it here. Compare against
+the committed `negative_corpus.json`, and don't overwrite that file unless the change is
+accepted as the new baseline. Allow 15-20 minutes:
+
+```bash
+uv run python tools/negative_corpus.py --seeds 1-9 --output <scratch>/corpus.json
+```
+
+**5. Write the outcome down** in the appropriate implementation or research document under
+`plans/`: what changed, what the probe showed, which titles needed real runs and what they
+gave. In the same commit, update or remove its priority/status row in `TODO.md` and any
+open questions it resolves. An item with no recorded outcome is not done.
+
+**Pitfalls, each met at least once:**
+
+* The stage cache keeps **one entry per stage per title**. Running changed analysis code
+  against `data/` overwrites the cache the main tree uses. To try an idea without committing
+  it, use a scratch `git worktree` with its own `data/` directory of symlinks to the `.npz`
+  files and records, so its caches are written there.
+* A background run (tests, the synthetic protocol, a real design) imports the working tree
+  when each process starts. Don't edit `beqforge/` while one is running, or it silently
+  measures a mix of old and new code. Use a worktree instead.
+* On an unchanged tree the rejudge reproduces every recorded verdict and winner exactly. If the
+  probe's output is ever in doubt, check that first.
+* The probe covers only what it records. Anything it doesn't record — note text, headroom,
+  export content — needs its own test.
+
+## Gotchas
+
+* RBJ biquad formulae exist twice — `biquad.py`'s class hierarchy and `filters.py`'s
+  `_sos_from_parameters`. Fix both or neither; the test asserting they agree is what keeps that
+  honest.
+* `beqd.py`'s exported `.beq` metadata carries our verdict under a `"beqforge"` key inside
+  beqdesigner's free-form `metadata` dict — that schema is pinned by `tests/test_design_record.py`.
+  Don't rename it without updating that test.
+
+## Working on the designer
+
+Deriving a BEQ filter from a film's audio rather than summarising existing ones. `TODO.md` is
+the live backlog of what's still open; everything below is what the shipped code actually does
+and why — read it before making a change here, since several of these rules were arrived at by
+getting them wrong first.
+
+### Principles
+
+* Every per-title decision must come from that title's own data. A fixed frequency band, a
+  slope threshold borrowed from one title, or a constant calibrated against the catalogue are
+  the same mistake wearing different clothes — several constants here have already been wrong
+  this way (see "Never calibrate against the catalogue", below).
+* Abstention is the default. A correction is only as good as the evidence for it; when the
+  evidence is missing, ambiguous, or the material is an excerpt, the pipeline must decline
+  rather than guess.
+* Past catalogue-authored filters are a test of a design, never its target. The catalogue
+  contains no negatives (nothing known to be unfiltered), so calibrating against it teaches
+  nothing about false positives.
+
+### Order of a run
+
+`pipeline.run`: `diagnose` → `extract` → `identify` (feeds `parametric` only) → **blockers** (no plateau,
+excerpt, no channels, no loud events, no positively-supported bins, exclusions fragmenting the
+judged band, silent sub feed — any one returns an empty `Report` with the reasons) → each
+strategy's proposals → one shared fit (`_fit_all`, section count escalated 1 → `max_sections`
+across every target at once; `parametric` is the exception — `design` fits its target inside the
+strategy, before `_fit_all`, and that proposal arrives already fitted) → `_judge` per candidate (publish, verify on the device response,
+headroom, `assess`). `Report.accepted` then takes the passing candidate whose corrected curve
+departs least from the *requested* shape, and within `ranking_tie_db` the one with fewest
+sections. Details worth knowing that are easy to miss elsewhere: `flatten` scans upward from the
+bottom for the first settled end of the deficit and tapers to nothing a quarter-octave above it;
+every strategy's target is then held flat below the mix's tracking floor and capped at the
+mix's measured deficit inside `priced_by_evidence`, before the contrast ceiling; `counterfactual` sweeps
+`restore_caps_db` (one candidate each, identical priced targets deduplicated) and only restores
+a channel as far as that channel's own contrast allows; the judged band runs from the tracking
+floor (at least `verify_floor_hz`) to the same deficit anchor `flatten` uses, widened to at
+least `min_judge_octaves` above the floor — no fixed top (historical review T6).
+
+### Strategies and evidence pricing
+
+* **Target strategies are first-class and interchangeable.** `flatten` (invert the measured mix
+  response), `counterfactual` (restore filtered channels, re-sum, read the deficit) and
+  `parametric` (fit and invert a rolloff) all produce a target, all go through the same fitter
+  and the same acceptance model, and all run by default. Adding one is a function plus an entry
+  in `STRATEGIES`. Select with `--strategy NAME` (repeatable, or `all`). On the nine-title
+  baseline (`plans/done-baseline-evidence.md`) `flatten` and `parametric` both win titles, and one title
+  abstains. No strategy has an opinion of its own: each will invert a noise floor as happily as
+  a rolloff, which is what `priced_by_evidence` and `diagnose`'s guard are for. **Every strategy
+  that builds a target must price it through `priced_by_evidence`, passing the mix's measured
+  low-end deficit (`low_end_deficit_db`)**. Pricing is the whole of the evidence: the tracking-floor hold,
+  the deficit cap and the contrast ceiling, identical for every strategy. `counterfactual` once
+  skipped pricing and handed the fitter +35 to +46 dB of boost no measurement supported. Until
+  historical review E3, only `flatten` got the hold and the cap, so the other two asked for up
+  to 10 dB more below the floor and won selection on it.
+* **The target is the outcome, not a model of the cause.** A BEQ recovers a filtered mix, but
+  the outcome is a flat-to-rising response, and inverting the measured response reaches it
+  directly. Do not reach for `identify_rolloff` to build a *new* target — when first tried it
+  returned "no representable alignment" on every real title. Its one route to a target is
+  `parametric`, which is one strategy among three, priced like the others; it does win titles
+  (28 Years Later on the baseline). Everywhere else identification is diagnostic.
+* **Missing evidence licenses zero boost, never unrestricted correction.**
+  `Envelopes.boost_ceiling` is zero wherever a bin lacks a measurable peak/quiet separation or
+  finite bootstrap uncertainty, including deliberately omitted profiling bins. The pipeline
+  abstains outright for an excerpt (`Material.coverage != "complete_programme"`), missing
+  channel decomposition, no qualifying loud events, or no positively-supported bins. These are
+  missing-evidence policies, not confidence thresholds, and do not claim that temporal contrast
+  proves a mastering filter — see "Evidence and confidence" below.
+* **No fixed frequency band may decide anything per title.** A constant band asserts where the
+  interesting frequencies are — it has already failed once: a fixed 22-35 Hz channel reference
+  sat on one title's knee and understated its mains by 13-17 dB. Channels and the mix are now
+  referenced to their own contiguous plateau (`diagnose.plateau_reference` — widest-then-
+  flattest-then-lowest region within 3 dB of the log-frequency 90th percentile, at least a
+  third of an octave wide, at most 3 dB/octave of trend), shared by target construction and
+  verification. No usable plateau abstains.
+* **Authored-feature exclusions (`--exclude LOW HIGH`) omit evidence and request zero
+  correction, everywhere** — reference discovery, channel slopes/shares/floors, scene
+  selection, coherence, identification, every target strategy and judging, not just the target
+  curve. References and smoothing never bridge across an excluded gap, including gaps narrower
+  than one sampling interval. If the remaining evidence is still fragmented inside the judged
+  band, the pipeline abstains with an explicit reason rather than concatenating the pieces.
+* **Start with `uv run python tools/design_beq.py data/NAME.npz`.** It runs the whole process
+  and prints the evidence beside the answer; exit status is 0 when a candidate was accepted, 1
+  when the correct output was to abstain — neither is an error. The stage cache is on by
+  default and skips `diagnose`/`extract`/`identify` and the parametric fit when the material,
+  their parameters, their modules and any effective exclusions are all unchanged; `--fresh`
+  recomputes and overwrites them, `--no-cache` neither reads nor writes, `--cache PATH` moves
+  the file.
+* Acceptance rules must be **comparative wherever possible** — corrected curve against input or
+  house curve. Every absolute threshold tried so far has been wrong on some title: a fixed 6 dB
+  flatness limit sat on the floor of what any smooth cascade can achieve, and a fixed ±3 dB
+  envelope rejected a correct filter on one 0.24 Hz bin. Aggregates over the whole band are the
+  recurring failure — a step, a turnover and a cliff are all invisible to a mean. Measure over
+  the segment that matters.
+* **Tilt, level and extent are judged against intent, not flat.** `Correction.intent_db` is
+  `before_db` + the evidence-priced target (+ any house curve), so a target `priced_by_evidence`
+  clipped is judged on whether the fit achieved what the evidence licensed, not on whether it
+  happened to be flat — without this, a filter that did exactly what it was asked failed
+  anyway. Overshoot, cliff, wobble-against-material, turnover, section contribution and
+  drift/realisability stay judged against the house curve or the material, deliberately: they
+  ask *is this filter wrong*, a different question from *did it achieve its intent*, and
+  judging them against a target that could itself be wrong collapses into trusting the residual
+  (see "Never trust a residual", below).
+* **The tilt dial reads in the audio sense; the internal measurement does not.**
+  `AcceptParams.target_tilt_db_per_octave` is positive for a low end *rising* toward the
+  bottom, the opposite sign convention to `Correction.tilt_db_per_octave`. `assess` negates
+  once, at the comparison. Do not add a second negation somewhere else.
+* **The goal below the knee is a preference, and there are two dials for it**, both on
+  `AcceptParams` and both on the CLI (`--goal-tilt`, `--goal-tolerance`):
+  * `target_tilt_db_per_octave` shapes the goal (0 flat by default; positive a rise, negative a
+    gentle rolloff). It *generates*: every strategy's target is measured against it
+    (`low_end_deficit_db` via `verify.house_curve_db`), and acceptance judges and ranks against
+    the same curve pivoting at the same point, the top of the judged band. `intent_db` must not
+    add it a second time.
+  * `goal_tolerance_db` (1.5 dB) is how far from the goal a low end may sit and need nothing.
+    A strategy whose priced target never exceeds it proposes nothing, and a run where none do
+    abstains with `within_goal_tolerance`.
+
+* **Texture is not a deficit.** A low end whose deepest shortfall is no larger than the
+  programme's own crest-to-trough ripple in the passband above the correction
+  (`pipeline.passband_ripple_db`) is left alone: it abstains with `within_programme_ripple`
+  before any strategy runs. That ripple is the title's own yardstick, so there is no constant.
+  Crest to trough rather than a one-sided dip, because the reference sits on the crests. This
+  is what took the negative corpus from 4 false acceptances in 45 to 0.
+* **Steep filters: the default declines them; `judge_from_content_edge` is an opt-in that
+  recovers them and lifts some noise.** Below a steep filter's edge the priced target already
+  falls into the quiet floor with the programme — contrast bounds it — and the shape clauses
+  (cliff, unevenness, tilt) judged from the tracking floor reject exactly that fall. With
+  `PipelineParams.judge_from_content_edge` (CLI `--content-edge`, server-wide on
+  `serve-designer`) the judged band starts at the content edge (`pipeline.content_edge_hz`:
+  where contrast stops licensing the whole deficit), and below it `_within_ceiling` allows a
+  cascade no more boost than contrast licenses. It changes nothing on the ten real titles, and
+  takes noise-floored steep injections from 2 of 18 accepted to 17. It is **off by default**
+  because contrast measures loud scenes: where they stand clear of a floor that dominates on
+  average it lifts that floor too (up to 17 dB on injected real titles), and the frozen
+  protocol's `steep_leakage` is then accepted. Three "average programme" bounds were tried and
+  failed — frame mean power (owned by a few transient frames), frame median (sparse programme
+  hides under it), mean over loud-or-quiet frames (the same transients). plans/research-design-decisions.md,
+  "Steep filters", has the numbers. The probe sees it only with `snapshot --content-edge`.
+* Refine the process by editing `PipelineParams`, `DiagnoseParams` or `AcceptParams`, not by
+  writing another one-off script. The point of the driver is that two titles become comparable;
+  twenty scratchpad scripts are how the design was first worked out and none of them survived.
+* Parametric design and its cache key share `parametric_params`: shared evidence/fitting knobs
+  must reach both. `parametric_max_boost_db` is a total-correction preference; `max_gain_db` is
+  a per-section realisability bound — not the same knob. Preserve the actual priced target and
+  method through every stage, including the parametric route, so partial correction is judged
+  against its intent.
+* **Never trust a residual.** It says a cascade matches the target it was handed, not that the
+  target was right. Five separate outputs have measured well and been wrong on sight — a +15 dB
+  peak at 378 Hz, a no-op section at 105 Hz, a +45 dB gain, a shelf placed at 3.22 Hz, and a
+  +17.5 dB boost at 21 Hz. Run `verify` and look at the corrected curve; every one of these was
+  caught by a person looking, not by a metric.
+
+### Evidence and confidence
+
+* Three separate outputs are required and must not be collapsed into one number:
+  **mastering-rolloff support** (unavailable from programme audio alone — a fitted knee, level
+  invariance or temporal tracking is a feature, not proof; source coloration and mastering can
+  look identical), **correction support** (conditional temporal contrast and its uncertainty,
+  `max(1 - z·SE/contrast, 0)`, boost-weighted and scale-free — halving a request without
+  changing its shape leaves it unchanged, and it is not a probability), and **preference
+  shaping** (choosing a plateau-relative target assumes a desired source spectrum; every
+  strategy, including `parametric`, makes this assumption).
+* Quiet frames estimate additive noise only if they contain negligible programme content,
+  represent the same noise process as loud frames, and the programme is covered adequately (an
+  excerpt fails this). Contrast is not SNR: a common spectral gain cancels in the peak-minus-
+  quiet difference. Temporal tracking supports recovery only if the measured low-band energy is
+  resolved programme energy rather than stopband leakage, correlated noise, or filter
+  transients — a steep filter's own stopband output can correlate with level almost perfectly
+  and is not content.
+* `Candidate.confidence` (`pipeline.correction_evidence_score`) is an **uncalibrated ordinal**,
+  fit quality and recovered fraction both excluded by design — there is no labelled corpus to
+  calibrate a probability against. It does not reorder `Report.accepted`, deliberately (see
+  the historical E3 review). Use `recovered_fraction` (priced target ÷ measured deficit) and
+  `shaping_fraction` (share of the cascade's peak gain below the level-independence floor,
+  clamped to [0, 1]) as the separate diagnostics they are; the legacy `accept.confidence_from_evidence` is kept only
+  for callers of the old arithmetic and must not be revived as the live confidence measure.
+* **Whether to boost is a question of content, not of cause.** Is there real programme at
+  this frequency to lift? Tracking says so (the band's level moves with the higher-frequency
+  programme — content correlated with the rest of the soundtrack is not noise), and contrast
+  says how much (loud passages standing clear of the quiet background). Whether a filter
+  removed the bass cannot be told from the audio and decides nothing. So the designer
+  response explains a correction in content terms. The level-independence floor and
+  `shaping_fraction` are filter-identification diagnostics and stay in the record only; the
+  response once reported them, and a plainly corrected rolloff read as "all shaping".
+* Every channel and the mix carry their own plateau, temporal contrast/error and tracking —
+  there is no single dominant channel whose floor becomes the mix's floor. Reported per-channel
+  contributions are signed coherent terms (`Re(X_channel·conj(X_sum))/|X_sum|²`), not
+  normalised power shares — they can be negative or exceed one under cancellation, and a
+  restored channel needs its own contrast and tracking support, priced against its own
+  block-bootstrap uncertainty, before it counts.
+* The predeclared synthetic validation protocol and its results live in
+  `evidence_validation.json` (development seed 101, held-out seed 947): one false acceptance in
+  four development negatives, zero in four held-out; both excerpts and both steep-stopband
+  positives correctly abstained; both complete positives recovered a partial correction, 17.77
+  and 13.11 dB RMS from the full injected inverse. This falsifies the old "temporal contrast
+  proves restoration" reading; it does not establish safe automatic restoration of arbitrary
+  source material, and **generalisation to sparse real programmes remains unvalidated** — see
+  `TODO.md`.
+* **Reading the frozen protocol under the content principle.** `natural_bass_light` is a
+  programme *recorded* with a 24 Hz 4th-order rolloff. The protocol counts it as a negative by
+  provenance, from when the question was "was a mastering filter applied?". Under the content
+  principle (above) its low end is real, attenuated programme, and lifting it toward a flat
+  goal is the dials working. So, like the corpus's `natural_droop`, it is **reported, not
+  counted as a false acceptance**. Since historical review T6 it is accepted on both seeds (it
+  had only been rejected by a sub-dB unevenness margin over an over-wide judged band). The
+  protocol file and its predeclared results are left untouched; the guards that matter still
+  hold — `stationary_coloured_noise` and `broadband` abstain on both seeds.
+
+### Publication, playback and verification
+
+* **Robustness is measured five ways, and they answer different questions.** Do not add one
+  to another, or compare one against a limit meant for another:
+
+  | Quantity | What it measures | Where, over what |
+  | --- | --- | --- |
+  | Fit objective (`_fit_structure`'s cost) | the larger of the worst error against the target and the worst change exact-coefficient device quantisation makes to the response | the optimiser's raw parameters, over the fit's scoring band (`residual_band_hz`, widened to cover placements) |
+  | `fit_error_db` / designer `residual_db` | that objective — **except** that when `_prune` drops a section it becomes the pure worst error against the target, without the quantisation term. Two meanings in one field (TODO 5); the escalation's `residual_target_db` compares against it | as above |
+  | Drift, p90 (`_published_drift`, `Verdict.drift_db`) | the 90th percentile, over `drift_samples` jitters of the *published* parameters by their rounding step, of the worst change quantisation makes — how fragile the neighbourhood is, not what the published filter does | published parameters (since the F1 follow-up both use them), 3-400 Hz design grid |
+  | Exposure (`_exposure_db`) | the fallback's ranking when no fit reaches the residual target: the residual, plus the drift if over `max_drift_db`. A sampled heuristic, not a bound on the published response | as its two terms |
+  | `device_error_db` and the corrected curve | what the device will actually do: the exact published, quantised response against the unquantised one (`device_error_db`), and that response applied to the programme (`verify`) — the only one that is not a model | published parameters, quantised coefficients, design grid / the programme |
+
+  Strict Jury stability (`unstable_sections`) is separate from all five and is a veto: a
+  cascade that is unstable at its published, quantised coefficients is never accepted, and its
+  drift and exposure are infinite.
+
+* **Headroom is a clipping question on the sub feed, not a master-volume figure.** A BEQ runs
+  post bass management on the sub channel only, so a large boost usually costs the listener
+  nothing. `PlaybackParams` declares the assumed model (default: historical LR4 mains crossover
+  + LR4 sub-bus low-pass, both at `crossover_hz`, mains −20.2 dB / LFE −10.2 dB — CLI
+  `--crossover`, `--sub-lowpass`, `--main-gain-db`, `--lfe-gain-db`, `--sub-gain-db`); judge
+  headroom with `required_offset_db` on `material.bass_managed_sum` under that model, never by
+  the cascade's peak magnitude — measured against the real quantity, peak magnitude is close to
+  *inverted* (a +45.7 dB filter needing 0.00 dB of reduction; an +18.2 dB one needing 4.4).
+  `required_offset_db` is reported, never gated — there is no `max_gain_reduction_db` in
+  `AcceptParams`. What this does not see is excursion (a property of a driver and listening
+  level, not of the filter), reported as a diagnostic only.
+* **Publication uses canonical rounding, not the optimiser's raw floats.**
+  `publication_filters` rounds frequency to 2 decimals, gain to 3, Q to 4, before device
+  coefficient quantisation — the same parameters for judging, export and the record. Every
+  accepted section must pass strict Jury stability at those exact quantised coefficients
+  (`unstable_sections`); the fitter screens the same condition before its sensitivity screen,
+  and export refuses to write an unstable accepted filter.
+* **Verification applies the actual published, quantised device response, not an
+  approximation.** Zero-padded Fourier convolution (`scipy.fft.rfft`/`irfft`) applies the full
+  complex transfer — magnitude and phase — of the exact declared device (rate,
+  coefficient/integer bits) to the band-limited extraction; this is not "assume the filter
+  parameters behave the same at every rate" — measured maximum differences between 1 kHz and
+  96 kHz exact responses ran to 2.4 dB on a 200 Hz shelf. Padding covers at least eight seconds
+  or twelve decades of pole decay per section, whichever is longer. Unstable publications get a
+  response diagnostic for rejection, never a finite waveform/headroom claim.
+* Extraction never infers LFE from channel count. Layout identity comes from an explicit
+  supported ffmpeg layout, checked for count consistency before decoding; unknown/unsupported
+  layouts are refused. Legacy `.npz` files load with an unverified-provenance warning and need
+  re-extraction or source-layout verification — relabelling channels cannot fix a wrongly
+  weighted stored `mono_mix`.
+* **Every run writes a record; use it rather than rerunning.** `tools/design_beq.py` writes
+  `data/<name>.run.json.gz` — diagnosis, candidates, verdicts and the chart curves — and
+  `tools/replay.py`/`tools/render_ledger.py` redraw charts or export a `.beq` from it in
+  seconds, **using the run's own recorded configuration** (strategy selection, exclusions,
+  etc.), not a fresh default. The record is fingerprinted on the material hash, the recorded
+  params, the git revision, and a content hash over every module under `beqforge/` — including
+  `biquad.py`'s RBJ arithmetic — plus the extraction/design/replay/ledger entry points and
+  ledger template (`record.RECORD_SOURCE_FILES`) — so successive edits inside an already-dirty
+  tree still invalidate it. `replay`/`render_ledger` refuse a stale record and say why;
+  `--force` draws it anyway. Extend `RECORD_SOURCE_FILES` when a new dependency lives outside
+  `beqforge/`; stage-cache dependency lists are separate and narrower. Legacy records are read
+  verbatim and never silently acquire a claim (evidence, publication, playback) they did not
+  actually record.
+* **The record and the `.beq` export are two different things.** The record is ours and has to
+  be exact and complete for re-analysis; the export is beqdesigner's and only needs the
+  filters plus the underlying signal. Do not merge them — it would make the cache hostage to a
+  schema this repo does not own. beqdesigner is not importable (PyQt6, qtawesome), so its
+  schema is reproduced in `beqd.py` and pinned by `tests/test_design_record.py`.
+
+### Performance
+
+* A run is ~40-80 s a title (down from ~100-490 s, 7.18x, every accepted filter's verdict
+  preserved); the test suite is ~2 minutes. Run both in the background regardless — see
+  "Waiting on a long run" above. On the baseline records (mixed revisions, analysis and
+  `parametric` cached; measured 2026-09-29) fitting is ~49% of a run, judging ~41% and target
+  construction ~10%; a cold run adds the analysis on top. The ~75% once quoted for the fitter
+  predates that. `FIT_STATS` reports the fitter's own cost breakdown per run.
+* **Exact-preserving changes and accuracy-for-time trades must never be mixed in one commit.**
+  A run that got faster and also moved is a run that says nothing about either. Validate an
+  exact change by reproducing the *whole record* byte-for-byte except the fingerprint and
+  timings (`tools/experiments/compare_records.py`); validate a trade by checking the
+  *decisions*, not the numbers — which candidates passed, which was accepted, what it
+  published (`tools/experiments/compare_verdicts.py`).
+* **Regression without a full pass** — `tools/experiments/probe.py`, and the workflow around
+  it in "Regression checking" above. Both kinds of change go through it; the probe says
+  which titles need a real run.
+* The fit pool leaves a core free (`FIT_WORKERS`); `PARALLEL_FITS = False` forces serial for
+  profiling. **Already measured and rejected — don't redo:** replacing the optimiser with a
+  smooth surrogate (fragile, or too slow), greedy section placement (this objective is
+  minimax, greedy is a least-squares idea), a coarser fit grid (1.24x, not the claimed 2x, and
+  it changes every filter), sharing one fit pool across every tier (no effect), scoring
+  publication-rounding drift inside the fit's own cost function via jittered evaluations
+  (non-smooth, costs more than it buys), and raising `max_sections` past 4 to rescue an
+  abstaining title (tested on two titles with real headroom to gain; verdicts did not move and
+  one title's wobble got worse, not better — the gap is in what the target asks for, not in the
+  section budget). `tol` is not a lever for the optimiser; `maxiter` is. `verify` itself costs
+  ~0.3 s and is not worth trading accuracy for.
+* A real bug that bit twice: `_fit_structure`'s Nelder-Mead polish must be given the same
+  `bounds` as the search that seeded it, or the simplex can walk outside them into parameters
+  `BiquadSpec` refuses (a negative Q), crashing a worker mid-run.
+
+### Never calibrate against the catalogue
+
+The catalogue's 3,505 authored `mvAdjust` values look like ground truth for a headroom gate and
+are not: a gate built and calibrated against them measured close to *inverted* against the real
+quantity (gain reduction actually required on the modelled sub feed) and had to be withdrawn.
+More generally, the catalogue has no negatives — nothing in it is known to be unfiltered — so it
+cannot validate a false-positive rate, and a per-title decision must never rest on a value
+derived from outside that title. This is the recurring failure mode in this package; see
+`TODO.md` for the constants still standing in for a measurement.
+
+`data/` holds extracted material and is gitignored. Nothing in it is committed.
