@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
-from beqforge.record import BUILD_REVISION_FILE, revision
+from beq_common.provenance import BUILD_REVISION_FILE, revision
 from beqforge_device_check.cli import provenance
 from beqforge_device_check.evidence import atomic_json, file_hash
 from tools.prepare_device_check_helper import host_target
@@ -28,7 +28,7 @@ atomic_json(work / "build.json", {"target": host_target(), "preview": True, **pr
 device_stamp = work / "device-stamp" / "BUILD_REVISION"
 device_stamp.parent.mkdir(exist_ok=True)
 device_stamp.write_text(provenance()["implementation"])
-datas = [(str(stamp), "beqforge"), (str(device_stamp), "beqforge_device_check")]
+datas = [(str(stamp), "beq_common"), (str(device_stamp), "beqforge_device_check")]
 datas += [(str(helper / "helper.json"), "helpers"), (str(helper / "minidsp-LICENSE.txt"), "helpers"),
           (str(root / "packaging/device-check/NOTICE.txt"), "."), (str(work / "build.json"), "."),
           (str(root / "docs/device-check.md"), "docs")]

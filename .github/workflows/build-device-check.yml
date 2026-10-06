@@ -57,17 +57,17 @@ jobs:
           uv sync --locked --extra device-check
           uv pip install pyinstaller==6.22.3
       - name: Prepare pinned native helper
-        run: uv run python tools/prepare_device_check_helper.py --target '${{ matrix.target }}' --out build/device-helper --cache build/helper-cache
+        run: uv run --extra device-check python tools/prepare_device_check_helper.py --target '${{ matrix.target }}' --out build/device-helper --cache build/helper-cache
       - name: Diagnose folder build
         env:
           BEQFORGE_DEVICE_BUILD_MODE: onedir
         run: |
-          uv run pyinstaller --clean --noconfirm --distpath dist/folder beqforge-device-check.spec
-          uv run python tools/smoke_test_device_check.py 'dist/folder/beqforge-device-check/${{ matrix.executable }}' --out 'build/folder test é'
+          uv run --extra device-check pyinstaller --clean --noconfirm --distpath dist/folder beqforge-device-check.spec
+          uv run --extra device-check python tools/smoke_test_device_check.py 'dist/folder/beqforge-device-check/${{ matrix.executable }}' --out 'build/folder test é'
       - name: Build and verify single executable
         run: |
-          uv run pyinstaller --clean --noconfirm --distpath dist/single beqforge-device-check.spec
-          uv run python tools/smoke_test_device_check.py 'dist/single/${{ matrix.executable }}' --out 'build/single test é' --package 'dist/preview-${{ matrix.target }}'
+          uv run --extra device-check pyinstaller --clean --noconfirm --distpath dist/single beqforge-device-check.spec
+          uv run --extra device-check python tools/smoke_test_device_check.py 'dist/single/${{ matrix.executable }}' --out 'build/single test é' --package 'dist/preview-${{ matrix.target }}'
       - uses: actions/upload-artifact@v7
         with:
           name: beqforge-device-check-preview-${{ matrix.target }}

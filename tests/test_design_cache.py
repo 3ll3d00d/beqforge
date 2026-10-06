@@ -17,7 +17,7 @@ import pytest
 
 from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge import cache as C
-from beqforge.diagnose import ChannelDiagnosis, Diagnosis, DiagnoseParams
+from beqforge.diagnose import ChannelDiagnosis, DiagnoseParams, Diagnosis
 from beqforge.extraction import Envelopes, ExtractionParams
 from beqforge.identify import Identification, IdentifyParams
 from beqforge.material import Material
@@ -229,6 +229,7 @@ def test_the_module_sets_name_what_each_stage_is_computed_by() -> None:
     """
     assert set(C.ANALYSIS_MODULES) == {
         "__init__.py",
+        "../beq_common/types.py",
         "diagnose.py",
         "extraction.py",
         "identify.py",
@@ -237,6 +238,8 @@ def test_the_module_sets_name_what_each_stage_is_computed_by() -> None:
     }
     assert set(C.PARAMETRIC_MODULES) >= set(C.ANALYSIS_MODULES) | {
         "biquad.py",
+        "../beq_common/biquad.py",
+        "../beq_common/publication.py",
         "design.py",
         "filters.py",
         "pipeline.py",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from beqforge import BiquadSpec
+from beq_common.types import BiquadSpec
 from beqforge_device_check import SCHEMA_VERSION
 from beqforge_device_check.coefficients import (
     coefficients,

@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13, <3.15"
 
 [[package]]
@@ -17,43 +17,66 @@ wheels = [
 
 [[package]]
 name = "beqforge"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "matplotlib" },
     { name = "numpy" },
-    { name = "ruff" },
-    { name = "scipy" },
-    { name = "scipy-stubs" },
 ]
 
 [package.optional-dependencies]
-device-check = [
+all = [
+    { name = "matplotlib" },
     { name = "pyfar" },
+    { name = "scipy" },
     { name = "sounddevice" },
     { name = "websocket-client" },
+]
+designer = [
+    { name = "matplotlib" },
+    { name = "scipy" },
+]
+device-check = [
+    { name = "matplotlib" },
+    { name = "pyfar" },
+    { name = "scipy" },
+    { name = "sounddevice" },
+    { name = "websocket-client" },
+]
+optimiser = [
+    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "ruff" },
+    { name = "scipy-stubs" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.10.8" },
+    { name = "matplotlib", marker = "extra == 'designer'", specifier = ">=3.10.8" },
+    { name = "matplotlib", marker = "extra == 'device-check'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.0" },
+    { name = "pyfar", marker = "extra == 'all'", specifier = "==0.8.1" },
     { name = "pyfar", marker = "extra == 'device-check'", specifier = "==0.8.1" },
-    { name = "ruff", specifier = ">=0.14.10" },
-    { name = "scipy", specifier = ">=1.16.3" },
-    { name = "scipy-stubs", specifier = ">=1.17.1,<1.19.0" },
+    { name = "scipy", marker = "extra == 'all'", specifier = ">=1.16.3" },
+    { name = "scipy", marker = "extra == 'designer'", specifier = ">=1.16.3" },
+    { name = "scipy", marker = "extra == 'device-check'", specifier = ">=1.16.3" },
+    { name = "scipy", marker = "extra == 'optimiser'", specifier = ">=1.16.3" },
+    { name = "sounddevice", marker = "extra == 'all'", specifier = "==0.5.6" },
     { name = "sounddevice", marker = "extra == 'device-check'", specifier = "==0.5.6" },
+    { name = "websocket-client", marker = "extra == 'all'", specifier = "==1.9.2" },
     { name = "websocket-client", marker = "extra == 'device-check'", specifier = "==1.9.2" },
 ]
-provides-extras = ["device-check"]
+provides-extras = ["all", "designer", "device-check", "optimiser"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.0.2" }]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "ruff", specifier = ">=0.14.10" },
+    { name = "scipy-stubs", specifier = ">=1.17.1,<1.19.0" },
+]
 
 [[package]]
 name = "cachebox"

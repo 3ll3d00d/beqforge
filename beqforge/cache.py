@@ -61,6 +61,7 @@ SCHEMA = 2
 
 ANALYSIS_MODULES = (
     "__init__.py",
+    "../beq_common/types.py",
     "diagnose.py",
     "extraction.py",
     "identify.py",
@@ -76,6 +77,8 @@ analysis valid across an afternoon's work on the fitter.
 
 PARAMETRIC_MODULES = ANALYSIS_MODULES + (
     "biquad.py",
+    "../beq_common/biquad.py",
+    "../beq_common/publication.py",
     "design.py",
     "filters.py",
     "pipeline.py",

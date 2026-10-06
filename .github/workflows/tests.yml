@@ -37,11 +37,11 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups
+        run: uv sync --locked --all-groups --extra designer
 
       # the device-check tests run in their own job below, in parallel, with the extra installed
       - name: Run tests
-        run: uv run pytest --ignore-glob='tests/test_device_check_*.py'
+        run: uv run --extra designer pytest --ignore-glob='tests/test_device_check_*.py'
 
   device-check:
     name: Device check (${{ matrix.os }})
@@ -64,4 +64,21 @@ jobs:
 
       - name: Run device-check tests
         shell: bash
-        run: uv run pytest tests/test_device_check_*.py
+        run: uv run --extra device-check pytest tests/test_device_check_*.py
+
+  package-profiles:
+    name: Install profile (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [base, designer, optimiser, device-check, all]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - name: Build the single distribution
+        run: uv build --out-dir dist
+      - name: Verify isolated wheel installation and command
+        run: uv run --no-project --python 3.13 python tools/smoke_test_install.py --wheel-dir dist --profile '${{ matrix.profile }}'

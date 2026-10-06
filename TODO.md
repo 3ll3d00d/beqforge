@@ -44,6 +44,26 @@ are retained so records and code comments remain traceable. Completed items are 
 
 ## Review evidence
 
+F2 also tracks the [catalogue filter optimisation design and initial implementation](plans/F2-catalogue-filter-optimisation.md):
+reproduce a published filter's ideal response more accurately on a named device, using only
+that filter. Deliver as the `beqoptimiser` package in the single `beqforge[optimiser]` distribution profile,
+used by beqcatalogue to publish device-specific
+variants consumed by ezbeq, supporting 48/96 kHz with extensible precision models.
+Search only above a configurable maximum error margin (default 0.5 dB); publish a replacement
+only when it meets that same margin.
+The library/CLI now implements direct-coefficient search and numerical validation;
+development examples show some qualifying replacements and correctly withheld partial improvements.
+The [static whole-catalogue report](docs/optimiser-report/README.md) now evaluates all 15,323 entries
+at both rates: 11,871 entries gain qualifying replacements at one or both rates; failures
+retain the originals in the aggregate curves. Catalogue/ezbeq publication integration remains open.
+The [package consolidation](plans/F2-package-consolidation.md) puts all three independent
+workflow packages in one versioned distribution with optional dependency profiles and
+separate commands; shared arithmetic lives beneath them in `beq_common`.
+Next: agree beqcatalogue/ezbeq variant and loading contracts, freeze catalogue evaluation and
+verify selected pairs on hardware. Parameter search and cascade refits remain follow-ups;
+no catalogue-wide or hardware-validated benefit is claimed. This work does not
+change the audio-derived pipeline or establish whether an authored BEQ suits its film.
+
 The consolidation at `4b11827` retained most work, but put a reporting issue above evidence
 quality, called actionable protocol work parked, and treated confirmation of already-adopted
 contract wording as blocked. This review restores the chart-bias follow-up and separates

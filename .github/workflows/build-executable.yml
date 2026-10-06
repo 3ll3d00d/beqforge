@@ -66,16 +66,16 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra designer
 
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
       - name: Build executable
-        run: uv run pyinstaller --clean beqforge.spec
+        run: uv run --extra designer pyinstaller --clean beqforge.spec
 
       - name: Smoke-test the built executable
-        run: uv run python tools/smoke_test_exe.py "${{ matrix.built_path }}"
+        run: uv run --extra designer python tools/smoke_test_exe.py "${{ matrix.built_path }}"
 
       - name: Rename artifact
         run: cp "${{ matrix.built_path }}" "${{ matrix.asset_name }}"

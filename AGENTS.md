@@ -12,25 +12,33 @@ answer, abstaining when nothing measures up. See "Working on `design/`" below fo
 and why, and [TODO.md](TODO.md) for what's still open.
 
 One entry point for file-based use: `tools/design_beq.py`, also installed as `beqforge design`
-(`pip install beqforge` / `uv tool install beqforge`). The only other way in is
+(`pip install "beqforge[designer]"` / `uv tool install "beqforge[designer]"`). The only other way in is
 `beqforge serve-designer`, an HTTP server implementing beqdesigner's `designer-interface.md`
 v1.1 §7.1 binding (`beqforge/designer.py` + `tools/designer_server.py`) — everything else here
 still holds: no other API, no other service, and the server is a thin transport around the same
 `beqforge.pipeline.run`, not a second implementation.
 
-The one separate tool is `beqforge-device-check` (`beqforge_device_check/`, guide in
+One distribution publishes the independent `beqforge`, `beqforge_device_check` and
+`beqoptimiser` workflow packages, with `designer`, `device-check`, `optimiser` and `all` extras
+and three separate CLI entry points. Shared primitives live in `beq_common`; workflow packages
+never import one another. All modules under `beq_common` that the designer reaches must be
+covered by its record/stage source fingerprints.
+
+The device measurement tool is `beqforge-device-check` (`beqforge_device_check/`, guide in
 [docs/device-check.md](docs/device-check.md), plan in `plans/F2-device-precision-validation.md`):
 a bench harness that measures whether a frozen cascade plays on a real DSP as predicted. It
-reads the designer's publication arithmetic (`BiquadSpec`, `biquad.py`,
-`filters.publication_filters`) but never feeds a decision back into the pipeline. Changes
-confined to `beqforge_device_check/` don't need the probe; changes to the `beqforge/`
-modules it imports still do.
+reads shared publication arithmetic (`beq_common.types.BiquadSpec`, `beq_common.biquad`,
+`beq_common.publication.publication_filters`) but never feeds a decision back into the pipeline. Changes
+confined to `beqforge_device_check/` or `beqoptimiser/` don't need the designer probe; changes
+to shared arithmetic used by the designer still do.
 
 ## Layout
 
 | File | Contents |
 | --- | --- |
-| `beqforge/biquad.py` | The RBJ `Biquad` class hierarchy every filter this package builds is rendered through. Imports nothing else from the package. |
+| `beq_common/` | Shared filter types, RBJ arithmetic, publication precision and distribution provenance; no workflow imports. |
+| `beqoptimiser/` | Coefficient optimisation library and CLI, guide in `docs/optimiser.md`; ships in the root distribution with the `optimiser` extra. |
+| `beqforge/biquad.py` | Compatibility exports for the shared RBJ `Biquad` class hierarchy every filter this package builds is rendered through. Imports nothing else from the package. |
 | `beqforge/__init__.py` | Shared design types — `Alignment`, `HighPass`, `BiquadSpec`, `PolePair`, `DESIGN_GRID`, `BIQUAD_BUDGET`. |
 | `beqforge/material.py` | Loads extracted signals (`.npz` from `tools/extract.py`) into the shapes `designer-interface.md` names, and models the bass-managed sub feed a BEQ actually operates on. |
 | `beqforge/extraction.py` | Signal → mean spectrum, peak/quiet envelopes, per-bin partial coherence, and the per-bin block-bootstrap standard error the boost ceiling is priced from. |
@@ -75,7 +83,7 @@ historical evidence, not additional work queues.
 ## Running things
 
 ```bash
-uv sync                                             # first time / after dependency changes
+uv sync --all-extras                                # first time / after dependency changes
 uv run python tools/design_beq.py data/NAME.npz     # automated design, all strategies
 uv run python tools/design_beq.py data/NAME.npz --strategy flatten   # just one
 uv run python tools/replay.py data/NAME.run.json.gz --charts charts   # redraw, no rerun
@@ -84,7 +92,7 @@ uv run ruff check beqforge tools tests   # ruff is a dependency; there is no con
 uv run ruff format beqforge tools tests
 ```
 
-Once installed (`pip install beqforge` / `uv tool install beqforge`), the same pipeline runs as
+Once installed (`pip install "beqforge[designer]"` / `uv tool install "beqforge[designer]"`), the same pipeline runs as
 `beqforge design data/NAME.npz`, `beqforge replay ...`, `beqforge extract ...`, `beqforge
 summarise ...` and `beqforge ledger ...` — `beqforge/cli.py` dispatches each subcommand straight
 to the script it names above, so `--help` on either form shows the same thing.
@@ -147,7 +155,7 @@ disagrees with its neighbours, the run met a suspend and needs repeating rather 
 
 ## Regression checking
 
-**Every change to anything under `beqforge/` goes through this before it is committed.** The
+**Every change to anything under `beqforge/` or designer-reachable shared primitives under `beq_common/` goes through this before it is committed.** The
 test suite checks the code does what it says; this checks what it now *decides* on real
 material. A full `design_beq.py` pass over the baseline set is ~20 minutes, so the workflow is
 tiered: a cheap probe on every title, and real runs only where the probe says they are needed.

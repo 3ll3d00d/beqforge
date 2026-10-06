@@ -43,7 +43,7 @@ def helper_path(value: str) -> Path:
 
 
 def provenance() -> dict:
-    from beqforge.record import revision
+    from beq_common.provenance import revision
 
     result = {"tool": "beqforge-device-check", "beqforge_revision": revision()}
     # The frozen entry script lives at the bundle root; package data lives alongside

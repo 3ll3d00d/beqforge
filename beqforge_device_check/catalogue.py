@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from beqforge import BiquadSpec
+from beq_common.types import BiquadSpec
 from beqforge_device_check.coefficients import rounded, stable
 from beqforge_device_check.manifest import digest, freeze_levels, generate, make_case
 from beqforge_device_check.profiles import DeviceProfile, finite

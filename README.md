@@ -8,9 +8,27 @@ rather than guesses, when the evidence isn't there.
 
 > NB: Code and requirements are LLM generated with human guidance/review.
 
+One published distribution, `beqforge`, provides three independent workflow packages:
+
+| Use case | Python package | Install profile | Command |
+| --- | --- | --- | --- |
+| Derive BEQ from audio | `beqforge` | `beqforge[designer]` | `beqforge` |
+| Measure device playback | `beqforge_device_check` | `beqforge[device-check]` | `beqforge-device-check` |
+| Optimise published coefficients | `beqoptimiser` | `beqforge[optimiser]` | `beqoptimiser` |
+
+Install `beqforge[all]` for all three. NumPy is the common runtime dependency; each profile
+adds its own requirements. The workflow packages never import one another. Shared filter
+types, RBJ arithmetic and publication precision live in `beq_common`, which imports no
+workflow code. All packages, commands and profiles ship in the same wheel and use one version.
+
+[Optimiser usage](docs/optimiser.md) describes the 48/96 kHz coefficient-only library and CLI.
+It requires no audio and does not participate in the audio-derived design pipeline.
+The [whole-catalogue optimisation report](docs/optimiser-report/README.md) includes static
+before/after charts, improvement counts and aggregate errors at 48 and 96 kHz.
+
 Extracted from the [`beqanalyser`](https://github.com/3ll3d00d/beqanalyser) project, whose
 clustering pipeline summarises the existing [BEQ catalogue](https://beqcatalogue.readthedocs.io)
-instead — the two share only the RBJ biquad arithmetic (`beqforge/biquad.py`).
+instead — the two share only the RBJ biquad arithmetic (now `beq_common/biquad.py`).
 
 ## Prerequisites
 
@@ -23,7 +41,7 @@ instead — the two share only the RBJ biquad arithmetic (`beqforge/biquad.py`).
 For day-to-day use once published:
 
 ```bash
-uv tool install beqforge      # or: pipx install beqforge
+uv tool install "beqforge[designer]"      # or: pipx install "beqforge[designer]"
 beqforge design data/FILM.npz
 ```
 
@@ -32,7 +50,7 @@ For working on this repo:
 ```bash
 git clone <this repo>
 cd beqforge
-uv sync
+uv sync --all-extras
 uv run python tools/design_beq.py data/FILM.npz
 ```
 
@@ -324,10 +342,10 @@ in [implemented changes](plans/done-design-and-pipeline.md),
 ## Development
 
 ```bash
-uv sync
-uv run pytest              # ~2 minutes, ~460 tests
-uv run ruff check beqforge tools tests
-uv run ruff format beqforge tools tests
+uv sync --all-extras
+uv run --all-extras pytest
+uv run ruff check beq_common beqforge beqforge_device_check beqoptimiser tools tests
+uv run ruff format beq_common beqforge beqforge_device_check beqoptimiser tools tests
 ```
 
 See [AGENTS.md](AGENTS.md) for the full layout, conventions and gotchas.

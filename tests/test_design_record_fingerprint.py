@@ -214,3 +214,26 @@ def test_revision_never_raises_when_sources_are_unreadable(monkeypatch):
 
     monkeypatch.setattr(record, "_git_revision", unreadable)
     assert record.revision() == "unknown (sources unreadable)"
+
+
+@pytest.mark.parametrize(
+    "relative,analysis_changes",
+    [
+        ("beq_common/types.py", True),
+        ("beq_common/biquad.py", False),
+        ("beq_common/publication.py", False),
+    ],
+)
+def test_shared_arithmetic_invalidates_the_dependent_sources(
+    source_tree, relative, analysis_changes
+):
+    before_record = record._source_digest()
+    before_analysis = cache.digest_of(cache.ANALYSIS_MODULES)
+    before_parametric = cache.digest_of(cache.PARAMETRIC_MODULES)
+    path = source_tree / relative
+    path.write_text(path.read_text() + "\n# changed shared primitive\n")
+    assert record._source_digest() != before_record
+    assert (
+        cache.digest_of(cache.ANALYSIS_MODULES) != before_analysis
+    ) == analysis_changes
+    assert cache.digest_of(cache.PARAMETRIC_MODULES) != before_parametric

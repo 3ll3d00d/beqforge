@@ -97,6 +97,7 @@ def _repository_root() -> Path:
 def _source_paths(root: Path) -> tuple[Path, ...]:
     declared = {root / name for name in RECORD_SOURCE_FILES}
     package_modules = set((root / "beqforge").rglob("*.py"))
+    package_modules.update((root / "beq_common").rglob("*.py"))
     return tuple(sorted(declared | package_modules))
 
 
@@ -124,6 +125,7 @@ def _git_revision() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=_repository_root(),
         )
         described = out.stdout.strip() or "unknown"

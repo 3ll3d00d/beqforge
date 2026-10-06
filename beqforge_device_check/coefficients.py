@@ -2,9 +2,9 @@
 
 import numpy as np
 
-from beqforge import BiquadSpec
-from beqforge.biquad import HighShelf, LowShelf, PeakingEQ
-from beqforge.filters import publication_filters
+from beq_common.biquad import HighShelf, LowShelf, PeakingEQ
+from beq_common.publication import publication_filters
+from beq_common.types import BiquadSpec
 
 
 def coefficients(filters: list[BiquadSpec], rate: int) -> np.ndarray:
