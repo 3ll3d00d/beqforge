@@ -8,6 +8,7 @@ import os
 import platform
 import sys
 import tempfile
+import time
 from dataclasses import asdict
 from functools import lru_cache
 from importlib.resources import files
@@ -281,7 +282,20 @@ class ResultCache:
             ) as stream:
                 temporary = Path(stream.name)
                 json.dump(envelope, stream, allow_nan=False, separators=(",", ":"))
-            temporary.replace(self.directory / f"{envelope['key']}.json")
+            destination = self.directory / f"{envelope['key']}.json"
+            # Windows can briefly deny replacement while another writer or reader
+            # holds the destination. Keep publication atomic and bound the wait.
+            for attempt in range(5):
+                try:
+                    temporary.replace(destination)
+                    break
+                except PermissionError as error:
+                    if (
+                        getattr(error, "winerror", None) not in (5, 32, 33)
+                        or attempt == 4
+                    ):
+                        raise
+                    time.sleep(0.01 * 2**attempt)
             return True
         except OSError:
             LOGGER.debug(

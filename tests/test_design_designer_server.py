@@ -19,6 +19,7 @@ import http.client
 import json
 import logging
 import threading
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -225,7 +226,10 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
 def _serve(monkeypatch, params: PipelineParams, cache):
     """A server of its own, with its own settings — `_Handler`'s are class attributes, so
     these are restored when the test ends and the module's shared server is unaffected."""
-    monkeypatch.setattr(_Handler, "params", params)
+    # These tests exercise transport and cache identity/reuse, not section-budget
+    # escalation. Still run the real pipeline with a bounded numerical search;
+    # test_accepts_a_real_injected_rolloff_over_http retains the full budget.
+    monkeypatch.setattr(_Handler, "params", replace(params, max_sections=1))
     monkeypatch.setattr(_Handler, "cache", cache)
     httpd = HTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)

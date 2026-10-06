@@ -191,8 +191,20 @@ def test_global_disable_forces_calculation(store, monkeypatch):
 
 
 def test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, request
 ):
+    manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "beqoptimiser/data/seed-manifest.json"
+        ).read_text()
+    )
+    # Exercise reuse in the seed's declared environment on every host. Production
+    # must reject this Linux seed on incompatible architectures/dependencies.
+    monkeypatch.setattr(
+        caching, "implementation_identity", lambda: manifest["implementation"]
+    )
+    caching._bundled_entries.cache_clear()
+    request.addfinalizer(caching._bundled_entries.cache_clear)
     # The entry appears in the frozen report, including the complete 96 kHz baseline.
     value = json.loads(
         (Path(__file__).parent / "fixtures" / "optimiser_seed_entry.json").read_text()
@@ -206,6 +218,49 @@ def test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search(
         assert report["variant"] is not None
         assert report["result"]["candidate_error_db"] <= 0.5
     assert not (tmp_path / "unused").exists()
+
+
+@pytest.mark.parametrize(
+    "field", ["system", "machine", "numpy", "scipy", "longdouble_mantissa_bits"]
+)
+def test_bundled_seed_rejects_incompatible_environment(monkeypatch, request, field):
+    manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "beqoptimiser/data/seed-manifest.json"
+        ).read_text()
+    )
+    identity = {**manifest["implementation"], field: "incompatible"}
+    monkeypatch.setattr(caching, "implementation_identity", lambda: identity)
+    caching._bundled_entries.cache_clear()
+    request.addfinalizer(caching._bundled_entries.cache_clear)
+    assert caching._bundled_entries() == {}
+
+
+@pytest.mark.parametrize("failures", [2, 5])
+def test_windows_sharing_violation_has_bounded_atomic_retry(
+    store, monkeypatch, failures
+):
+    replace = Path.replace
+    attempts = []
+    waits = []
+
+    def busy(source, destination):
+        attempts.append(True)
+        if len(attempts) <= failures:
+            error = PermissionError("destination in use")
+            error.winerror = 32
+            raise error
+        return replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", busy)
+    monkeypatch.setattr(caching.time, "sleep", waits.append)
+    envelope = {"key": "test", "result": {"value": 1}}
+    assert store._write(envelope) == (failures < 5)
+    assert len(attempts) == min(failures + 1, 5)
+    assert len(waits) == min(failures, 4)
+    assert not list(store.directory.glob("*.tmp"))
+    if failures < 5:
+        assert json.loads((store.directory / "test.json").read_text()) == envelope
 
 
 def test_bundled_entries_have_valid_checksums_and_population_provenance():

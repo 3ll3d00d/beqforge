@@ -420,6 +420,11 @@ Catalogue/ezbeq integration and hardware checks remain the next work.
 
 ### Automatic library cache and bundled seed (6 October 2026)
 
+Cross-platform test and cache-publication fixes are recorded in
+[test portability and runtime](test-portability-and-runtime.md): bounded retries
+for Windows atomic-replacement sharing violations, compatible seed-reuse tests
+and explicit incompatible-environment rejection coverage.
+
 `beqoptimiser.optimise` and the catalogue adapter now share an automatic result cache.
 Numerical request keys cover coefficients, sample rate, complete settings and precision
 configuration, numerical source/version, dependency versions and execution architecture.
