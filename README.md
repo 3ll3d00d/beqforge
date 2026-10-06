@@ -232,8 +232,11 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
 The same workflow builds and checks the Python wheel and source distribution, verifies all
-five dependency profiles, and publishes `beqforge` to PyPI after every executable build
-passes. Release tags must match `beq_common.__version__` exactly (`v0.1.0` for `0.1.0`);
+five dependency profiles, and runs the reusable tests workflow against the release commit.
+GitHub release creation and executable builds require those tests to pass on Linux, macOS
+and Windows, including device-check tests and isolated dependency profiles. PyPI publication
+also requires every executable build to pass. Release tags must match
+`beq_common.__version__` exactly (`v0.1.0` for `0.1.0`);
 bump that version before creating a new release tag. Both distributions are also attached
 to the GitHub release. Manual workflow runs build artifacts without publishing to PyPI.
 

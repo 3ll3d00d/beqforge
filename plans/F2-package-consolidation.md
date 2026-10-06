@@ -81,3 +81,14 @@ Added README metadata to the distribution. Both built artifacts passed strict Tw
 the wheel passed a fresh offline installation with the `all` dependency profile and all
 three commands. The workflow passed actionlint. No workflow implementation or numerical
 behaviour changed inside the Python packages, so no designer regression probe was required.
+
+### Release test gate (6 October 2026)
+
+`tests.yml` is now callable as a reusable workflow while retaining branch-push validation.
+The executable release workflow calls it on its own release commit, running designer/shared/
+optimiser tests, device-check tests on Linux/macOS/Windows, and all five isolated dependency
+profiles. Release creation, executable builds and PyPI publication depend on successful tests.
+The manual-build condition explicitly requires successful tests and package validation, so a
+skipped release-creation job cannot bypass a failed upstream check. Publication still requires
+all executable builds to pass and only runs for a release-tag push. Both changed workflows
+passed actionlint and whitespace checks; no release run or publication was triggered locally.

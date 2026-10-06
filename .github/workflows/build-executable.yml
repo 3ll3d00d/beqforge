@@ -14,6 +14,12 @@ permissions:
   contents: write  # softprops/action-gh-release needs to create/attach to the release
 
 jobs:
+  tests:
+    name: Release tests
+    uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
+
   package:
     name: Build Python package
     runs-on: ubuntu-latest
@@ -60,7 +66,7 @@ jobs:
 
   create_release:
     name: Create release
-    needs: [package]
+    needs: [package, tests]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -83,11 +89,11 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    # runs regardless of trigger (workflow_dispatch builds without a release to attach to);
-    # only waits on create_release, and only when that job actually ran, so a tag push still
-    # uploads to one release created once rather than racing three matrix legs to create it.
-    needs: [create_release]
-    if: always() && (needs.create_release.result == 'success' || needs.create_release.result == 'skipped')
+    # Manual runs skip release creation, but still require tests and package validation.
+    needs: [create_release, package, tests]
+    if: >-
+      !cancelled() && needs.tests.result == 'success' && needs.package.result == 'success' &&
+      (needs.create_release.result == 'success' || needs.create_release.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -141,7 +147,7 @@ jobs:
 
   publish:
     name: Publish Python package to PyPI
-    needs: [package, build, create_release]
+    needs: [tests, package, build, create_release]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment:
