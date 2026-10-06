@@ -66,7 +66,7 @@ def test_entry_metadata_and_volume_are_rebuilt(store, monkeypatch):
         "transport",
         "margin",
         "passes",
-        "guard",
+        "band",
         "environment",
     ],
 )
@@ -89,8 +89,8 @@ def test_request_changes_invalidate_cache(store, monkeypatch, change):
         kwargs["settings"] = Settings(margin_db=0.4)
     elif change == "passes":
         kwargs["settings"] = Settings(passes=5)
-    elif change == "guard":
-        kwargs["settings"] = Settings(guard_margin_db=0.4)
+    elif change == "band":
+        kwargs["settings"] = Settings(band_hz=(3.0, 200.0))
     else:
         identity = {**caching.implementation_identity(), "numpy": "different"}
         monkeypatch.setattr(caching, "implementation_identity", lambda: identity)
@@ -150,10 +150,15 @@ def test_concurrent_writers_publish_complete_identical_results(store):
 
 
 def test_nonfinite_and_unsuccessful_results_round_trip(store):
-    reference = [Section("LowShelf", 3, 0.7, 10).sos(48000)]
-    failed = optimise(reference, rate=48000, cache=store)
-    assert failed.replacement is None
-    assert optimise(reference, rate=48000, cache=store) == failed
+    # an original which can't be represented has an infinite error
+    reference = [Section("LowShelf", 3, 0.7, 10).sos(96000)]
+    nonfinite = optimise(reference, rate=96000, cache=store)
+    assert np.isinf(nonfinite.original_error_db)
+    assert optimise(reference, rate=96000, cache=store) == nonfinite
+    accurate = [Section("LowShelf", 30, 0.7, 6).sos(48000)]
+    unsuccessful = optimise(accurate, rate=48000, cache=store)
+    assert unsuccessful.replacement is None
+    assert optimise(accurate, rate=48000, cache=store) == unsuccessful
     body = caching._encode({"x": float("inf"), "optional": None})
     assert json.loads(json.dumps(body)) == body
     restored = caching._decode(body)
@@ -312,8 +317,6 @@ def test_improvement_round_trips_through_the_cache(store, monkeypatch):
     [
         # no better than the original
         lambda r: {"candidate_error_db": r.original_error_db},
-        # worse than the original outside the matching band
-        lambda r: {"guard_error_db": max(0.5, r.original_guard_error_db) + 1},
         # missing coefficients
         lambda r: {"replacement": None},
     ],

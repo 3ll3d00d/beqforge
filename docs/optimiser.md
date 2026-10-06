@@ -42,16 +42,15 @@ precision models implement `quantise`, `neighbours` and a versioned identifying 
 in the initial device-motivated examples. No hardware validity follows from a format name.
 
 The default matching band is 2–200 Hz. The maximum absolute cascade magnitude error must
-exceed the configurable 0.5 dB margin before search begins. A replacement is returned when its
-independently evaluated maximum error meets that margin, its outside-band error meets
-`guard_margin_db` (also 0.5 dB by default), it is stable, and publication/reloading through the
-configured transport and storage representations reproduces the evaluated coefficients exactly.
-A candidate that misses either margin is still returned, as an `improvement`, when it is
-strictly better than the original across the matching band and its outside-band error is no
-worse than the original's there (or within `guard_margin_db`); it must pass the same stability,
-convergence and publication checks. An original that cannot be represented (an infinite error)
-is improved by any qualifying stable candidate. Recalibrating the margin without a semantic
-reason is not part of this process. Guard checks include near-DC, DC and Nyquist.
+exceed the configurable 0.5 dB margin before search begins. Candidates are assessed over the
+matching band only. A `replacement` is returned when a candidate's independently evaluated
+maximum error meets that margin, and an `improvement` when it does not but is strictly lower
+than the original's. Both must be stable, and publication/reloading through the configured
+transport and storage representations must reproduce the evaluated coefficients exactly. An
+original that cannot be represented (an infinite error) is improved by any qualifying stable
+candidate. The error outside the matching band, including near-DC, DC and Nyquist, is reported
+as `guard_error_db` for information but does not affect the outcome. Recalibrating the margin
+without a semantic reason is not part of this process.
 
 Outcomes are `within_margin`, `replacement`, `improvement`, `no_replacement` and `unresolved`.
 Invalid API inputs raise `ValueError`; the CLI reports unsupported entries individually.

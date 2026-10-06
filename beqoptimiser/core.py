@@ -117,7 +117,6 @@ def magnitude(sos: np.ndarray, frequencies: np.ndarray, rate: int) -> np.ndarray
 class Settings:
     margin_db: float = 0.5
     band_hz: tuple[float, float] = (2.0, 200.0)
-    guard_margin_db: float = 0.5
     passes: int = 6
     grid_points: int = 512
     validation_points: int = 8192
@@ -129,14 +128,12 @@ class Settings:
                 np.isfinite(
                     [
                         self.margin_db,
-                        self.guard_margin_db,
                         *self.band_hz,
                         self.numerical_tolerance_db,
                     ]
                 )
             )
             or self.margin_db <= 0
-            or self.guard_margin_db <= 0
             or not 0 < self.band_hz[0] < self.band_hz[1]
             or self.passes < 1
             or self.grid_points < 32
@@ -161,7 +158,6 @@ class Result:
     band_hz: tuple[float, float] = (2.0, 200.0)
     candidate_error_db: float | None = None
     guard_error_db: float | None = None
-    original_guard_error_db: float | None = None
     replacement: tuple[tuple[float, ...], ...] | None = None
     evaluations: int = 0
     source_digest: str = ""
@@ -211,10 +207,11 @@ def optimise(
 ) -> Result:
     """Return custom SOS when the original exceeds the margin and a candidate improves on it.
 
-    Outcomes for a search: ``replacement`` when the candidate meets the margin and guard margin,
-    ``improvement`` when it does not meet them but is strictly better than the original in the
-    matching band and no worse than the original outside it (or within the guard margin there),
-    otherwise ``no_replacement``. Both ``replacement`` and ``improvement`` carry the coefficients.
+    Candidates are assessed over the matching band only. Outcomes for a search: ``replacement``
+    when the candidate meets the margin, ``improvement`` when it does not but is strictly better
+    than the original, otherwise ``no_replacement``. Both ``replacement`` and ``improvement``
+    carry the coefficients and must be stable and survive publication/reload. The error outside
+    the matching band is reported as ``guard_error_db`` but does not affect the outcome.
 
     reference and sent use normalised SOS [b0,b1,b2,1,a1,a2], subtractive feedback.
     Maxima are dense-grid/refined numerical estimates, not certified uniform bounds.
@@ -344,45 +341,23 @@ def optimise(
         )
         return value, all(ok for _, ok in results)
 
-    guard, guard_converged = guard_error(current)
-    converged = converged and guard_converged
-    near = (
-        abs(measured - cfg.margin_db) < cfg.numerical_tolerance_db
-        or abs(guard - cfg.guard_margin_db) < cfg.numerical_tolerance_db
-    )
+    # recorded for information only, decisions are made on the matching band alone
+    guard, _ = guard_error(current)
     publishable = stable(current) and np.array_equal(store(current), current)
-    original_guard = None
-    if near or not converged:
+    if abs(measured - cfg.margin_db) < cfg.numerical_tolerance_db or not converged:
         outcome = "unresolved"
-    elif publishable and measured <= cfg.margin_db and guard <= cfg.guard_margin_db:
+    elif publishable and measured <= cfg.margin_db:
         outcome = "replacement"
     elif publishable and measured < baseline - cfg.numerical_tolerance_db:
-        # outside the margin but better than what would be loaded today, so accepted unless it is
-        # worse than the original outside the matching band. An unstable original is +inf there;
-        # an original whose guard error does not converge only allows the guard margin.
-        if stable(base):
-            original_guard, original_guard_converged = guard_error(base)
-            if not original_guard_converged:
-                original_guard = None
-        else:
-            original_guard = float("inf")
-        allowed = max(
-            cfg.guard_margin_db,
-            original_guard if original_guard is not None else cfg.guard_margin_db,
-        )
-        outcome = (
-            "improvement"
-            if guard <= cfg.guard_margin_db
-            or guard <= allowed - cfg.numerical_tolerance_db
-            else "no_replacement"
-        )
+        # outside the margin but better than what would be loaded today (an original which
+        # can't be represented has an infinite error so any publishable candidate is better)
+        outcome = "improvement"
     else:
         outcome = "no_replacement"
     return result(
         outcome,
         candidate_error_db=measured,
         guard_error_db=guard,
-        original_guard_error_db=original_guard,
         replacement=tuple(tuple(float(v) for v in row) for row in current)
         if outcome in PUBLISHED_OUTCOMES
         else None,

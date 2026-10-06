@@ -408,7 +408,7 @@ def render(entries, results, output, provenance):
         "",
         "## Whole-catalogue error by frequency",
         "",
-        "“After” uses an optimised cascade when it passes the 0.5 dB maximum-error margin across 2–200 Hz and the 0.5 dB out-of-band guard (a replacement), or when it misses those but is strictly better than the original across 2–200 Hz and no worse than the original out of band (an improvement). Both must be stable, converge numerically and survive publication. Otherwise it retains the original.",
+        "“After” uses an optimised cascade when it meets the 0.5 dB maximum-error margin across 2–200 Hz (a replacement), or when it misses the margin but is strictly better than the original across 2–200 Hz (an improvement). Only 2–200 Hz is assessed. Both must be stable, converge numerically and survive publication. Otherwise it retains the original.",
         "",
         "The charts show pointwise absolute-error median, 95th and 99th percentiles, and maximum. The table reports those statistics of each entry’s maximum sampled error within each frequency band. These are different summaries: a pointwise percentile need not follow one particular entry. Chart axes use a logarithmic frequency scale and a symmetric logarithmic error scale to retain the tails.",
         "",

@@ -63,29 +63,48 @@ def test_partial_improvement_is_published(rate):
     result = optimise(reference, rate=rate)
     assert result.outcome == "improvement"
     assert 0.5 < result.candidate_error_db < result.original_error_db
-    assert result.guard_error_db <= max(0.5, result.original_guard_error_db)
     stored = Float32().quantise(np.array(result.replacement))
     assert stable(stored)
     np.testing.assert_array_equal(stored, result.replacement)
 
 
-@pytest.mark.parametrize(
-    "rate,kind,freq,q,gain",
-    [(48000, "LowShelf", 3, 0.7, 10), (48000, "HighShelf", 5, 6, 12)],
-)
-def test_improvement_worse_than_original_outside_band_is_not_published(
-    rate, kind, freq, q, gain
-):
-    result = optimise([Section(kind, freq, q, gain).sos(rate)], rate=rate)
+class Frozen(Float32):
+    """float32 with no neighbouring values to search, so no candidate can beat the original"""
+
+    name = "frozen-float32"
+
+    def neighbours(self, value):
+        return (value,)
+
+
+def test_candidate_no_better_than_original_is_not_published():
+    ref = [Section("PeakingEQ", 5, 6, 12).sos(48000)]
+    result = optimise(ref, rate=48000, precision=Frozen())
     assert result.outcome == "no_replacement" and result.replacement is None
-    assert result.candidate_error_db < result.original_error_db
-    assert result.guard_error_db > max(0.5, result.original_guard_error_db)
+    assert result.candidate_error_db == pytest.approx(result.original_error_db)
+
+
+@pytest.mark.parametrize("rate,kind", [(48000, "LowShelf"), (48000, "HighShelf")])
+def test_out_of_band_error_does_not_affect_the_outcome(rate, kind):
+    # these candidates are worse than the original outside 2-200 Hz, which is not assessed
+    result = optimise(
+        [
+            Section(
+                kind,
+                3 if kind == "LowShelf" else 5,
+                0.7 if kind == "LowShelf" else 6,
+                10 if kind == "LowShelf" else 12,
+            ).sos(rate)
+        ],
+        rate=rate,
+    )
+    assert result.outcome == "improvement" and result.replacement is not None
+    assert result.guard_error_db > 0.5
 
 
 def test_unstable_original_accepts_any_better_stable_candidate():
     result = optimise([Section("LowShelf", 3, 0.7, 10).sos(96000)], rate=96000)
     assert np.isinf(result.original_error_db)
-    assert np.isinf(result.original_guard_error_db)
     assert result.outcome == "improvement"
     assert np.isfinite(result.candidate_error_db)
     assert stable(np.array(result.replacement))
@@ -113,13 +132,9 @@ def test_margin_and_numerical_boundary():
     assert strict.candidate_error_db < strict.original_error_db
 
 
-def test_guard_demotes_matching_candidate_to_an_improvement():
-    ref = [Section("PeakingEQ", 10, 0.7, 12).sos(96000)]
-    r = optimise(ref, rate=96000, settings=Settings(guard_margin_db=0.0001))
-    assert r.candidate_error_db < 0.5
-    # outside the guard margin, so not a replacement, but no worse than the original there
-    assert r.guard_error_db <= r.original_guard_error_db
-    assert r.outcome == "improvement" and r.replacement is not None
+def test_guard_setting_no_longer_exists():
+    with pytest.raises(TypeError):
+        Settings(guard_margin_db=0.1)
 
 
 def test_fixed_precision_protocol():
@@ -192,18 +207,14 @@ def test_cli_both_rates_and_no_unsuccessful_variant(tmp_path):
     source = tmp_path / "in.json"
     output = tmp_path / "out.json"
     source.write_text(
-        json.dumps({"filters": [{"type": "LowShelf", "freq": 3, "q": 0.7, "gain": 10}]})
+        json.dumps({"filters": [{"type": "LowShelf", "freq": 30, "q": 0.7, "gain": 6}]})
     )
     assert main([str(source), "--out", str(output)]) == 0
     document = json.loads(output.read_text())
-    entries = {r["rate"]: r for r in document["entries"]}
-    assert set(entries) == {48000, 96000}
-    # 48k only finds candidates worse than the original outside the band, 96k improves on an
-    # original which can't be represented
-    assert entries[48000]["result"]["outcome"] == "no_replacement"
-    assert entries[48000]["variant"] is None
-    assert entries[96000]["result"]["outcome"] == "improvement"
-    assert entries[96000]["variant"] is not None
+    assert {r["rate"] for r in document["entries"]} == {48000, 96000}
+    for r in document["entries"]:
+        published = r["result"]["outcome"] in ("replacement", "improvement")
+        assert (r["variant"] is not None) == published
 
 
 @pytest.mark.parametrize(

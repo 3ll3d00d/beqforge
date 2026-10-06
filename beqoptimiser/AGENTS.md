@@ -21,15 +21,14 @@ Both 48 and 96 kHz must work independently. Precision models are separate from s
 keep storage and transport configurable so future representations can be added.
 
 Search only when maximum absolute magnitude error exceeds the configured margin (default
-0.5 dB over 2–200 Hz). Return a `replacement` when independent validation meets the
-matching-band margin, outside-band guard margin, stability and publication/reload checks.
-Return an `improvement` (also carrying coefficients) when a candidate misses a margin but is
-strictly better than the original in the matching band and no worse than it outside the band
-(or within the guard margin), and passes the same stability, convergence and publication checks;
-the maintainer chose to publish any genuine improvement rather than only within-margin results.
-Every other outcome carries `replacement=None`. Near-boundary uncertainty must remain
-unresolved. Do not weaken these rules further to raise published counts. Entry/rate results
-and distinct improved titles are different counts.
+0.5 dB over 2–200 Hz). Candidates are assessed over that matching band only: return a
+`replacement` when independent validation meets the margin, and an `improvement` when it does
+not but is strictly better than the original. Both carry coefficients and must pass the
+stability and publication/reload checks; the maintainer chose to publish any genuine
+in-band improvement rather than only within-margin results, and to ignore out-of-band error
+(still reported as `guard_error_db`). Every other outcome carries `replacement=None`.
+Near-boundary uncertainty must remain unresolved. Do not weaken these rules further to raise
+published counts. Entry/rate results and distinct improved titles are different counts.
 
 The source cascade, section count/order and original volume offset are preserved. Magnitude
 matching does not imply phase preservation. Use the ideal RBJ response as the reference and
