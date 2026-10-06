@@ -55,7 +55,7 @@ def smoke(
     payload["executable_sha256"] = file_hash(binary)
     payload["executable_bytes"] = binary.stat().st_size
     atomic_json(directory / "smoke.json", payload)
-    (directory / "stderr.txt").write_text(result.stderr)
+    (directory / "stderr.txt").write_text(result.stderr, encoding="utf-8")
     if package:
         package.mkdir(parents=True, exist_ok=False)
         shutil.copy2(binary, package / binary.name)
@@ -71,7 +71,8 @@ def smoke(
         (package / "SHA256SUMS").write_text(
             "".join(
                 f"{file_hash(p)}  {p.relative_to(package).as_posix()}\n" for p in paths
-            )
+            ),
+            encoding="utf-8",
         )
     return payload
 
