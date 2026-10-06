@@ -66,3 +66,18 @@ report content beyond the probe's fields. Baseline records were not overwritten.
 Scratch evidence and built artefacts are under `/tmp/beqforge-consolidation/`. Nothing was
 published and no device was loaded. Catalogue publication/ezbeq variant selection remain
 the separately recorded F2 integration work; this consolidation adds no new workflow API.
+
+### PyPI release publication (6 October 2026)
+
+The executable release workflow now builds wheel/sdist artifacts, checks a tag against the
+wheel's declared version, validates metadata with strict Twine checks, and exercises all five
+dependency profiles. Package validation precedes release creation. A tag-push publication job
+waits for every executable build to succeed, attaches the same distributions to the release,
+and uploads to PyPI through Trusted Publishing in the `pypi` GitHub environment. Manual runs
+build artifacts without publishing. The README records the required PyPI publisher identity
+and one-time environment setup; no release tag or actual PyPI upload was performed here.
+
+Added README metadata to the distribution. Both built artifacts passed strict Twine checks;
+the wheel passed a fresh offline installation with the `all` dependency profile and all
+three commands. The workflow passed actionlint. No workflow implementation or numerical
+behaviour changed inside the Python packages, so no designer regression probe was required.

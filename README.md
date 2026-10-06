@@ -231,6 +231,19 @@ proves a built executable's `serve-designer` actually accepts a real request (no
 `multiprocessing` `spawn` inside a frozen executable, which only a real fit exercises. To build
 one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
+The same workflow builds and checks the Python wheel and source distribution, verifies all
+five dependency profiles, and publishes `beqforge` to PyPI after every executable build
+passes. Release tags must match `beq_common.__version__` exactly (`v0.1.0` for `0.1.0`);
+bump that version before creating a new release tag. Both distributions are also attached
+to the GitHub release. Manual workflow runs build artifacts without publishing to PyPI.
+
+One-time setup: configure a PyPI Trusted Publisher for project `beqforge`, owner `3ll3d00d`,
+repository `beqforge`, workflow `build-executable.yml`, and GitHub environment `pypi`.
+Create that environment in the repository settings. For the first publication, register a
+pending publisher on PyPI if the project does not yet exist. Publishing uses GitHub's OIDC
+identity with no API-token secret; see the
+[PyPI Trusted Publishing guide](https://docs.pypi.org/trusted-publishers/using-a-publisher/).
+
 ## Device check (preview)
 
 `beqforge-device-check` is a separate tool from the designer. It measures whether a frozen

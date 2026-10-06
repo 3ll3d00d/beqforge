@@ -14,8 +14,53 @@ permissions:
   contents: write  # softprops/action-gh-release needs to create/attach to the release
 
 jobs:
+  package:
+    name: Build Python package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - name: Build wheel and source distribution
+        run: uv build --out-dir dist
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run --no-project --python 3.13 python - <<'PY'
+          import email
+          import os
+          import pathlib
+          import zipfile
+
+          wheel, = pathlib.Path("dist").glob("*.whl")
+          with zipfile.ZipFile(wheel) as archive:
+              metadata, = (name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              version = email.message_from_bytes(archive.read(metadata))["Version"]
+          if os.environ["RELEASE_TAG"] != f"v{version}":
+              raise SystemExit(f"Release tag must be v{version}, matching the package version")
+          PY
+      - name: Validate package metadata
+        run: uvx twine check --strict dist/*
+      - name: Verify dependency profiles
+        run: |
+          for profile in base designer optimiser device-check all; do
+            uv run --no-project --python 3.13 python tools/smoke_test_install.py --wheel-dir dist --profile "$profile"
+          done
+      - name: Upload package distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+
   create_release:
     name: Create release
+    needs: [package]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -93,3 +138,29 @@ jobs:
           files: ${{ matrix.asset_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish Python package to PyPI
+    needs: [package, build, create_release]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/beqforge/
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-distributions
+          path: dist
+      - name: Attach distributions to release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish distributions
+        uses: pypa/gh-action-pypi-publish@release/v1
