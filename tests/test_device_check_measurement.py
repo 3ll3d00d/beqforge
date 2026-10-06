@@ -50,6 +50,24 @@ def test_capture_quality_rejects_failure_modes(stimulus):
     assert "silent capture" in capture_quality(np.zeros_like(x), len(x))
 
 
+def test_a_device_that_saturates_below_full_scale_is_caught_by_its_flat_top():
+    """A 2x4 HD clipped at 0.9986, under the 0.999 full-scale test, and went unnoticed."""
+    rate, low = 48000, 5
+    t = np.arange(rate * 2) / rate
+    clean = 0.9986 * np.sin(2 * np.pi * low * t)
+    assert capture_quality(clean, len(t), rate=rate, low_hz=low) == []
+    clipped = np.clip(1.12 * np.sin(2 * np.pi * low * t), -0.9986, 0.9986)
+    failures = capture_quality(clipped, len(t), rate=rate, low_hz=low)
+    assert any("flat-topped at -0.012 dBFS" in f for f in failures)
+    # Quiet content is held to its own crest, not to full scale.
+    assert (
+        capture_quality(
+            0.003 * np.sin(2 * np.pi * low * t), len(t), rate=rate, low_hz=low
+        )
+        == []
+    )
+
+
 def test_independent_delay_and_clock_drift(stimulus):
     x, metadata = stimulus
     delay = 300

@@ -856,3 +856,49 @@ The report leads with a summary and one row per filter and level: Device PASS/FA
 (measured vs predicted, with uncertainty) and Coefficients OK/DEGRADED (predicted vs intended),
 each with a chart of intended, predicted and measured responses; swept parameters get error
 charts. The per-load detail against the exact filter remains, collapsed, and in report.json.
+
+### 13. Catalogue sample: per-cascade convergence, whole curves, and one clipped cascade
+
+The first 50-cascade catalogue sample on the 2x4 HD (`results/20261005T192911Z`, USB loopback,
+96 kHz, −47.7 dBFS) reported almost nothing: each filter's measured curve appeared as a few
+dots below 10 Hz. The measurements were sound (SNR ~107 dB, identity repeats agreeing to
+0.0001 dB); the qualification passed only 108 of 2578 bins. `complete` pooled convergence as
+the *worst cascade's* disagreement between sweep variants and charged it to every filter, and
+one cascade disagreed by up to 25.7 dB at 10–40 Hz (median 3.85 dB against a 0.033 dB budget).
+
+Changes:
+
+* **Convergence is budgeted per cascade** (`qualification.cascade_convergence`). The
+  identity's own convergence stays in the bench budget every cascade carries; a cascade's
+  disagreement widens only its own uncertainty and is reported as not settled. Records made
+  before this are derived again from their hashed traces, in `complete` and in `analyse`, so
+  an existing run re-analyses without remeasuring.
+* **Every curve is drawn whole.** Judging is limited to qualified bins; display is not. Charts
+  show designed, predicted and actual responses and actual − predicted at every bin, judged
+  bins solid and the rest faint, with the judged fraction in the title and the table.
+* **The report answers its question first:** does the device play the simulated (predicted)
+  response — YES, NO (naming each failing filter, worst dB and frequency) or NOT DETERMINED,
+  with the median and lowest judged fraction.
+
+Re-analysing the sample offline: 49 of 50 cascades PASS on 100% of their bins (worst
+0.0082 dB). *Mojin: The Worm Valley* FAILs (0.36 dB at 8.7 Hz on its 2% judged bins).
+
+**Why Mojin failed: the device clipped, and nothing caught it.** Two defects together:
+
+1. `freeze_levels` screened the gain of the *sent* float64 coefficients (+32.5 dB) and set the
+   level for a 6 dB margin. The device plays the *stored* float32 coefficients, which give
+   this cascade (five 10 Hz, Q 0.9, +6.2 dB shelves plus four peaks) +48.8 dB, so its output
+   was due at +1.05 dBFS. Tracers, the next highest at +46.3 dB stored, peaked at −1.9 dBFS
+   and passed.
+2. `capture_quality` flagged clipping only at |x| ≥ 0.999. This device saturates at 0.99861
+   (−0.012 dBFS): all three of Mojin's captures sit at that ceiling for 3,248–3,793
+   consecutive samples, 47–55 times as long as an unclipped sine at the sweep's lowest
+   frequency could stay at its crest; all 528 other captures in the run and store stay under
+   0.91 of that.
+
+Fixes: the level screen takes the larger of the sent and stored-coefficient responses; a
+capture flat-topped for more than four times the sine-crest bound is rejected as clipping
+(`measurement.flat_topped`). Regenerating the catalogue manifest lowers its level by the
+extra 16 dB (to about −54.8 dBFS); case ids change with the screened peak, so identity,
+bypass and convergence are measured again on the next verify. Mojin's result in this run is a
+clipping artefact, not evidence about the device's arithmetic, and is to be remeasured.

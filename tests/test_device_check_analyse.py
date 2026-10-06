@@ -128,3 +128,31 @@ def test_catalogue_versions_and_reloads_do_not_inflate_unique_cascade_count():
         "incomplete": 0,
     }
     assert result["complete"]
+
+
+def test_verdict_answers_no_not_determined_or_yes_and_never_hides_coverage():
+    from beqforge_device_check.report import verdict
+
+    def row(device, coverage=1.0, worst=0.001):
+        return {
+            "device": device,
+            "filters": [{"type": "peaking_eq", "freq_hz": 20, "gain_db": 3, "q": 1}],
+            "name": "x",
+            "level_dbfs": -30.0,
+            "device_worst_db": worst,
+            "device_worst_hz": 20.0,
+            "representation": {"model": "float32"},
+            "loads": [
+                {
+                    "stored_model": {"coverage": coverage},
+                    "convergence": {"outcome": "converged"},
+                }
+            ],
+        }
+
+    engine = {"profile": "test"}
+    assert "<b class='pass'>YES.</b>" in verdict([row("pass")] * 2, 0.1, engine)
+    no = verdict([row("pass"), row("fail", worst=0.4)], 0.1, engine)
+    assert "<b class='fail'>NO.</b>" in no and "0.40 dB at 20.0 Hz" in no
+    open_ = verdict([row("pass"), row("unresolved", coverage=0.25)], 0.1, engine)
+    assert "NOT DETERMINED" in open_ and "lowest 25%" in open_

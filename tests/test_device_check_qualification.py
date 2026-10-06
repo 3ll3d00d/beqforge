@@ -87,6 +87,10 @@ def test_qualification_stages_assemble_and_license_only_measured_bins(tmp_path):
         tmp_path / "identity" / "analysis" / "qualification--30.npz", allow_pickle=False
     ) as data:
         assert np.any(data["mask"])
+        # Each cascade's convergence is its own row, not pooled into the bench budget.
+        assert data["cases"].tolist() == result["convergence_covers"]
+        assert data["case_uncertainty_db"].shape == (1, len(data["frequencies"]))
+        assert np.any(data["case_mask"])
     completed = run(
         config, manifest, tmp_path / "identity", tmp_path / "run", engine, engine
     )
@@ -182,3 +186,27 @@ def test_all_digital_bench_completes_without_direct_loopback_and_says_so(tmp_pat
     assert result["qualified"]
     assert result["waived_stages"] == {"direct-loopback": basis}
     assert "waived" in result["scope"]
+
+
+def test_an_unsettled_cascade_widens_only_its_own_budget(tmp_path):
+    """The real failure: one cascade's disagreement once masked every other filter."""
+    from beqforge_device_check.analyse import qualified_budgets
+    from beqforge_device_check.evidence import atomic_arrays
+
+    frequencies = np.linspace(2, 200, 50)
+    unsettled = np.where(frequencies < 40, 4.0, 0.001)
+    atomic_arrays(
+        tmp_path / "analysis" / "qualification--30.npz",
+        frequencies=frequencies,
+        uncertainty_db=np.full(50, 0.002),
+        mask=np.ones(50, bool),
+        cases=np.asarray(["settled", "unsettled"]),
+        case_uncertainty_db=np.stack([np.full(50, 0.001), unsettled]),
+        case_mask=np.ones((2, 50), bool),
+    )
+    _, bench, mask, per_case = qualified_budgets(
+        tmp_path, {"accuracy_db": 0.1}, "qualification--30.npz", {}
+    )
+    assert np.all(mask) and np.all(bench < 0.1 / 3)
+    assert np.max(per_case["settled"][0]) == 0.001
+    assert np.max(per_case["unsettled"][0]) == 4.0

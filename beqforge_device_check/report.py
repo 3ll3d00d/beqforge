@@ -1,11 +1,11 @@
-"""The human-readable page: per filter, intended vs predicted vs measured, and two verdicts.
+"""The human-readable page: per filter, designed vs predicted vs actual, and two verdicts.
 
 Two questions are kept apart because they have different answers and different owners:
 
 * Device: does the hardware play the coefficients it was sent as they predict? PASS,
   FAIL or UNRESOLVED against the accuracy requirement, including the bench uncertainty.
 * Representation: can the device's coefficient format represent the filter at all?
-  The predicted (e.g. float32) response against the intended one; computed, not measured.
+  The predicted (e.g. float32) response against the designed one; computed, not measured.
 
 A filter can PASS on the device and still be DEGRADED by its coefficients, as a very low,
 high-Q section is in float32 at 96 kHz.
@@ -91,14 +91,28 @@ def style(ax) -> None:
         spine.set_visible(False)
 
 
+def judged_range(row: dict) -> str:
+    load = min(row["loads"], key=lambda load: load["stored_model"].get("coverage", 0))
+    stats = load["stored_model"]
+    if stats.get("status") != "measured":
+        return "nothing judged"
+    return (
+        f"{stats['coverage']:.0%} of bins, {stats['valid_low_hz']:.1f}-"
+        f"{stats['valid_high_hz']:.0f} Hz"
+    )
+
+
 def filter_chart(row: dict, requirement: float, path: Path) -> None:
     import matplotlib.pyplot as plt
 
     load = row["loads"][0]
     f = np.asarray(load["frequencies"])
     curves = load["curves_db"]
-    measured = np.array([np.nan if v is None else v for v in curves["measured"]])
-    error = np.array([np.nan if v is None else v for v in load["delta_stored_db"]])
+    actual = np.array([np.nan if v is None else v for v in curves["measured"]])
+    # Records written before every curve was kept whole carry only judged bins.
+    full = curves.get("measured_minus_predicted", load["delta_stored_db"])
+    difference = np.array([np.nan if v is None else v for v in full])
+    judged = np.asarray(load["mask"], dtype=bool)
     fig, (top, bottom) = plt.subplots(
         2,
         1,
@@ -107,46 +121,37 @@ def filter_chart(row: dict, requirement: float, path: Path) -> None:
         gridspec_kw={"height_ratios": [3, 1.4]},
         facecolor=SURFACE,
     )
-    top.plot(f, curves["intended"], color=INTENDED, lw=2, ls="--", label="Intended")
+    top.plot(f, curves["intended"], color=INTENDED, lw=2, ls="--", label="Designed")
     top.plot(
         f, curves["predicted"], color=PREDICTED, lw=2, label="Predicted (coefficients)"
     )
-    # Markers evenly across the visible band, not one per (dense) FFT bin.
-    valid = np.flatnonzero(np.isfinite(measured) & (f <= FREQUENCY_AXIS_HZ[1]))
-    picks = (
-        np.unique(
-            valid[
-                np.searchsorted(
-                    f[valid], np.linspace(f[valid][0], f[valid][-1], 40)
-                ).clip(0, len(valid) - 1)
-            ]
-        )
-        if len(valid)
-        else valid
-    )
-    top.plot(
-        f[picks],
-        measured[picks],
-        color=MEASURED,
-        ls="none",
-        marker="o",
-        ms=4,
-        label="Measured",
-    )
+    top.plot(f, actual, color=MEASURED, lw=1.5, label="Actual")
     top.set_ylabel("Response (dB)", color=MUTED, fontsize=9)
     top.set_title(
-        f"{label(row)} at {row['level_dbfs']:.1f} dBFS",
+        f"{label(row)} at {row['level_dbfs']:.1f} dBFS; judged on {judged_range(row)}",
         color=INK,
         fontsize=10,
         loc="left",
     )
     top.legend(frameon=False, fontsize=8, labelcolor=INK)
-    bottom.plot(f, error, color=MEASURED, lw=1.5)
+    # Every bin is drawn; only judged bins are solid. An unjudged bin is one the bench
+    # could not measure finely enough to tell a requirement-sized difference.
     bottom.axhspan(-requirement, requirement, color=GRID, alpha=0.6, lw=0)
-    bottom.set_ylabel("Measured − predicted\n(dB)", color=MUTED, fontsize=8)
+    bottom.plot(f, difference, color=MEASURED, lw=1, alpha=0.35, label="Not judged")
+    bottom.plot(
+        f, np.where(judged, difference, np.nan), color=MEASURED, lw=1.5, label="Judged"
+    )
+    visible = np.isfinite(difference) & (f <= FREQUENCY_AXIS_HZ[1])
+    if np.any(judged & visible):
+        # Scale to the judged difference so a small one stays readable; a large
+        # unjudged one is still plain in the response above.
+        span = max(3 * requirement, 1.25 * np.max(np.abs(difference[judged & visible])))
+        bottom.set_ylim(-span, span)
+    bottom.set_ylabel("Actual − predicted\n(dB)", color=MUTED, fontsize=8)
     bottom.set_xlabel("Frequency (Hz)", color=MUTED, fontsize=9)
     bottom.set_xlim(*FREQUENCY_AXIS_HZ)
     bottom.set_xticks(FREQUENCY_TICKS_HZ)
+    bottom.legend(frameon=False, fontsize=7, labelcolor=INK, loc="upper right")
     for ax in (top, bottom):
         style(ax)
     fig.tight_layout()
@@ -191,10 +196,16 @@ def sweep_chart(title: str, vary: str, members: list[dict], requirement: float, 
         lw=2,
         marker="s",
         ms=6,
-        label="Coefficients vs intended (predicted)",
+        label="Predicted vs designed (coefficients)",
     )
     ax.plot(
-        x, device, color=MEASURED, lw=2, marker="o", ms=6, label="Device vs predicted"
+        x,
+        device,
+        color=MEASURED,
+        lw=2,
+        marker="o",
+        ms=6,
+        label="Actual vs predicted (device)",
     )
     ax.axhline(requirement, color=MUTED, lw=1, ls=":", label=f"{requirement:g} dB")
     ax.set_yscale("log")
@@ -245,6 +256,84 @@ def model_chart(rows: list[dict], requirement: float, path: Path) -> None:
     plt.close(fig)
 
 
+def verdict(rows: list[dict], requirement: float, engine: dict) -> str:
+    """The question the report exists to answer, answered first and in words.
+
+    Yes only if every filter passes. Never stronger than the bins judged: where the bench
+    could not resolve a requirement-sized difference, nothing is claimed either way, and
+    the page says how much that is.
+    """
+    model = next(
+        (r["representation"]["model"] for r in rows if r.get("representation")), "?"
+    )
+    fails = [r for r in rows if r["device"] == "fail"]
+    open_ = [r for r in rows if r["device"] in ("unresolved", "under-range")]
+    if fails:
+        answer, css = "NO", "fail"
+        lead = (
+            f"{len(fails)} of {len(rows)} filter results differ from their simulated"
+            f" response by more than {requirement:g} dB plus the bench uncertainty."
+        )
+    elif open_:
+        answer, css = "NOT DETERMINED", "unresolved"
+        lead = (
+            f"No filter result is shown to differ, but {len(open_)} of {len(rows)} could"
+            f" not be resolved to within {requirement:g} dB."
+        )
+    else:
+        answer, css = "YES", "pass"
+        lead = (
+            f"All {len(rows)} filter results play their simulated response to within"
+            f" {requirement:g} dB, including the bench uncertainty, on every bin judged."
+        )
+    coverage = [
+        min(load["stored_model"].get("coverage", 0) for load in r["loads"])
+        for r in rows
+    ]
+    unsettled = [
+        r
+        for r in rows
+        if any(
+            load.get("convergence", {}).get("outcome") == "unsettled"
+            for load in r["loads"]
+        )
+    ]
+    lines = [
+        "<h2>Does the device play the simulated response?</h2>",
+        f"<p style='font-size:18px'><b class='{css}'>{answer}.</b> {lead}</p>",
+        (
+            "<p class='muted'>Simulated: the published filters' coefficients as the"
+            f" device stores them ({html.escape(str(model))}), computed. Actual: the"
+            f" swept {html.escape(engine.get('profile', 'device'))} output with those"
+            " coefficients loaded, divided by the same route with the filter bank"
+            " empty.</p>"
+        ),
+    ]
+    if fails:
+        lines.append(
+            "<ul>"
+            + "".join(
+                f"<li class='fail'>{html.escape(label(r))} at {r['level_dbfs']:.1f} dBFS:"
+                f" {r['device_worst_db']:.2f} dB at {r['device_worst_hz']:.1f} Hz</li>"
+                for r in fails
+            )
+            + "</ul>"
+        )
+    if coverage:
+        lines.append(
+            f"<p>Judged on a median {np.median(coverage):.0%} of each filter's bins"
+            f" (lowest {min(coverage):.0%}). The rest are drawn in each chart but not"
+            " judged: there the bench could not tell a"
+            f" {requirement:g} dB difference from its own uncertainty.</p>"
+        )
+    if unsettled:
+        lines.append(
+            "<p>Not settled within the sweep, so judged only where it had:"
+            f" {html.escape(', '.join(sorted({label(r) for r in unsettled})))}.</p>"
+        )
+    return "".join(lines)
+
+
 def page(report: dict, output: Path, details: str) -> str:
     import matplotlib
 
@@ -276,6 +365,7 @@ def page(report: dict, output: Path, details: str) -> str:
             f"{html.escape(str(engine.get('helper_version', '—')))}. Accuracy requirement "
             f"{requirement:g} dB.</p>"
         ),
+        verdict(rows, requirement, engine),
         "<h2>Summary</h2><ul>",
         f"<li><b>Device:</b> {len(rows) - device_fail - device_open} of {len(rows)} "
         "filter/level results play exactly as their coefficients predict"
@@ -311,8 +401,8 @@ def page(report: dict, output: Path, details: str) -> str:
             lines.append(f"<p><img alt='{html.escape(title)}' src='charts/{name}'></p>")
     lines.append(
         "<h2>Filters</h2><table><tr><th>Filter</th><th>Level</th><th>Loads</th>"
-        "<th>Device (measured vs predicted)</th>"
-        "<th>Coefficients (predicted vs intended)</th></tr>"
+        "<th>Device (actual vs predicted)</th><th>Judged</th>"
+        "<th>Coefficients (predicted vs designed)</th></tr>"
     )
     for row in rows:
         mark = MARKS[row["device"]]
@@ -334,7 +424,8 @@ def page(report: dict, output: Path, details: str) -> str:
         lines.append(
             f"<tr><td><a href='charts/{chart}'>{html.escape(label(row))}"
             f"</a></td><td>{row['level_dbfs']:.1f} dBFS</td><td>{len(row['loads'])}</td>"
-            f"<td>{device}</td><td>{coefficients}</td></tr>"
+            f"<td>{device}</td><td class='muted'>{judged_range(row)}</td>"
+            f"<td>{coefficients}</td></tr>"
         )
     lines.append("</table>")
     for row in rows:
@@ -442,7 +533,7 @@ def catalogue_page(
             (
                 f"<p class='muted'>Predicted, not measured: each entry's published "
                 f"coefficients rounded to {predictions['coefficient_format']} at "
-                f"{predictions['rate']} Hz, against its intended filters. Snapshot "
+                f"{predictions['rate']} Hz, against its designed filters. Snapshot "
                 f"{html.escape(str(source.get('revision')))} ({source.get('entries')} "
                 f"entries, sha256 {str(source.get('sha256'))[:12]}).</p>"
             ),
@@ -460,11 +551,11 @@ def catalogue_page(
             ),
             "<h2>Entries</h2>",
             (
-                "<p class='muted'>Click an entry to plot its intended response against the "
+                "<p class='muted'>Click an entry to plot its designed response against the "
                 f"response its {predictions['coefficient_format']} coefficients produce."
                 "</p><div id='plot'><div id='title' style='font-weight:600'></div>"
                 "<svg id='chart' viewBox='0 0 800 360' width='100%'"
-                " role='img' aria-label='Intended and predicted response'></svg></div>"
+                " role='img' aria-label='Designed and predicted response'></svg></div>"
                 "<div id='tip'></div>"
             ),
             (
@@ -521,7 +612,7 @@ def write_cascades(manifest: dict, predictions: dict, output: Path) -> dict[str,
     return index
 
 
-# Plots one cascade: intended (exact) vs predicted (float32) magnitude over 2-200 Hz,
+# Plots one cascade: designed (exact) vs predicted (float32) magnitude over 2-200 Hz,
 # with the difference beneath; a crosshair tooltip reads all three at any frequency.
 VIEWER_JS = r"""
 (() => {
@@ -590,8 +681,8 @@ function draw(row) {
   parts.push(`<path d="${path(predicted, top)}" fill="none" stroke="__PREDICTED__" stroke-width="2"/>`);
   parts.push(`<path d="${path(diff, bot)}" fill="none" stroke="__PREDICTED__" stroke-width="2"/>`);
   parts.push(`<line x1="${L}" x2="${W - R}" y1="${bot.y(0)}" y2="${bot.y(0)}" stroke="__INK__" stroke-width="0.5"/>`);
-  parts.push(`<text x="${W - R}" y="${T + 12}" text-anchor="end"><tspan fill="__INTENDED__">- - intended</tspan>  <tspan fill="__PREDICTED__">— float32 (miniDSP)</tspan></text>`);
-  parts.push(`<text x="${L + 4}" y="${T + TOPH + GAP - 6}">float32 − intended (dB)</text>`);
+  parts.push(`<text x="${W - R}" y="${T + 12}" text-anchor="end"><tspan fill="__INTENDED__">- - designed</tspan>  <tspan fill="__PREDICTED__">— float32 (miniDSP)</tspan></text>`);
+  parts.push(`<text x="${L + 4}" y="${T + TOPH + GAP - 6}">float32 − designed (dB)</text>`);
   parts.push(`<text x="${W - R}" y="${T + TOPH + GAP + BOTH + 16}" text-anchor="end" dy="14">Hz</text>`);
   parts.push(`<line id="cross" y1="${T}" y2="${T + TOPH + GAP + BOTH}" stroke="__INK__" stroke-width="0.5" visibility="hidden"/>`);
   parts.push(`<rect x="${L}" y="${T}" width="${W - L - R}" height="${TOPH + GAP + BOTH}" fill="transparent" id="hit"/>`);
@@ -609,7 +700,7 @@ function draw(row) {
     cross.setAttribute('x1', x(F[i])); cross.setAttribute('x2', x(F[i])); cross.setAttribute('visibility', 'visible');
     tip.style.display = 'block';
     tip.style.left = (ev.pageX + 12) + 'px'; tip.style.top = (ev.pageY + 12) + 'px';
-    tip.innerHTML = `${F[i].toFixed(1)} Hz<br>intended ${intended[i].toFixed(2)} dB<br>float32 ${predicted[i].toFixed(2)} dB<br>difference ${diff[i] >= 0 ? '+' : ''}${diff[i].toFixed(2)} dB`;
+    tip.innerHTML = `${F[i].toFixed(1)} Hz<br>designed ${intended[i].toFixed(2)} dB<br>float32 ${predicted[i].toFixed(2)} dB<br>difference ${diff[i] >= 0 ? '+' : ''}${diff[i].toFixed(2)} dB`;
   };
   hit.onmouseleave = () => { tip.style.display = 'none'; cross.setAttribute('visibility', 'hidden'); };
 }

@@ -70,6 +70,15 @@ def test_transaction_restore_resume_and_offline_bundle(tmp_path, bench):
     report = analyse(directory, directory)
     assert len(report["results"]) == 6
     assert max(item["exact"]["worst_db"] for item in report["results"]) < 0.002
+    for item in report["results"]:
+        # Every curve is whole; `mask` only says which bins are judged.
+        curves = item["curves_db"]
+        assert None not in curves["measured"]
+        assert None not in curves["measured_minus_predicted"]
+        assert item["convergence"]["outcome"] == "converged"
+    html = (directory / "report.html").read_text(encoding="utf-8")
+    assert "Does the device play the simulated response?" in html
+    assert "<b class='pass'>YES.</b>" in html
     assert (directory / "report.html").exists()
     assert (directory / "charts" / "catalogue-population.png").exists()
     assert report["catalogue"]["unique_cascade_weighted"]["count"] == 1

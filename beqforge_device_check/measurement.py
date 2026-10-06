@@ -139,8 +139,38 @@ def worst(values, lower, upper, exact, *, larger: bool = True) -> np.ndarray:
     return np.where(exact, values[upper], pick(values[lower], values[upper]))
 
 
+# How far from its own extreme a capture may sit and still count as "at" it: above 24-bit
+# quantisation and a digital bench's noise, far below any level a sweep is judged at.
+CREST_TOLERANCE = 1e-5
+
+
+def flat_topped(values: np.ndarray, rate: float, low_hz: float) -> bool:
+    """Whether the capture stays at its own extreme longer than any unclipped sine could.
+
+    A sine of amplitude A stays within `CREST_TOLERANCE` of its crest for
+    2·sqrt(2·tol/A)/(2πf) seconds, longest at the sweep's lowest frequency. A device that
+    saturates below full scale holds its ceiling far longer: one 2x4 HD clipped at
+    0.9986 for 47-55 times that, while every clean capture of the same pilot stayed under
+    0.91 of it. Four times leaves margin both ways.
+    """
+    magnitude = np.abs(values)
+    peak = float(np.max(magnitude))
+    if peak <= CREST_TOLERANCE:
+        return False
+    near = np.r_[0, (magnitude >= peak - CREST_TOLERANCE).astype(np.int8), 0]
+    edges = np.flatnonzero(np.diff(near))
+    longest = int(np.max(edges[1::2] - edges[::2]))
+    crest = 2 * np.sqrt(2 * CREST_TOLERANCE / peak) / (2 * np.pi * low_hz) * rate
+    return longest > 4 * max(crest, 1)
+
+
 def capture_quality(
-    samples: np.ndarray, expected_count: int, *, statuses: list[str] | None = None
+    samples: np.ndarray,
+    expected_count: int,
+    *,
+    statuses: list[str] | None = None,
+    rate: float | None = None,
+    low_hz: float | None = None,
 ) -> list[str]:
     values = np.asarray(samples)
     failures = []
@@ -148,8 +178,14 @@ def capture_quality(
         failures.append("missing/truncated samples")
     if np.any(~np.isfinite(values)):
         failures.append("non-finite capture")
-    if values.size and np.max(np.abs(values)) >= 0.999:
+    elif values.size and np.max(np.abs(values)) >= 0.999:
         failures.append("capture clipping")
+    elif values.size and rate and low_hz and flat_topped(values, rate, low_hz):
+        # A device can saturate below full scale; its flat top is the evidence.
+        failures.append(
+            f"capture clipping: flat-topped at {20 * np.log10(np.max(np.abs(values))):.3f}"
+            " dBFS (the device saturates below full scale)"
+        )
     if values.size == 0 or not np.any(values):
         failures.append("silent capture")
     if statuses:
@@ -226,7 +262,13 @@ def recover(
     settings = SweepSettings(**metadata["settings"])
     if waveform_hash(stimulus) != metadata["hash"]:
         raise ValueError("emitted stimulus hash mismatch")
-    failures = capture_quality(captured, len(stimulus), statuses=statuses)
+    failures = capture_quality(
+        captured,
+        len(stimulus),
+        statuses=statuses,
+        rate=settings.rate,
+        low_hz=settings.low_hz,
+    )
     drift = None
     if reference is not None and np.max(np.abs(reference)) < 0.01 * metadata["peak"]:
         # A silent reference gives a meaningless delay/drift estimate, not a small one.

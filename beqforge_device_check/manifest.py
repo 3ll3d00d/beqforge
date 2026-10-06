@@ -171,24 +171,35 @@ def freeze_levels(
 ) -> dict[str, str]:
     worst = 0.0
     remapping = {}
+    model = manifest.get("profile", {}).get("coefficient_format", "unknown")
     for case in manifest["cases"]:
         if case["status"] != "planned":
             continue
-        sos = np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6)
+        sent = np.asarray(case.get("transport_sos", case["exact_sos"])).reshape(-1, 6)
+        # Screen what the device will play, not only what is sent: storing float32
+        # coefficients gave one catalogue cascade 16 dB more infrasonic gain than its
+        # float64 ones (+48.8 against +32.5 dB), and that clipped the device.
+        screened = [sent]
+        if model in ("float32", "fixed5.23"):
+            try:
+                screened.append(rounded(sent, model))
+            except ValueError:  # Out of the format's range: make_case reports it.
+                pass
         frequencies = np.geomspace(0.1, case["rate"] / 2 * 0.999, 8192)
         peak = 0.0
-        for count in range(1, len(sos) + 1):
-            peak = max(
-                peak,
-                float(
-                    np.max(
-                        20
-                        * np.log10(
-                            np.abs(response(sos[:count], frequencies, case["rate"]))
+        for sos in screened:
+            for count in range(1, len(sos) + 1):
+                peak = max(
+                    peak,
+                    float(
+                        np.max(
+                            20
+                            * np.log10(
+                                np.abs(response(sos[:count], frequencies, case["rate"]))
+                            )
                         )
-                    )
-                ),
-            )
+                    ),
+                )
         old_id = case["id"]
         case["predicted_intermediate_peak_db"] = peak
         case["id"] = digest({k: v for k, v in case.items() if k != "id"})
@@ -202,7 +213,7 @@ def freeze_levels(
         "nominal_levels_dbfs": [float(level) for level in nominal],
         "reduction_db": reduction,
         "margin_db": 6,
-        "limitation": "sampled ideal transfer screen, not a proof of internal state headroom; capture clipping still aborts",
+        "limitation": "sampled transfer screen of the sent and the device-stored coefficients, not a proof of internal state headroom; capture clipping, including a flat top below full scale, still aborts",
     }
     return remapping
 

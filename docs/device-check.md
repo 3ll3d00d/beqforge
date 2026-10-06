@@ -44,9 +44,13 @@ the headroom.
 
 A filter can pass the first and fail the second: on the 2x4 HD at 96 kHz a 5 Hz, Q 6, +12 dB
 peak plays exactly as its float32 coefficients predict, and those coefficients put an 18.8 dB
-error into the response. Each filter has a chart of the intended, predicted and measured
-responses with the device error beneath; frequency and Q sweeps also get charts of both errors
-against the swept parameter. It measures only
+error into the response. The report opens by answering the question it exists for — does the
+device play the simulated (predicted) response? — as YES, NO (naming each filter that does not)
+or NOT DETERMINED, with how much of each filter's band could be judged. Each filter has a chart
+of the designed, predicted and actual responses with actual − predicted beneath, every bin
+drawn; bins the bench could not resolve to the requirement are drawn faint and not judged.
+Frequency and Q sweeps also get charts of both errors against the swept parameter. It measures
+only
 what nothing stored already proves. Identity and device bypass never involve the cascades
 under test, so they are kept in `store/` beside the bench, keyed on the bench, engine, sweep
 settings, accuracy requirement, identity case and levels, and reused by any manifest that
@@ -122,8 +126,10 @@ tail of at least 1 second (`--tail`). Each cascade's tail is extended to its own
 (decay to −120 dB), so only a ringing cascade pays for a long one; convergence doubles that
 too. These are starting settings, not proof that 2 Hz is measurable; the convergence stage
 tests them. The manifest freezes nominal −30/−50 dBFS blocks, reduced where a
-sampled intermediate-gain screen requires more attenuation. This does not prove internal
-state headroom; clipping still aborts a run. Unsupported/unstable cases are retained.
+sampled intermediate-gain screen requires more attenuation. The screen covers both the sent
+coefficients and the ones the device stores (float32 can add many dB of infrasonic gain). It
+does not prove internal state headroom; clipping still aborts a run, including a flat top below
+full scale (one 2x4 HD saturates at −0.012 dBFS). Unsupported/unstable cases are retained.
 
 `self-test` exercises known-transfer recovery, evidence transactions, reports and a local ZIP.
 It emits no live signal. It reports unavailable/stalled host audio discovery separately;
@@ -203,7 +209,10 @@ convergence stages alone, recording the waiver and its basis in the qualificatio
 `waived_stages` and scope.
 
 Completion checks hashes, matching settings/engine, masks and measured repeatability,
-inversion/noise bounds and convergence. Only their common usable bins qualify. Missing,
+inversion/noise bounds and convergence. Only their common usable bins qualify. Convergence is
+budgeted per cascade: a cascade whose sweep variants disagree (it has not settled, or the device
+does not play it repeatably) widens only its own uncertainty and is reported as not settled; it
+never widens the bench's, so it cannot disqualify the other filters. Missing,
 stale or under-range evidence refuses completion. Set `common_clock: true` and describe its
 established basis in `clock_basis`, or supply an independent `reference_channel` in the bench
 JSON. Merely sharing a nominal sample rate is not a shared clock. Timing-reference captures

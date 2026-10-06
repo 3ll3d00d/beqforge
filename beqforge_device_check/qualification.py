@@ -94,6 +94,106 @@ def load_trace(directory, attempt):
         return {name: arrays[name].copy() for name in arrays.files}
 
 
+def cascade_convergence(
+    directory: Path, stage: dict, config: dict, identity_case: str
+) -> dict:
+    """Each cascade's own duration/tail convergence, per level, from a stage's traces.
+
+    A cascade that has not settled within the sweep is that cascade's problem, not the
+    bench's: its disagreement between sweep variants widens its own budget only. The
+    identity's disagreement is the bench's, and is the only part every cascade carries.
+
+    Returns {reference file name: arrays}: `uncertainty_db`/`mask` the identity's
+    convergence (mask thresholded at a third of the requirement), and one row of
+    `case_uncertainty_db`/`case_mask` per cascade in `cases` (mask: bins measured
+    validly in every variant, not thresholded; judging applies the requirement).
+    Works on any directory holding the stage's attempts, including a run's copy.
+    """
+    attempts: dict[float, dict[str, list[str]]] = {}
+    for result in stage["results"]:
+        attempts.setdefault(result["level_dbfs"], {}).setdefault(
+            result["case"], []
+        ).append(result["attempt"])
+    recomputed: dict[tuple[str, int], dict] = {}
+
+    def reference_on(attempt: str, trace: dict, grid: dict) -> dict:
+        # A long-settling cascade has a longer tail and a finer grid; its identity is
+        # recovered again on that grid.
+        if np.array_equal(grid["frequencies"], trace["frequencies"]):
+            return trace
+        key = (attempt, len(grid["impulse"]))
+        if key not in recomputed:
+            recomputed[key] = recompute(directory, attempt, config, key[1])
+        return recomputed[key]
+
+    budgets = {}
+    for level, cases in attempts.items():
+        identities = cases[identity_case]
+        references = [load_trace(directory, attempt) for attempt in identities]
+        frequencies = references[0]["frequencies"]
+
+        def disagreement(
+            traces: list[dict], references=references, frequencies=frequencies
+        ) -> tuple[np.ndarray, np.ndarray]:
+            valid = references[0]["mask"].copy()
+            error = np.zeros(len(frequencies))
+            base, base_bias, base_mask = sample_trace(traces[0], frequencies)
+            for trace in traces[1:]:
+                longer, longer_bias, longer_mask = sample_trace(trace, frequencies)
+                valid &= base_mask & longer_mask
+                error = np.maximum(
+                    error, np.abs(longer - base) + base_bias + longer_bias
+                )
+            return error, valid
+
+        def magnitude(data: dict, reference: dict | None) -> dict:
+            response = data["response"]
+            bias = 2 * data["inversion_bias_db"]
+            mask = data["mask"]
+            if reference is not None:
+                response = response / reference["response"]
+                bias = data["inversion_bias_db"] + reference["inversion_bias_db"]
+                mask = mask & reference["mask"]
+            return {
+                "frequencies": data["frequencies"],
+                "delta_exact_db": 20 * np.log10(np.maximum(np.abs(response), 1e-300)),
+                "mask": mask,
+                "uncertainty_db": bias,
+            }
+
+        error, valid = disagreement([magnitude(r, None) for r in references])
+        ids, rows, masks = [], [], []
+        for case, variants in cases.items():
+            if case == identity_case:
+                continue
+            traces = []
+            for index, attempt in enumerate(variants):
+                data = load_trace(directory, attempt)
+                traces.append(
+                    magnitude(
+                        data,
+                        reference_on(identities[index], references[index], data),
+                    )
+                )
+            case_error, case_valid = disagreement(traces)
+            ids.append(case)
+            rows.append(case_error)
+            masks.append(case_valid)
+        budgets[f"qualification-{level:g}.npz"] = {
+            "frequencies": frequencies,
+            "uncertainty_db": error,
+            "mask": valid & (error < stage["accuracy_db"] / 3),
+            "cases": np.asarray(ids, dtype=str),
+            "case_uncertainty_db": np.asarray(rows, dtype=float).reshape(
+                len(ids), len(frequencies)
+            ),
+            "case_mask": np.asarray(masks, dtype=bool).reshape(
+                len(ids), len(frequencies)
+            ),
+        }
+    return budgets
+
+
 def convergence(config, manifest, directory, engine, capture, settings, *, accuracy_db):
     """Double duration and tail independently on identity and every planned cascade.
 
@@ -162,7 +262,7 @@ def convergence(config, manifest, directory, engine, capture, settings, *, accur
         "covers": sorted(case["id"] for case in filtered),
         "identity_case": identity["id"],
         "qualified": False,
-        "scope": "independent duration and retained-tail doubling on every planned cascade; magnitude convergence only",
+        "scope": "independent duration and retained-tail doubling on every planned cascade; magnitude convergence only, budgeted per cascade",
     }
     with run_lock(directory):
         snapshot = engine.snapshot()
@@ -170,35 +270,10 @@ def convergence(config, manifest, directory, engine, capture, settings, *, accur
         atomic_json(directory / "manifest.json", manifest)
         try:
             for level in manifest["levels_dbfs"]:
-                references = []
-                for index, variant in enumerate(variants):
-                    result = measure(
-                        directory,
-                        identity,
-                        replace(variant, level_dbfs=level),
-                        engine,
-                        capture,
-                        reference_channel=config.get("reference_channel"),
-                        progress=counter(index),
-                    )
-                    record["results"].append(result)
-                    references.append(load_trace(directory, result["attempt"]))
-                    references[-1]["attempt"] = result["attempt"]
-                frequencies = references[0]["frequencies"]
-                valid = references[0]["mask"].copy()
-                error = np.zeros(len(frequencies))
-                for case in manifest["cases"]:
-                    if case["status"] != "planned":
-                        continue
-                    traces = []
+                for case in [identity, *filtered]:
                     for index, variant in enumerate(variants):
-                        if case["name"] == "identity":
-                            data = reference = references[index]
-                            magnitude = 20 * np.log10(
-                                np.maximum(np.abs(data["response"]), 1e-300)
-                            )
-                        else:
-                            result = measure(
+                        record["results"].append(
+                            measure(
                                 directory,
                                 case,
                                 replace(variant, level_dbfs=level),
@@ -207,63 +282,34 @@ def convergence(config, manifest, directory, engine, capture, settings, *, accur
                                 reference_channel=config.get("reference_channel"),
                                 progress=counter(index),
                             )
-                            record["results"].append(result)
-                            data = load_trace(directory, result["attempt"])
-                            # A longer-settling cascade has a longer tail and a finer
-                            # grid; its identity is recovered again on that grid.
-                            reference = (
-                                references[index]
-                                if np.array_equal(
-                                    data["frequencies"],
-                                    references[index]["frequencies"],
-                                )
-                                else recompute(
-                                    directory,
-                                    references[index]["attempt"],
-                                    config,
-                                    len(data["impulse"]),
-                                )
-                            )
-                            data["mask"] &= reference["mask"]
-                            magnitude = 20 * np.log10(
-                                np.maximum(
-                                    np.abs(data["response"] / reference["response"]),
-                                    1e-300,
-                                )
-                            )
-                        traces.append(
-                            {
-                                "frequencies": data["frequencies"],
-                                "delta_exact_db": magnitude,
-                                "mask": data["mask"],
-                                "uncertainty_db": data["inversion_bias_db"]
-                                + reference["inversion_bias_db"],
-                            }
                         )
-                    base, base_bias, base_mask = sample_trace(traces[0], frequencies)
-                    for trace in traces[1:]:
-                        longer, longer_bias, longer_mask = sample_trace(
-                            trace, frequencies
-                        )
-                        valid &= base_mask & longer_mask
-                        error = np.maximum(
-                            error, np.abs(longer - base) + base_bias + longer_bias
-                        )
-                valid &= error < accuracy_db / 3
+            names_by_id = {case["id"]: case["name"] for case in filtered}
+            for name, budget in cascade_convergence(
+                directory, record, config, identity["id"]
+            ).items():
+                limit = accuracy_db / 3
+                unsettled = [
+                    names_by_id[case]
+                    for case, error, valid in zip(
+                        budget["cases"],
+                        budget["case_uncertainty_db"],
+                        budget["case_mask"],
+                        strict=True,
+                    )
+                    if np.any(valid & (error >= limit))
+                ]
                 logger.info(
-                    "%g dBFS: %d/%d bins converged within %.3g dB",
-                    level,
-                    int(np.count_nonzero(valid)),
-                    len(valid),
-                    accuracy_db / 3,
+                    "%s: identity converged on %d/%d bins; %d/%d cascade(s) converged"
+                    " within %.3g dB on every bin%s",
+                    name,
+                    int(np.count_nonzero(budget["mask"])),
+                    len(budget["mask"]),
+                    len(budget["cases"]) - len(unsettled),
+                    len(budget["cases"]),
+                    limit,
+                    f"; not settled: {', '.join(unsettled)}" if unsettled else "",
                 )
-                name = f"qualification-{level:g}.npz"
-                atomic_arrays(
-                    directory / "analysis" / name,
-                    frequencies=frequencies,
-                    uncertainty_db=error,
-                    mask=valid,
-                )
+                atomic_arrays(directory / "analysis" / name, **budget)
                 record["reference_files"][name] = file_hash(
                     directory / "analysis" / name
                 )
@@ -387,24 +433,51 @@ def complete(
         with np.load(target, allow_pickle=False) as arrays:
             data = {key: arrays[key].copy() for key in arrays.files}
         converged = None
+        per_case: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for source, stage in stages.values():
             if name not in stage["reference_files"]:
                 raise ValueError("supporting qualification lacks a required level")
-            with np.load(source / "analysis" / name, allow_pickle=False) as arrays:
-                if not np.array_equal(data["frequencies"], arrays["frequencies"]):
-                    raise ValueError("supporting qualification frequency axes differ")
+            with np.load(source / "analysis" / name, allow_pickle=False) as stored:
+                arrays = {key: stored[key].copy() for key in stored.files}
+            if not np.array_equal(data["frequencies"], arrays["frequencies"]):
+                raise ValueError("supporting qualification frequency axes differ")
+            if stage["stage"] != "convergence":
                 data["mask"] &= arrays["mask"]
-                if stage["stage"] == "convergence":
-                    # One convergence budget: the worst cascade's, wherever it was.
-                    converged = (
-                        arrays["uncertainty_db"].copy()
-                        if converged is None
-                        else np.maximum(converged, arrays["uncertainty_db"])
-                    )
-                else:
-                    data["uncertainty_db"] += arrays["uncertainty_db"]
+                data["uncertainty_db"] += arrays["uncertainty_db"]
+                continue
+            if "cases" not in arrays:
+                # Recorded before convergence was budgeted per cascade: derive it again
+                # from the stage's own hashed traces rather than pool its worst case.
+                bench = json.loads((source / "bench.json").read_text())
+                arrays = cascade_convergence(source, stage, bench, identity_case)[name]
+            # The identity's own convergence is the bench's; every cascade carries it.
+            data["mask"] &= arrays["mask"]
+            converged = (
+                arrays["uncertainty_db"]
+                if converged is None
+                else np.maximum(converged, arrays["uncertainty_db"])
+            )
+            for case, error, valid in zip(
+                arrays["cases"].tolist(),
+                arrays["case_uncertainty_db"],
+                arrays["case_mask"],
+                strict=True,
+            ):
+                if case in per_case:
+                    error = np.maximum(per_case[case][0], error)
+                    valid = per_case[case][1] & valid
+                per_case[case] = (error, valid)
         data["uncertainty_db"] += converged
         data["mask"] &= data["uncertainty_db"] < record["accuracy_db"] / 3
+        # A cascade that has not settled widens only its own budget (see `analyse`).
+        cases = sorted(per_case)
+        data["cases"] = np.asarray(cases, dtype=str)
+        data["case_uncertainty_db"] = np.asarray(
+            [per_case[case][0] for case in cases], dtype=float
+        ).reshape(len(cases), len(data["frequencies"]))
+        data["case_mask"] = np.asarray(
+            [per_case[case][1] for case in cases], dtype=bool
+        ).reshape(len(cases), len(data["frequencies"]))
         if not np.any(data["mask"]):
             raise ValueError(
                 "no common qualified bins at a required level; improve the bench/settings"

@@ -98,3 +98,33 @@ def test_boundary_suite_spans_the_predicted_coefficient_error_targets():
     assert errors[0] < 0.02 and errors[-1] > 2
     for target in (t for t in BOUNDARY_TARGETS_DB if t <= 1):
         assert min(abs(np.log(e / target)) for e in errors) < np.log(2)
+
+
+def test_level_screen_uses_the_coefficients_the_device_stores():
+    """Mojin: The Worm Valley clipped a 2x4 HD: float32 storage adds 16 dB at 1 Hz."""
+    from beqforge_device_check.coefficients import published
+    from beqforge_device_check.manifest import freeze_levels
+
+    specs = [BiquadSpec("low_shelf", 10, 6.2, 0.9)] * 5 + [
+        BiquadSpec("peaking_eq", 12, 4.7, 5),
+        BiquadSpec("peaking_eq", 16, 8, 1.8),
+        BiquadSpec("peaking_eq", 24, 2, 11),
+        BiquadSpec("peaking_eq", 33, 0.7, 3),
+    ]
+    sos = coefficients(published(specs), 96000)
+    case = {
+        "status": "planned",
+        "id": "x",
+        "rate": 96000,
+        "exact_sos": sos.tolist(),
+        "transport_sos": sos.tolist(),
+    }
+    sent_only = {"profile": {"coefficient_format": "float64"}, "cases": [dict(case)]}
+    stored = {"profile": {"coefficient_format": "float32"}, "cases": [dict(case)]}
+    freeze_levels(sent_only, (-30.0,))
+    freeze_levels(stored, (-30.0,))
+    assert sent_only["cases"][0]["predicted_intermediate_peak_db"] < 33
+    peak = stored["cases"][0]["predicted_intermediate_peak_db"]
+    assert peak > 48
+    # The stored-coefficient peak keeps the screen's 6 dB below full scale.
+    assert stored["levels_dbfs"][0] + peak == pytest.approx(-6)

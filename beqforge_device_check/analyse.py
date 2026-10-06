@@ -19,6 +19,10 @@ from beqforge_device_check.report import page
 from beqforge_device_check.transactions import recompute
 
 
+def finite(values: np.ndarray) -> list[float | None]:
+    return [float(v) if np.isfinite(v) else None for v in values]
+
+
 def summarise(
     frequencies: np.ndarray,
     delta: np.ndarray,
@@ -65,6 +69,83 @@ def summarise(
     }
 
 
+def qualified_budgets(
+    directory: Path, qualification: dict, name: str, bench: dict
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict | None]:
+    """(frequencies, bench uncertainty, bench mask, {case: (uncertainty, mask)}).
+
+    The last is None for a record with no convergence stage at all.
+
+    The bench budget is what every cascade carries; each cascade's own convergence is
+    kept apart, so one that has not settled cannot disqualify the others.
+
+    A qualification assembled before per-cascade budgets pooled the worst cascade's
+    convergence into the bench budget. That is undone here from the run's own copies of
+    the stage evidence: the pooled term is subtracted and each cascade's derived again
+    from the convergence stage's hashed traces. The identity repeats' own SNR masks are
+    not in a run's copy; every judged bin still needs the run's identity brackets to
+    pass that same SNR test.
+    """
+    with np.load(directory / "analysis" / name, allow_pickle=False) as arrays:
+        data = {key: arrays[key].copy() for key in arrays.files}
+    frequencies = data["frequencies"]
+    if "cases" in data:
+        return (
+            frequencies,
+            data["uncertainty_db"],
+            data["mask"],
+            {
+                case: (error, valid)
+                for case, error, valid in zip(
+                    data["cases"].tolist(),
+                    data["case_uncertainty_db"],
+                    data["case_mask"],
+                    strict=True,
+                )
+            },
+        )
+    from beqforge_device_check.qualification import cascade_convergence
+
+    labels = list(qualification.get("supporting_stages", {}))
+    if not any(label.startswith("convergence") for label in labels):
+        # An identity-only (unqualified, simulation) record: no convergence was asked
+        # for, so none is charged; `None` tells the caller so.
+        return frequencies, data["uncertainty_db"], data["mask"], None
+    limit = qualification["accuracy_db"] / 3
+    mask = np.ones(len(frequencies), bool)
+    pooled = np.zeros(len(frequencies))
+    identity_converged = np.zeros(len(frequencies))
+    per_case: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for label in labels:
+        with np.load(
+            directory / "analysis" / f"{label}-{name}", allow_pickle=False
+        ) as arrays:
+            stage_unc, stage_mask = arrays["uncertainty_db"], arrays["mask"]
+        if not label.startswith("convergence"):
+            mask &= stage_mask
+            continue
+        pooled = np.maximum(pooled, stage_unc)
+        stage = json.loads((directory / "analysis" / f"stage-{label}.json").read_text())
+        derived = cascade_convergence(
+            directory, stage, bench, qualification["identity_case"]
+        )[name]
+        mask &= derived["mask"]
+        identity_converged = np.maximum(identity_converged, derived["uncertainty_db"])
+        for case, error, valid in zip(
+            derived["cases"].tolist(),
+            derived["case_uncertainty_db"],
+            derived["case_mask"],
+            strict=True,
+        ):
+            if case in per_case:
+                error = np.maximum(per_case[case][0], error)
+                valid = per_case[case][1] & valid
+            per_case[case] = (error, valid)
+    uncertainty = np.maximum(data["uncertainty_db"] - pooled, 0) + identity_converged
+    mask &= uncertainty < limit
+    return frequencies, uncertainty, mask, per_case
+
+
 def analyse(directory: Path, output: Path) -> dict:
     registry = json.loads((directory / "files.json").read_text())
     for relative, expected in registry.items():
@@ -92,6 +173,7 @@ def analyse(directory: Path, output: Path) -> dict:
     bench_path = directory / "bench.json"
     bench = json.loads(bench_path.read_text()) if bench_path.is_file() else {}
     results = []
+    budgets: dict[str, tuple] = {}
     output.mkdir(parents=True, exist_ok=True)
     for completed in run["completed"]:
         case = cases[completed["case"]]
@@ -132,12 +214,26 @@ def analyse(directory: Path, output: Path) -> dict:
         )
         mask = data["mask"] & left["mask"] & right["mask"]
         level = completed["result"]["level_dbfs"]
-        qualified = trace(f"qualification-{level:g}")
-        lower, upper, exact, valid = carried(
-            qualified["frequencies"], frequencies, qualified["mask"]
-        )
-        mask &= valid
-        uncertainty = worst(qualified["uncertainty_db"], lower, upper, exact)
+        name = f"qualification-{level:g}.npz"
+        if name not in budgets:
+            budgets[name] = qualified_budgets(directory, qualification, name, bench)
+        grid, bench_unc, bench_mask, per_case = budgets[name]
+        lower, upper, exact, bench_valid = carried(grid, frequencies, bench_mask)
+        bench_part = worst(bench_unc, lower, upper, exact)
+        if per_case is None:
+            settled_valid = np.ones(len(frequencies), bool)
+            settling = np.zeros(len(frequencies))
+        elif case["id"] in per_case:
+            case_unc, case_mask = per_case[case["id"]]
+            _, _, _, settled_valid = carried(grid, frequencies, case_mask)
+            settling = worst(case_unc, lower, upper, exact)
+        else:  # No convergence evidence for this cascade: nothing of it is judged.
+            settled_valid = np.zeros(len(frequencies), bool)
+            settling = np.full(len(frequencies), np.inf)
+        limit = qualification["accuracy_db"] / 3
+        unsettled = settled_valid & bench_valid & (settling >= limit)
+        mask &= bench_valid & settled_valid & (bench_part + settling < limit)
+        uncertainty = bench_part + np.where(np.isfinite(settling), settling, 0)
         uncertainty += data["inversion_bias_db"] + np.maximum(
             left["inversion_bias_db"], right["inversion_bias_db"]
         )
@@ -269,17 +365,26 @@ def analyse(directory: Path, output: Path) -> dict:
             "worst_hz": represent["worst_hz"],
             "outcome": "ok" if represent["worst_db"] <= requirement else "degraded",
         }
+        # Every curve is kept whole, judged or not: `mask` says which bins are judged.
+        # "intended" is the designed (exact) filter; "measured" is what actually played.
         item["curves_db"] = {
             "intended": (20 * np.log10(np.maximum(np.abs(exact), 1e-300))).tolist(),
             "predicted": (20 * np.log10(np.maximum(np.abs(stored_h), 1e-300))).tolist(),
-            "measured": [
-                float(v) if m else None
-                for v, m in zip(
-                    20 * np.log10(np.maximum(np.abs(measured), 1e-300)),
-                    mask,
-                    strict=True,
-                )
-            ],
+            "measured": finite(20 * np.log10(np.maximum(np.abs(measured), 1e-300))),
+            "measured_minus_predicted": finite(stored_delta),
+        }
+        item["convergence"] = {
+            "outcome": "unsettled" if np.any(unsettled) else "converged",
+            "unsettled_bins": int(np.count_nonzero(unsettled)),
+            "unsettled_low_hz": float(frequencies[unsettled][0])
+            if np.any(unsettled)
+            else None,
+            "unsettled_high_hz": float(frequencies[unsettled][-1])
+            if np.any(unsettled)
+            else None,
+            "worst_db": float(np.max(settling[settled_valid]))
+            if np.any(settled_valid)
+            else None,
         }
         item["characteristics"] = {
             "sections": len(case["publication_filters"]),
@@ -324,7 +429,7 @@ def analyse(directory: Path, output: Path) -> dict:
         rows.append(
             f"<tr><td>{html.escape(item['name'])}<details><summary>Published filters</summary><pre>{html.escape(json.dumps(item['filters'], indent=2))}</pre>Offset {item['gain_db']} dB: {item['gain_application']}</details></td><td>{item.get('accuracy_assessment', {}).get('outcome', item['status'])}</td><td>{stats.get('worst_db', '—')}</td><td>{stats.get('worst_hz', '—')}</td><td>{stats.get('coverage', '—')}</td></tr>"
         )
-    details = f"<p>{html.escape(run['scope'])}. Qualified: {qualification['qualified']}. Complete: {report['complete']}. Restoration verified: {run['restored']}.</p><p>{html.escape(report['limitations'])}</p><p>Against the exact (unrounded) filter, per load. Positive delta means more output than the published cascade predicts. Invalid bins are missing, never zero.</p><table><tr><th>Case</th><th>Outcome</th><th>Worst absolute delta (dB)</th><th>Frequency (Hz)</th><th>Valid fraction</th></tr>{''.join(rows)}</table>"
+    details = f"<p>{html.escape(run['scope'])}. Qualified: {qualification['qualified']}. Complete: {report['complete']}. Restoration verified: {run['restored']}.</p><p>{html.escape(report['limitations'])}</p><p>Actual against the designed (exact, unrounded) filter, per load. Positive delta means more output than designed. Invalid bins are missing, never zero.</p><table><tr><th>Case</th><th>Outcome</th><th>Worst absolute delta (dB)</th><th>Frequency (Hz)</th><th>Valid fraction</th></tr>{''.join(rows)}</table>"
     details += "".join(
         f"<p><img alt='Signed device response errors' src='{name}'></p>"
         for name in charts
@@ -402,10 +507,8 @@ def plot_discrepancies(results: list[dict], output: Path) -> list[str]:
         delta = np.asarray(item["delta_exact_db"], dtype=float)
         uncertainty = np.asarray(item["uncertainty_db"])
         fig, ax = plt.subplots(figsize=(8, 4))
-        ax.semilogx(frequencies, delta, label="Measured / exact")
-        ax.semilogx(
-            frequencies, item["delta_stored_db"], label="Measured / storage model"
-        )
+        ax.semilogx(frequencies, delta, label="Actual / designed")
+        ax.semilogx(frequencies, item["delta_stored_db"], label="Actual / predicted")
         ax.semilogx(
             frequencies,
             item["predicted_quantisation_db"],
@@ -416,7 +519,7 @@ def plot_discrepancies(results: list[dict], output: Path) -> list[str]:
             delta - uncertainty,
             delta + uncertainty,
             alpha=0.2,
-            label="Identity uncertainty",
+            label="Bench and settling uncertainty",
         )
         ax.set(xlabel="Frequency (Hz)", ylabel="Signed delta (dB)", title=item["name"])
         ax.grid(True, alpha=0.3)
