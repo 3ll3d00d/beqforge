@@ -11,12 +11,10 @@ import numpy as np
 from . import Float32, Section, Settings, optimise
 
 
-def optimise_entry(entry: dict, *, rate: int, settings: Settings | None = None) -> dict:
-    """Produce an optional variant, preserving the complete authored entry separately.
-
-    Only common shelf/PEQ cascades are supported. Cached coefficients, when complete,
-    define the sent baseline; authored parameters always define the ideal reference.
-    """
+def prepare_entry(
+    entry: dict, *, rate: int
+) -> tuple[np.ndarray, np.ndarray | None, str, float]:
+    """Validate catalogue applicability and reproduce its baseline loading policy."""
     if any(k in entry for k in ("channel_cascades", "channelFilters", "channel_scope")):
         raise ValueError("channel-specific filters are unsupported")
     offset = float(entry.get("mv", 0))
@@ -56,13 +54,27 @@ def optimise_entry(entry: dict, *, rate: int, settings: Settings | None = None) 
         raise ValueError(
             "incomplete cached coefficient set; loading policy must be explicit"
         )
+    return (
+        np.asarray(exact),
+        np.asarray(cached) if complete else None,
+        "published" if complete else "RBJ",
+        offset,
+    )
+
+
+def optimise_entry(
+    entry: dict, *, rate: int, settings: Settings | None = None, cache=None
+) -> dict:
+    """Build entry-specific provenance around an automatically cached numerical result."""
+    exact, sent, baseline_source, offset = prepare_entry(entry, rate=rate)
     result = optimise(
         exact,
         rate=rate,
         precision=Float32(),
         transport=Float32(),
-        sent=np.asarray(cached) if complete else None,
+        sent=sent,
         settings=settings,
+        cache=cache,
     )
     source_digest = hashlib.sha256(
         json.dumps(
@@ -95,7 +107,7 @@ def optimise_entry(entry: dict, *, rate: int, settings: Settings | None = None) 
         }
     return {
         "source_digest": source_digest,
-        "baseline_source": "published" if complete else "RBJ",
+        "baseline_source": baseline_source,
         "result": report,
         "variant": variant,
     }
@@ -116,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--margin-db", type=float, default=0.5)
     parser.add_argument("--passes", type=int, default=6)
+    parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args(argv)
     if args.out.resolve() == args.input.resolve() or (
         args.out.exists() and args.input.exists() and args.out.samefile(args.input)
@@ -128,11 +142,16 @@ def main(argv: list[str] | None = None) -> int:
         entries = [entries]
     if not isinstance(entries, list):
         parser.error("input must be an entry or catalogue array")
+    from .cache import ResultCache
+
+    cache = False if args.no_cache else ResultCache(args.cache_dir)
     reports = []
     for ordinal, entry in enumerate(entries):
         for rate in dict.fromkeys(args.rate or (48000, 96000)):
             try:
-                report = optimise_entry(entry, rate=rate, settings=settings)
+                report = optimise_entry(
+                    entry, rate=rate, settings=settings, cache=cache
+                )
             except (ValueError, KeyError, TypeError, OverflowError) as error:
                 report = {
                     "result": {"outcome": "unsupported"},

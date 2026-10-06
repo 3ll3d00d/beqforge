@@ -39,6 +39,10 @@ testpaths = ["tests"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.force-include]
+"beqoptimiser/data/seed.json.gz" = "beqoptimiser/data/seed.json.gz"
+"beqoptimiser/data/seed-manifest.json" = "beqoptimiser/data/seed-manifest.json"
+
 [tool.hatch.build.targets.wheel]
 packages = ["beqforge", "beqforge_device_check", "beqoptimiser", "beq_common", "tools"]
 exclude = ["tools/experiments"]

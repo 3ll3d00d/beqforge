@@ -113,3 +113,56 @@ The [whole-catalogue report](optimiser-report/README.md) provides checked-in sta
 charts, per-rate outcome counts and aggregate error distributions for a pinned catalogue snapshot.
 Its source is the [10 September 2026 catalogue snapshot](https://github.com/3ll3d00d/beqcatalogue/blob/43e97a8d349961236b409fec2af7383997183724/docs/database.json),
 verified against the SHA-256 recorded in the report.
+
+## Automatic result cache
+
+Both `optimise()` and `optimise_entry()` automatically reuse numerical results. The installed
+wheel includes a read-only seed of **29,268 distinct results**, covering all **30,542
+filter-bearing entry/rate cases** from the pinned catalogue report. The 104 cases without
+filters remain unsupported. Matching calls need no numerical search and no local cache setup.
+
+Keys include the reference and original sent coefficients, sample rate, all settings, storage
+and transport configurations, numerical implementation/version, NumPy/SciPy versions and
+architecture/long-double precision. A changed configuration or incompatible environment is a
+miss: it computes normally and saves the result. The bundled seed was produced on Linux
+x86_64 with NumPy 2.4.2, SciPy 1.18.1 and an 80-bit long double; other environments do not
+reuse that seed. [Seed provenance](../beqoptimiser/data/seed-manifest.json) records its hashes
+and the verified source revision. No dependency versions are silently forced by the cache.
+
+The disk cache defaults to `$XDG_CACHE_HOME/beqoptimiser`, or `~/.cache/beqoptimiser`.
+Set `BEQOPTIMISER_CACHE_DIR` or pass an explicit cache for catalogue build jobs:
+
+```python
+from beqoptimiser import ResultCache
+from beqoptimiser.cli import optimise_entry
+
+cache = ResultCache(".cache/beqoptimiser")
+report = optimise_entry(authored_entry, rate=96000, cache=cache)
+```
+
+Only immutable numerical results are cached. Titles, catalogue source digests, volume offsets
+and variant metadata are rebuilt for each entry, including when another entry has identical
+filters. Ineligible results are also cached, with no replacement. Stored results have
+checksums, request/provenance checks, stability and publication-policy checks. Damaged entries
+are treated as misses; atomic file replacement permits concurrent writers. An unwritable disk
+cache does not prevent a calculation or a bundled-seed hit.
+
+Use `cache=False`, `BEQOPTIMISER_CACHE=0` or CLI `--no-cache` for fresh calculations.
+The CLI also accepts `--cache-dir DIR`. `ResultCache(..., use_seed=False)` restricts reuse to
+the chosen disk cache. Custom precision implementations must provide a JSON-serialisable
+`cache_identity()` containing their implementation version and complete configuration to opt
+in; otherwise they are calculated without caching. Built-in precision models supply that
+identity automatically.
+
+The report generator uses this same library cache. To rebuild the bundled seed from the
+verified historical report cache without rerunning searches:
+
+```bash
+uv run python -m tools.seed_optimiser_cache /path/to/beqcatalogue/docs/database.json \
+  --legacy-cache /tmp/beq-catalogue-report-cache --report-revision 9253439 \
+  --cache-dir /tmp/beqoptimiser-library-cache
+```
+
+The importer verifies the catalogue/settings/dependency fingerprints, archived report source,
+unchanged numerical implementation, request identity and publication policy before accepting
+results. It does not import another entry's variant identity or volume offset.

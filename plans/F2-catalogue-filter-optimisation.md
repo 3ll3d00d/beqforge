@@ -417,3 +417,27 @@ passed: 47 focused tests, plus new-file Ruff and whitespace checks. The full num
 took 4,407 seconds under the sleep inhibitor; chart/statistics rendering followed. No designer
 or shared arithmetic implementation changed for this report, so no designer probe was needed.
 Catalogue/ezbeq integration and hardware checks remain the next work.
+
+### Automatic library cache and bundled seed (6 October 2026)
+
+`beqoptimiser.optimise` and the catalogue adapter now share an automatic result cache.
+Numerical request keys cover coefficients, sample rate, complete settings and precision
+configuration, numerical source/version, dependency versions and execution architecture.
+Catalogue identity and volume offset are regenerated on every adapter call. Atomic writes,
+checksums and publication-policy validation permit safe concurrent reuse; invalid entries
+are misses, unavailable cache storage does not prevent calculation, and custom precisions
+without an explicit implementation/configuration identity bypass caching.
+
+The historical report cache was imported after verifying the catalogue fingerprint, archived
+report implementation and unchanged numerical core. The installed distribution includes
+29,268 distinct numerical results covering 30,542 supported entry/rate cases; 104 cases have
+no filters. The seed is scoped to its recorded Linux x86_64 / NumPy 2.4.2 / SciPy 1.18.1
+numerical environment. Other environments calculate and populate their own cache.
+
+A full replay of all supported cases matched the historical numerical reports and replacement
+coefficients with zero core optimiser calls, including fresh per-entry publication identities
+and volume offsets. It took 10.75 seconds with the sleep inhibitor held. The 71 focused
+optimiser, report, cache and package-boundary tests passed, as did Ruff, whitespace checks and
+a fresh offline installation of the built optimiser wheel, including bundled-seed reuse.
+The wheel and source distribution explicitly include the seed and provenance manifest.
+No designer or shared numerical implementation changed, so no designer probe was required.

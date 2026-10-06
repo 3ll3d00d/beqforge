@@ -256,6 +256,9 @@ http-client.private.env.json
 .idea/**/copilot.data.migration.*.xml
 
 data/
+!beqoptimiser/data/
+!beqoptimiser/data/seed.json.gz
+!beqoptimiser/data/seed-manifest.json
 
 # generated debug charts (PNGs, regenerated per run)
 charts/

@@ -2,6 +2,12 @@
 
 from beq_common import __version__ as __version__
 
+from .cache import (
+    ResultCache as ResultCache,
+)
+from .cache import (
+    optimise as optimise,
+)
 from .core import (
     FixedPoint as FixedPoint,
 )
@@ -22,9 +28,6 @@ from .core import (
 )
 from .core import (
     magnitude as magnitude,
-)
-from .core import (
-    optimise as optimise,
 )
 from .core import (
     stable as stable,

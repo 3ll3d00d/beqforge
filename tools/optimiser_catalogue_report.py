@@ -14,7 +14,16 @@ from pathlib import Path
 
 import numpy as np
 
-from beqoptimiser import Float32, Section, Settings, core, magnitude, stable
+from beqoptimiser import (
+    Float32,
+    ResultCache,
+    Section,
+    Settings,
+    core,
+    magnitude,
+    stable,
+)
+from beqoptimiser.cache import implementation_identity
 from beqoptimiser.cli import optimise_entry
 
 RATES = (48000, 96000)
@@ -103,13 +112,10 @@ def cached_search_magnitude(rate, fallback):
 
 def evaluate(job):
     key, entry, rate, cache = job
-    path = Path(cache) / f"{key}.json"
-    if path.exists():
-        return key, json.loads(path.read_text())
     original_magnitude = core.magnitude
     core.magnitude = cached_search_magnitude(rate, original_magnitude)
     try:
-        report = optimise_entry(entry, rate=rate)
+        report = optimise_entry(entry, rate=rate, cache=ResultCache(cache))
     except (ValueError, KeyError, TypeError, OverflowError) as error:
         report = {
             "result": {"outcome": "unsupported"},
@@ -119,9 +125,6 @@ def evaluate(job):
     finally:
         core.magnitude = original_magnitude
     report = clean(report)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(report, allow_nan=False))
-    temporary.replace(path)
     return key, report
 
 
@@ -501,7 +504,9 @@ def main():
     jobs, keys = {}, {}
     for ordinal, entry in enumerate(entries):
         for rate in RATES:
-            key = job_key(entry, rate, digest)
+            key = job_key(
+                entry, rate, json.dumps(implementation_identity(), sort_keys=True)
+            )
             keys[ordinal, rate] = key
             jobs.setdefault(key, (key, entry, rate, str(args.cache_dir)))
     print(

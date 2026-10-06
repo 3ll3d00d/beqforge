@@ -43,6 +43,8 @@ def check(wheel: Path, profile: str, lockfile: Path, offline: bool = False) -> d
         ):
             if not any(name.startswith(package + "/") for name in names):
                 raise ValueError(f"wheel omits {package}")
+        if "beqoptimiser/data/seed.json.gz" not in names:
+            raise ValueError("wheel omits the bundled optimiser cache")
     with tempfile.TemporaryDirectory(prefix=f"beqforge-{profile}-") as directory:
         root = Path(directory)
         env = root / "env"
@@ -101,6 +103,39 @@ for rate,q in [(48000,2),(96000,.7)]:
     result=optimise([Section('PeakingEQ',10,q,12).sos(rate)],rate=rate)
     assert result.replacement and result.candidate_error_db < .5
 """,
+                ],
+                root,
+            )
+        if profile in ("optimiser", "all"):
+            fixture = (
+                Path(__file__).resolve().parents[1]
+                / "tests/fixtures/optimiser_seed_entry.json"
+            )
+            run(
+                [
+                    str(python),
+                    "-c",
+                    """
+import json, sys
+from beqoptimiser import ResultCache
+from beqoptimiser import cache
+from beqoptimiser.cli import optimise_entry
+entry=json.load(open(sys.argv[1]))
+original=cache.core.optimise
+for rate in (48000,96000):
+    from beqoptimiser import Float32
+    from beqoptimiser.cli import prepare_entry
+    reference,sent,_,_=prepare_entry(entry,rate=rate)
+    request=cache._request(reference,rate=rate,precision=Float32(),transport=Float32(),sent=sent)
+    # Numerical environments incompatible with the seed must compute instead.
+    if cache._bundled_entries().get(request[0]) is not None:
+        def fail(*args,**kwargs): raise AssertionError('installed seed missed')
+        cache.core.optimise=fail
+        assert optimise_entry(entry,rate=rate,cache=ResultCache(sys.argv[2]))['variant']
+        cache.core.optimise=original
+""",
+                    str(fixture),
+                    str(root / "empty-cache"),
                 ],
                 root,
             )

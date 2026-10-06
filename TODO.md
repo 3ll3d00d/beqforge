@@ -55,7 +55,10 @@ The library/CLI now implements direct-coefficient search and numerical validatio
 development examples show some qualifying replacements and correctly withheld partial improvements.
 The [static whole-catalogue report](docs/optimiser-report/README.md) now evaluates all 15,323 entries
 at both rates: 11,871 entries gain qualifying replacements at one or both rates; failures
-retain the originals in the aggregate curves. Catalogue/ezbeq publication integration remains open.
+retain the originals in the aggregate curves. The library now automatically reuses numerical
+results, with a bundled seed covering all filter-bearing entry/rate cases and configurable
+disk caching; entry metadata is rebuilt on every call. Catalogue/ezbeq publication integration
+remains open.
 The [package consolidation](plans/F2-package-consolidation.md) puts all three independent
 workflow packages in one versioned distribution with optional dependency profiles and
 separate commands; shared arithmetic lives beneath them in `beq_common`.

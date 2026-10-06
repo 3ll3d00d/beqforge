@@ -1,0 +1,40 @@
+{
+  "implementation": {
+    "biquad": "8cd9ef4ea6bf3b0b6ac928ff4953e48ef9e8de8340a875d3a15df51b683ad89e",
+    "byteorder": "little",
+    "core": "710067e9b9940b691e733ea40f6c9c7fa2e932a1165092a4cb0e6a9fdfb8256a",
+    "longdouble_mantissa_bits": 63,
+    "machine": "x86_64",
+    "numpy": "2.4.2",
+    "schema": 1,
+    "scipy": "1.18.1",
+    "system": "Linux",
+    "version": "0.1.0"
+  },
+  "provenance": {
+    "catalogue_sha256": "e63ff69e4bf82f74d10fc503979f70c4e2a525f97512ff0dfcb91f875becc9e8",
+    "code_sha256": "494984a0defcdf531e8e9e5292dff45732833692dc8d4f47e08d264d03a926b5",
+    "entry_rate_results": 30542,
+    "matplotlib": "3.11.2",
+    "numpy": "2.4.2",
+    "report_revision": "9253439",
+    "scipy": "1.18.1",
+    "settings": {
+      "band_hz": [
+        2.0,
+        200.0
+      ],
+      "grid_points": 512,
+      "guard_margin_db": 0.5,
+      "margin_db": 0.5,
+      "numerical_tolerance_db": 1e-06,
+      "passes": 6,
+      "validation_points": 8192
+    },
+    "unique_filter_rate_jobs": 29320,
+    "unique_numerical_results": 29268,
+    "unsupported_entry_rate_results": 104
+  },
+  "schema": 1,
+  "seed_sha256": "8af61501b7263c356bce561066b1ef267464f41739cba5e0f02b39b75a32e58a"
+}

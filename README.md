@@ -25,6 +25,8 @@ workflow code. All packages, commands and profiles ship in the same wheel and us
 It requires no audio and does not participate in the audio-derived design pipeline.
 The [whole-catalogue optimisation report](docs/optimiser-report/README.md) includes static
 before/after charts, improvement counts and aggregate errors at 48 and 96 kHz.
+The optimiser automatically reuses a bundled catalogue seed and caches new numerical results;
+[cache configuration](docs/optimiser.md#automatic-result-cache) supports catalogue build jobs.
 
 Extracted from the [`beqanalyser`](https://github.com/3ll3d00d/beqanalyser) project, whose
 clustering pipeline summarises the existing [BEQ catalogue](https://beqcatalogue.readthedocs.io)
