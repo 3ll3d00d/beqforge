@@ -14,6 +14,13 @@ on:
     branches:
       - '**'
 
+# A newer push to a feature branch supersedes its in-progress run. main and tag (release) runs are
+# grouped per commit so they are never cancelled or queued behind each other: a release reuses
+# main's result for the tagged commit.
+concurrency:
+  group: tests-${{ github.event_name }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   test:
     name: Test (${{ matrix.os }})
@@ -21,7 +28,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # feature branch pushes only test on Linux; main, tags (releases) and manual runs test all three
+        os: ${{ fromJSON(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -58,7 +66,7 @@ jobs:
 
       # the device-check tests run in their own job below, in parallel, with the extra installed
       - name: Run tests
-        run: uv run --extra designer pytest --durations=25 --ignore-glob='tests/test_device_check_*.py'
+        run: uv run --extra designer pytest -n auto --durations=25 --ignore-glob='tests/test_device_check_*.py'
 
   device-check:
     name: Device check (${{ matrix.os }})
@@ -66,7 +74,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # feature branch pushes only test on Linux; main, tags (releases) and manual runs test all three
+        os: ${{ fromJSON(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -81,7 +90,7 @@ jobs:
 
       - name: Run device-check tests
         shell: bash
-        run: uv run --extra device-check pytest --durations=25 tests/test_device_check_*.py
+        run: uv run --extra device-check pytest -n auto --durations=25 tests/test_device_check_*.py
 
   package-profiles:
     name: Install profile (${{ matrix.profile }})

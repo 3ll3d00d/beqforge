@@ -2,9 +2,19 @@ name: Build device-check preview
 
 on:
   workflow_dispatch:
+  # only when something that affects the packaged executable changes
   push:
     branches:
       - '**'
+    paths:
+      - 'beqforge_device_check/**'
+      - 'beqforge-device-check.spec'
+      - 'tools/prepare_device_check_helper.py'
+      - 'tools/smoke_test_device_check.py'
+      - 'packaging/device-check/**'
+      - '.github/workflows/build-device-check.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
   pull_request:
     paths:
       - 'beqforge_device_check/**'
@@ -15,6 +25,11 @@ on:
       - '.github/workflows/build-device-check.yml'
       - 'pyproject.toml'
       - 'uv.lock'
+
+# a newer push to a branch supersedes its in-progress preview build
+concurrency:
+  group: device-check-preview-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

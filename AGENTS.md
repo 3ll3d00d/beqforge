@@ -55,11 +55,14 @@ importing them; use an isolated worktree for simultaneous experiments.
 
 The root build configuration includes every workflow and the optimiser's bundled seed in one
 wheel and source distribution. `.github/workflows/tests.yml` checks isolated dependency
-profiles. `.github/workflows/build-executable.yml` builds release executables and distributions;
+profiles and runs the suite in parallel (`pytest -n auto`, so tests must not share mutable state
+or fixed ports). Feature branch pushes test on Linux only and a newer push cancels the branch's
+previous run; `main`, tags and manual runs test Linux, macOS and Windows and are never cancelled. `.github/workflows/build-executable.yml` builds release executables and distributions;
 tag pushes publish to PyPI after validation and successful executable builds. Tags must match
 the shared version exactly (`vX.Y.Z`). Manual runs build artifacts without publishing.
 PyPI uses the `pypi` environment and Trusted Publishing; setup details are in the README.
-Device-check preview executable packaging has its own workflow, not a separate Python release.
+Device-check preview executable packaging has its own workflow, not a separate Python release;
+it only runs when device-check code, packaging or dependencies change.
 
 ## Conventions
 
