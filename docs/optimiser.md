@@ -134,6 +134,18 @@ x86_64 with NumPy 2.4.2, SciPy 1.18.1 and an 80-bit long double; other environme
 reuse that seed. [Seed provenance](../beqoptimiser/data/seed-manifest.json) records its hashes
 and the verified source revision. No dependency versions are silently forced by the cache.
 
+The seed exists because evaluating the whole catalogue is expensive: each entry/rate is a
+coefficient search plus dense validation, and a cold run of the catalogue takes hours of CPU
+even when parallelised. With a compatible seed, the same run is a lookup per entry. It matters
+most for from-scratch work, such as the catalogue report or a beqcatalogue device catalogue
+re-evaluated after a profile revision bump, and for fresh CI runners with empty caches; a
+beqcatalogue device build normally only evaluates newly added titles, which no seed covers yet.
+
+Any change to the numerical code (`core.py`, `biquad.py`), the default settings, the version or
+the pinned NumPy/SciPy changes the implementation identity, so the existing seed silently stops
+being reused (every lookup misses) and `test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search`
+fails. Rebuild the seed as described below before releasing such a change.
+
 The disk cache defaults to `$XDG_CACHE_HOME/beqoptimiser`, or `~/.cache/beqoptimiser`.
 Set `BEQOPTIMISER_CACHE_DIR` or pass an explicit cache for catalogue build jobs:
 
