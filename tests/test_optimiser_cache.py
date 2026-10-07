@@ -276,9 +276,9 @@ def test_bundled_entries_have_valid_checksums_and_population_provenance():
     assert (
         len(document["entries"])
         == document["provenance"]["unique_numerical_results"]
-        == 29268
+        == 29566
     )
-    assert document["provenance"]["entry_rate_results"] == 30542
+    assert document["provenance"]["entry_rate_results"] == 30848
     assert document["provenance"]["unsupported_entry_rate_results"] == 104
     for key, value in document["entries"].items():
         assert key == value["key"]

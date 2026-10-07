@@ -54,8 +54,10 @@ Corrupt entries are misses; unwritable storage must not prevent calculation or s
 Use atomic writes and retain checksums, request identity and publication-policy validation.
 
 Bundled seeds are reusable only in their recorded numerical environment. Changes to numerical
-code or settings invalidate them; do not relabel old results as compatible. The historical
-report-cache importer is `tools/seed_optimiser_cache.py`: preserve its source/environment checks.
+code or settings invalidate them; do not relabel old results as compatible. Rebuild the seed
+with `tools/build_optimiser_seed.py` from a committed report's library cache (see
+docs/optimiser.md). The historical report-cache importer is `tools/seed_optimiser_cache.py`:
+preserve its source/environment checks.
 The root build explicitly includes the seed and manifest in wheel and source distribution.
 
 ## Running and checking

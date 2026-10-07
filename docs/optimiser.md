@@ -122,7 +122,7 @@ verified against the SHA-256 recorded in the report.
 ## Automatic result cache
 
 Both `optimise()` and `optimise_entry()` automatically reuse numerical results. The installed
-wheel includes a read-only seed of **29,268 distinct results**, covering all **30,542
+wheel includes a read-only seed of **29,566 distinct results**, covering all **30,848
 filter-bearing entry/rate cases** from the pinned catalogue report. The 104 cases without
 filters remain unsupported. Matching calls need no numerical search and no local cache setup.
 
@@ -159,15 +159,22 @@ the chosen disk cache. Custom precision implementations must provide a JSON-seri
 in; otherwise they are calculated without caching. Built-in precision models supply that
 identity automatically.
 
-The report generator uses this same library cache. To rebuild the bundled seed from the
-verified historical report cache without rerunning searches:
+The report generator uses this same library cache. To rebuild the bundled seed, generate the
+report, commit it, then bundle that report's cached results without rerunning any search:
 
 ```bash
-uv run python -m tools.seed_optimiser_cache /path/to/beqcatalogue/docs/database.json \
-  --legacy-cache /tmp/beq-catalogue-report-cache --report-revision 9253439 \
-  --cache-dir /tmp/beqoptimiser-library-cache
+uv run python -m tools.optimiser_catalogue_report /path/to/beqcatalogue/docs/database.json \
+  --cache-dir /tmp/beqoptimiser-library-cache --out docs/optimiser-report --workers 12
+git commit docs/optimiser-report -m "Regenerate the catalogue optimisation report"
+uv run python -m tools.build_optimiser_seed /path/to/beqcatalogue/docs/database.json \
+  --cache-dir /tmp/beqoptimiser-library-cache --report-revision <that commit>
 ```
 
-The importer verifies the catalogue/settings/dependency fingerprints, archived report source,
-unchanged numerical implementation, request identity and publication policy before accepting
-results. It does not import another entry's variant identity or volume offset.
+The builder verifies that the catalogue, settings and NumPy/SciPy versions match the report's
+provenance and that the report's source digest matches both the committed revision and the
+working tree. Every supported entry/rate must already be cached; each result passes the
+cache's request identity, stability and publication-policy checks before it is bundled. It
+does not import another entry's variant identity or volume offset.
+
+`tools.seed_optimiser_cache` is the historical importer from the pre-0.2.0 report-cache format,
+kept for provenance; it cannot produce a seed for the current implementation.

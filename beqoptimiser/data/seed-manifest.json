@@ -1,40 +1,39 @@
 {
+  "schema": 1,
   "implementation": {
-    "biquad": "8cd9ef4ea6bf3b0b6ac928ff4953e48ef9e8de8340a875d3a15df51b683ad89e",
-    "byteorder": "little",
-    "core": "710067e9b9940b691e733ea40f6c9c7fa2e932a1165092a4cb0e6a9fdfb8256a",
-    "longdouble_mantissa_bits": 63,
-    "machine": "x86_64",
-    "numpy": "2.4.2",
     "schema": 1,
+    "version": "0.2.0",
+    "core": "7593172a55f9016b81ba351a796a7e1956b69a7588d9304270726e6caa71d152",
+    "biquad": "8cd9ef4ea6bf3b0b6ac928ff4953e48ef9e8de8340a875d3a15df51b683ad89e",
+    "numpy": "2.4.2",
     "scipy": "1.18.1",
     "system": "Linux",
-    "version": "0.1.0"
+    "machine": "x86_64",
+    "byteorder": "little",
+    "longdouble_mantissa_bits": 63
   },
   "provenance": {
-    "catalogue_sha256": "e63ff69e4bf82f74d10fc503979f70c4e2a525f97512ff0dfcb91f875becc9e8",
-    "code_sha256": "494984a0defcdf531e8e9e5292dff45732833692dc8d4f47e08d264d03a926b5",
-    "entry_rate_results": 30542,
-    "matplotlib": "3.11.2",
-    "numpy": "2.4.2",
-    "report_revision": "9253439",
-    "scipy": "1.18.1",
+    "catalogue_sha256": "ed4454b612ef3e30aa734962119015a50c4addf7cb8bc5192fbbfe8869428dda",
+    "code_sha256": "36e3eb32ef10a56e1468969022e1dd29b7b7a5b43d8661979abc4616c98469a7",
     "settings": {
+      "margin_db": 0.5,
       "band_hz": [
         2.0,
         200.0
       ],
-      "grid_points": 512,
-      "guard_margin_db": 0.5,
-      "margin_db": 0.5,
-      "numerical_tolerance_db": 1e-06,
       "passes": 6,
-      "validation_points": 8192
+      "grid_points": 512,
+      "validation_points": 8192,
+      "numerical_tolerance_db": 1e-06
     },
-    "unique_filter_rate_jobs": 29320,
-    "unique_numerical_results": 29268,
-    "unsupported_entry_rate_results": 104
+    "numpy": "2.4.2",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2",
+    "unique_filter_rate_jobs": 29620,
+    "report_revision": "d5a08c3",
+    "entry_rate_results": 30848,
+    "unsupported_entry_rate_results": 104,
+    "unique_numerical_results": 29566
   },
-  "schema": 1,
-  "seed_sha256": "8af61501b7263c356bce561066b1ef267464f41739cba5e0f02b39b75a32e58a"
+  "seed_sha256": "5cc0d3d0bb1d0d81707834b19eaf49c005eabbc92ec5fd54c5e11bbb95c997e0"
 }

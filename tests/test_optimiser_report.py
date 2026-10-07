@@ -107,7 +107,7 @@ def test_accelerated_worker_matches_library_result_exactly(tmp_path):
     assert evaluate(("test", value, 48000, str(tmp_path)))[1] == actual
 
 
-def test_checked_in_catalogue_report_is_complete_and_respects_publication_margin():
+def test_checked_in_catalogue_report_is_complete_and_respects_publication_policy():
     import gzip
     from pathlib import Path
 
@@ -131,7 +131,12 @@ def test_checked_in_catalogue_report_is_complete_and_respects_publication_margin
                 row["original_max_error_db"] is None
                 or row["original_max_error_db"] > 0.5
             )
-            assert row["published_max_error_db"] <= 0.5
+            if row["outcome"] == "replacement":
+                assert row["published_max_error_db"] <= 0.5
+            else:
+                assert row["original_max_error_db"] is None or (
+                    row["published_max_error_db"] < row["original_max_error_db"]
+                )
         else:
             assert row["published_max_error_db"] == row["original_max_error_db"]
     assert (
@@ -142,7 +147,7 @@ def test_checked_in_catalogue_report_is_complete_and_respects_publication_margin
         assert sum(data["outcomes"].values()) == size
         assert (
             sum(row["replacement"] for row in rows if str(row["rate"]) == rate)
-            == data["replaced_entries"]
+            == data["replaced_entries"] + data["improved_entries"]
         )
         for stage in ("before", "after"):
             values = [
