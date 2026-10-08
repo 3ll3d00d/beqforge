@@ -3,6 +3,9 @@ name: Designer image
 # The designer as a container, beside a beqdesigner pipeline service (README, "Running the
 # designer in a container"). Every change to what goes into it is built and smoke-tested;
 # a vX.Y.Z tag also publishes linux/amd64 and linux/arm64 to GHCR as ghcr.io/<owner>/beqforge-designer.
+# A manual run with `publish` publishes the image of an existing release from a later commit,
+# only if the designer's runtime code is identical to that release's tag (as when the image
+# recipe arrived after the release).
 on:
   push:
     branches: [main]
@@ -22,6 +25,11 @@ on:
       - '.dockerignore'
       - '.github/workflows/build-designer-image.yml'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the image as beq_common.__version__ (its vX.Y.Z tag must exist, with identical designer code)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +47,17 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the release tags, for a manual publish's check
+      - name: Choose whether to publish
+        id: publish
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* || "${{ inputs.publish }}" == true ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Set image version
         id: version
         shell: bash
@@ -48,6 +67,14 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match beq_common.__version__ $version" >&2
             exit 1
           fi
+          if [[ "$GITHUB_REF" != refs/tags/* && "${{ inputs.publish }}" == true ]]; then
+            # the image says it is release $version: what it runs must be exactly that release's
+            if ! git diff --quiet "v$version" HEAD -- beqforge beq_common tools/designer_server.py; then
+              echo "the designer code differs from v$version: tag a release instead" >&2
+              git diff --stat "v$version" HEAD -- beqforge beq_common tools/designer_server.py >&2
+              exit 1
+            fi
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build image for smoke test
         run: |
@@ -56,11 +83,11 @@ jobs:
       - name: Health, and a design inline and by reference
         run: python3 packaging/designer/smoke.py beqforge-designer:smoke
       - uses: docker/setup-qemu-action@v4
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.publish.outputs.publish == 'true'
       - uses: docker/setup-buildx-action@v3
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.publish.outputs.publish == 'true'
       - name: Log in to GHCR
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.publish.outputs.publish == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -68,7 +95,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Choose tags
         id: tags
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.publish.outputs.publish == 'true'
         shell: bash
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/beqforge-designer"
@@ -79,7 +106,7 @@ jobs:
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - name: Build and publish amd64 and arm64
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.publish.outputs.publish == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .

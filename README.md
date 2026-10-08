@@ -228,6 +228,9 @@ pure `design(request) -> response` adapter, independently testable without a soc
 pipeline service beside it (beqdesigner's `docker/compose.example.yaml` runs both). It is
 published for linux/amd64 and linux/arm64 by `.github/workflows/build-designer-image.yml` on
 each `vX.Y.Z` tag, from the same commit as that release; `latest` follows the newest release.
+A manual run of that workflow with `publish` set publishes the current version's image from a
+later commit, and refuses unless the designer's code is identical to that version's tag (0.2.0's
+image was published this way, the recipe having arrived after the release).
 Pin a version: a catalogue designed over several days should come from one designer build.
 
 The image's defaults, all overridable with the environment variables above:
