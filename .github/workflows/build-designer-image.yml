@@ -1,0 +1,92 @@
+name: Designer image
+
+# The designer as a container, beside a beqdesigner pipeline service (README, "Running the
+# designer in a container"). Every change to what goes into it is built and smoke-tested;
+# a vX.Y.Z tag also publishes linux/amd64 and linux/arm64 to GHCR as ghcr.io/<owner>/beqforge-designer.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'packaging/designer/**'
+      - '.dockerignore'
+      - '.github/workflows/build-designer-image.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'beq_common/**'
+      - 'beqforge/**'
+      - 'tools/designer_server.py'
+  pull_request:
+    paths:
+      - 'packaging/designer/**'
+      - '.dockerignore'
+      - '.github/workflows/build-designer-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: designer-image-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60   # the arm64 image builds under emulation
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set image version
+        id: version
+        shell: bash
+        run: |
+          version="$(python3 -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('beq_common/__init__.py').read_text()).group(1))")"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match beq_common.__version__ $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build image for smoke test
+        run: |
+          docker build -f packaging/designer/Dockerfile -t beqforge-designer:smoke \
+            --build-arg VERSION="${{ steps.version.outputs.version }}" --build-arg REVISION="$GITHUB_SHA" .
+      - name: Health, and a design inline and by reference
+        run: python3 packaging/designer/smoke.py beqforge-designer:smoke
+      - uses: docker/setup-qemu-action@v4
+        if: startsWith(github.ref, 'refs/tags/')
+      - uses: docker/setup-buildx-action@v3
+        if: startsWith(github.ref, 'refs/tags/')
+      - name: Log in to GHCR
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Choose tags
+        id: tags
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/beqforge-designer"
+          version="${{ steps.version.outputs.version }}"
+          tags="$image:$version"
+          if [[ ! "$version" =~ (a|b|rc|dev)[0-9]*$ ]]; then
+            tags="$tags,$image:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - name: Build and publish amd64 and arm64
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: packaging/designer/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            REVISION=${{ github.sha }}

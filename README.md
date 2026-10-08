@@ -222,6 +222,38 @@ the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.
 
+### Running the designer in a container
+
+`ghcr.io/3ll3d00d/beqforge-designer:<version>` runs `beqforge serve-designer` for a beqdesigner
+pipeline service beside it (beqdesigner's `docker/compose.example.yaml` runs both). It is
+published for linux/amd64 and linux/arm64 by `.github/workflows/build-designer-image.yml` on
+each `vX.Y.Z` tag, from the same commit as that release; `latest` follows the newest release.
+Pin a version: a catalogue designed over several days should come from one designer build.
+
+The image's defaults, all overridable with the environment variables above:
+
+| Setting | Default | Mount |
+| --- | --- | --- |
+| `BEQFORGE_HOST`, `BEQFORGE_PORT` | `0.0.0.0`, `8420` | |
+| `BEQFORGE_SHARED_ROOT` | `/work` | the pipeline's work directory, so audio is sent by reference |
+| `BEQFORGE_CACHE_DIR` | `/cache` | a volume, so a restart keeps the stage cache |
+| `BEQFORGE_RECORD_DIR` | unset | set it (for example to `/records`, and mount that) to keep run records |
+
+It runs as uid/gid 1000 (`--build-arg PUID=… PGID=…` to change), which must be able to write
+the shared root and the cache: the server checks both with a write at startup. Its
+`HEALTHCHECK` asks `/health`. The server answers one request at a time (its fitter forks), so a
+caller sending several at once queues them; size the caller's timeout for that.
+
+Build and check it locally from the repository root:
+
+```bash
+docker build -f packaging/designer/Dockerfile -t beqforge-designer .
+python3 packaging/designer/smoke.py beqforge-designer
+```
+
+The smoke script checks `/health` and one design inline and one by reference;
+`tests/test_designer_image.py` runs the same check against an in-process server.
+
 For a machine without Python/`uv`, a standalone `beqforge` executable (every subcommand,
 including `serve-designer`) is built for Linux/macOS/Windows by
 `.github/workflows/build-executable.yml` on every `vX.Y.Z` tag, and attached to the matching
