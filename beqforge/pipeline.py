@@ -767,6 +767,53 @@ def low_end_deficit_db(
     return on_grid * _taper(DESIGN_GRID, anchor, params.flatten_taper_ratio)
 
 
+MAINS_HZ = (50.0, 60.0)
+# a hum-removal notch is 2-3.4 Hz wide at -6 dB (Glory, measured); the surround stays well
+# inside the 50 Hz spacing so it never reaches the next harmonic
+HUM_NOTCH_HALF_WIDTH_HZ = 2.5
+HUM_SURROUND_HALF_WIDTH_HZ = 10.0
+
+
+def mains_hum_notches(
+    freqs: np.ndarray, response: np.ndarray, low: float, high: float
+) -> tuple[tuple[float, float], ...]:
+    """The bands of a hum-removal comb in `low`-`high`, or none.
+
+    A harmonic is notched when the spectrum's minimum within `HUM_NOTCH_HALF_WIDTH_HZ` of it
+    lies below the lowest point of its surround by more than the surround's own crest-to-trough
+    spread — deeper than anything the programme does nearby, measured against the programme
+    beside it, no dB constant. A comb is every harmonic of one mains frequency in the band
+    notched, and at least two of them: one deep dip at a round frequency is not a repair.
+
+    On the 28 real titles and 63 corpus cases at hand only Glory qualifies (1.48-2.21 at 60, 120
+    and 180 Hz); nothing else exceeds 0.61 at any harmonic but A Star Is Born's 60 Hz (1.28),
+    whose other harmonics do not.
+    """
+    for mains in MAINS_HZ:
+        centres = [c for c in np.arange(mains, high + 1e-9, mains) if c >= low]
+        if len(centres) < 2:
+            continue
+        notched = []
+        for centre in centres:
+            offset = np.abs(freqs - centre)
+            inner = offset <= HUM_NOTCH_HALF_WIDTH_HZ
+            surround = (offset <= HUM_SURROUND_HALF_WIDTH_HZ) & ~inner
+            if not inner.any() or not surround.any():
+                break
+            beside = response[surround]
+            if np.min(beside) - np.min(response[inner]) <= np.ptp(beside):
+                break
+            notched.append(
+                (
+                    float(centre - HUM_NOTCH_HALF_WIDTH_HZ),
+                    float(centre + HUM_NOTCH_HALF_WIDTH_HZ),
+                )
+            )
+        else:
+            return tuple(notched)
+    return ()
+
+
 def passband_ripple_db(
     material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
 ) -> tuple[float, tuple[float, float]] | None:
@@ -780,6 +827,10 @@ def passband_ripple_db(
     of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
     negative corpus (IMPROVEMENT_PLAN E2) every unfiltered title's low-end deficit came in
     under this (at most 0.77x); every real title and injected filter above it (1.08x and up).
+    Mains-hum notches (`mains_hum_notches`) are left out of it: a comb cut at every harmonic of
+    50 or 60 Hz is a repair, not texture, and on Glory its 12-13 dB troughs read as 15.4 dB of
+    ripple on a passband that otherwise swings 7.
+
     `None` when there is no passband left above the correction to measure.
     """
     measured = _flat_deficit(material, params)
@@ -790,10 +841,11 @@ def passband_ripple_db(
         _judged_top_hz(anchor, params, noise_floor_hz),
         params.diagnose.band_hz[1],
     )
-    band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, params.exclude_bands_hz)
+    bands = (*params.exclude_bands_hz, *mains_hum_notches(freqs, response, low, high))
+    band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, bands)
     if band.sum() < 8:
         return None
-    smooth = smooth_unexcluded(response, freqs, params.exclude_bands_hz, 15)[band]
+    smooth = smooth_unexcluded(response, freqs, bands, 15, levels=True)[band]
     octaves = np.log2(freqs[band])
     about = smooth - np.polyval(np.polyfit(octaves, smooth, 1), octaves)
     return float(np.max(about) - np.min(about)), (low, high)

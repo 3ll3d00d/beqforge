@@ -206,3 +206,18 @@ def test_effective_exclusions_reach_cached_analysis(tmp_path, monkeypatch):
             cache_path=cache_path,
         )
     assert seen == [((12.0, 20.0),), ((13.0, 21.0),)]
+
+
+def test_smoothing_beside_an_exclusion_is_not_pulled_towards_zero():
+    """A level beside an omitted band keeps its level: the window shortens, it is not padded.
+
+    Zero padding read as 0 dB, so -68 dB bins next to an exclusion came out near -37 dB — a
+    false crest the passband ripple then measured as texture (Glory, hum notches excluded).
+    """
+    freqs = np.arange(0.25, 500.25, 0.25)
+    values = np.full_like(freqs, -68.0)
+    bands = ((57.0, 63.0), (117.0, 123.0))
+    actual = smooth_unexcluded(values, freqs, bands, 15, levels=True)
+    kept = unexcluded(freqs, bands)
+    np.testing.assert_allclose(actual[kept], -68.0)
+    assert np.all(actual[~kept] == 0)

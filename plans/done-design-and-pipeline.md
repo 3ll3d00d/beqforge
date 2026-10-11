@@ -748,6 +748,55 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## Levels beside an omission, and mains-hum notches as texture (11 October 2026)
+
+Three titles from a beqdesigner run against `/media/beq` were declined in ways that should not
+have happened. Two of the causes are fixed here.
+
+* **`smooth_unexcluded` padded levels with zero.** Each retained segment was smoothed with
+  a zero-padded window. For a correction, zero is "no correction", which is right. For an
+  absolute spectrum in dB, zero is 0 dB, so a −68 dB bin beside an exclusion read about −37.
+  `passband_ripple_db` then measured those false crests as texture. It now takes
+  `levels=True`, which shortens the window at a segment's ends instead. The strata spread in
+  `_temporal_evidence` uses it too. The correction path is left bit-exact: a version that
+  rounded differently moved corpus recovery by up to 0.28 dB RMS and changed
+  `filtered/3`'s winner from float rounding alone (the fitter amplifies last-bit target
+  changes), which would have hidden what the change itself did.
+* **Hum-removal notches read as texture (Glory).** The mix carries 2-3.4 Hz wide notches at
+  60, 120 and 180 Hz. `passband_ripple_db` measured 15.4 dB ripple against a 12.1 dB deficit
+  and declined `within_programme_ripple`. `pipeline.mains_hum_notches` finds a comb: every
+  harmonic of 50 or 60 Hz in the band, at least two of them, each with its ±2.5 Hz minimum
+  below the lowest point of its ±10 Hz surround by more than the surround's own spread. The
+  ripple measure leaves those bins out, and Glory reads about 6 dB. End to end through
+  `designer.design()` Glory is now accepted: plateau 62.3-115.5 Hz at −67.6 dB, low shelf
+  21.7 Hz +11.4 dB Q 0.71 with a 29.6 Hz −1.2 dB trim, 99% of the deficit supported, sub
+  feed peaking at −18.6 dBFS. Across the 28 real titles
+  and 63 corpus cases at hand, only Glory qualifies. Its harmonics score 1.48-2.21; nothing
+  else exceeds 0.61 at any harmonic except A Star Is Born at 60 Hz (1.28), whose other
+  harmonics do not. A ⅙-octave median ripple was rejected: it also clears Glory, but it lets
+  a `sparse_dialogue` negative reach 1.19× and a broadband one 0.97×.
+* **Validation.** Probe: `compare --tol 0` reports nothing on all eleven `data/*.npz`
+  titles. Synthetic protocol, seeds 101 and 947: identical to HEAD. Negative corpus, seeds
+  1-9: all 63 cases identical to HEAD (gated 0/45, gate pass 0.079 against 0.100,
+  natural_droop 4/9, TP 7/9, median recovery 1.2708). The committed `negative_corpus.json`
+  predates HEAD (`4c6d5c3`: 5/9, 1.2598) and was left alone. Full suite: 798 passed,
+  2 skipped. New tests are in `tests/test_design_hum.py`, plus the zero-padding case in
+  `tests/test_design_exclusions.py`.
+* **The third decline is not fixed here: a plateau that is not found (13 Going on 30).** The mix
+  peaks at 65-70 Hz, more than the 3 dB tolerance above the 90th-percentile threshold. That
+  splits the passband into two runs and neither is flat within 3 dB/oct, so
+  `plateau_reference` returns NaN. The per-channel plateaus are fine; the mix tilts about
+  −7 dB/oct because bass is coherent across channels while ~200 Hz is not. A one-sided
+  tolerance on every title absorbs Send Help's authored 18-23 Hz hump, T4's "wide hump wins",
+  so it is rejected. Applied only when the two-sided rule finds nothing, it changes
+  13 Going on 30 alone (−64.7 dB, 48.7-94 Hz) and leaves Little Women NaN. With it patched
+  in, 13 Going on 30 is accepted end to end: three low shelves, peak boost +28.3 dB, 82%
+  of a ~36 dB deficit below 25 Hz supported, judged over 5-58 Hz. Not implemented.
+* **Mono sources (beqdesigner).** `load_channels` of a one-channel WAV returned `{}`, so
+  `channels_missing_low_end` had nothing to compare. It now returns `{"FC": samples}`. The
+  interface document says so, and no one-channel multichannel project is written.
+
+
 ## Windows output encoding and fit-pool sizing (3 October 2026)
 
 `11fe3b9`: `beqforge.cli.main` reconfigures stdout and stderr to UTF-8 (the dispatch bypassed

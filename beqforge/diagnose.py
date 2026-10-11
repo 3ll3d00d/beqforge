@@ -219,19 +219,36 @@ def retained_regions(freqs: np.ndarray, keep: np.ndarray, bands=()) -> list[np.n
 
 
 def smooth_unexcluded(
-    values: np.ndarray, freqs: np.ndarray, bands, width: int
+    values: np.ndarray, freqs: np.ndarray, bands, width: int, *, levels: bool = False
 ) -> np.ndarray:
-    """Smooth each retained segment separately; omitted bins request zero correction."""
+    """Smooth each retained segment separately; omitted bins request zero correction.
+
+    For a correction (a deficit, a target) a segment's ends are padded with zero, so it tapers
+    towards no correction beside an omission. For absolute `levels` (a spectrum in dB) zero is
+    not "nothing", it is 0 dB: padding pulled -68 dB bins beside an exclusion to about -37, a
+    false crest `passband_ripple_db` then measured as texture (Glory, hum notches excluded).
+    There the window just shortens at a segment's ends.
+
+    The correction path is the original arithmetic to the bit: the fitter amplifies a last-bit
+    change in its target into a different fit (on the corpus, recovery moved by up to 0.28 dB
+    RMS and one winner changed from rounding alone), which would hide what a change did.
+    """
     result = np.zeros_like(values)
     for region in retained_regions(
         freqs, unexcluded(freqs, bands) & np.isfinite(values), bands
     ):
         if not len(region):
             continue
-        kernel = min(width, len(region))
-        result[region] = np.convolve(
-            values[region], np.ones(kernel) / kernel, mode="same"
-        )
+        width_here = min(width, len(region))
+        if levels:
+            kernel = np.ones(width_here)
+            result[region] = np.convolve(
+                values[region], kernel, mode="same"
+            ) / np.convolve(np.ones(len(region)), kernel, mode="same")
+        else:
+            result[region] = np.convolve(
+                values[region], np.ones(width_here) / width_here, mode="same"
+            )
     return result
 
 
@@ -677,7 +694,9 @@ def _temporal_evidence(
         spread = np.ptp(
             np.vstack(
                 [
-                    smooth_unexcluded(v, strata_freqs, params.exclude_bands_hz, 15)
+                    smooth_unexcluded(
+                        v, strata_freqs, params.exclude_bands_hz, 15, levels=True
+                    )
                     for v in strata.values()
                 ]
             ),
