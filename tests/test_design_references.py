@@ -145,3 +145,38 @@ def test_construction_and_verification_share_reference(monkeypatch):
         12
     )
     assert np.interp(10, correction.freqs, correction.before_db) == pytest.approx(-12)
+
+
+def _rolled_off_plateau(corner_hz: float) -> tuple[np.ndarray, np.ndarray]:
+    freqs = np.geomspace(4, 200, REFERENCE_POINTS)
+    return freqs, np.where(
+        freqs < corner_hz, -30 * np.log2(corner_hz / freqs).clip(0, 1), 0.0
+    )
+
+
+def test_a_crest_that_splits_the_plateau_does_not_cost_the_title_its_reference():
+    """13 Going on 30: a 65-70 Hz crest more than the tolerance above the plateau left two
+    halves within it, neither flat alone, and the reference came back NaN. Kept bins may then
+    lie above the band too, so the plateau spans the crest and its median stays on the flat.
+    """
+    freqs, curve = _rolled_off_plateau(48.0)
+    curve = np.where(freqs > 95, -20 * np.log2(freqs / 95), curve)
+    curve += 6.0 * np.exp(-0.5 * ((np.log2(freqs / 67)) / 0.12) ** 2)
+    level, (low, high) = plateau_reference(curve, freqs, DiagnoseParams())
+    assert level == pytest.approx(0.0, abs=0.5)
+    assert low < 50 and high > 95
+    # a channel's diagnosis keeps "no plateau" as its finding
+    level, _ = plateau_reference(
+        curve, freqs, DiagnoseParams(), one_sided_fallback=False
+    )
+    assert np.isnan(level)
+
+
+def test_a_hump_beside_a_plateau_that_is_found_is_still_kept_out():
+    """The one-sided band is a fallback only: everywhere, it let Send Help's authored
+    18-23 Hz hump join its plateau and win "widest first"."""
+    freqs, curve = _rolled_off_plateau(15.0)
+    curve += 5.0 * np.exp(-0.5 * ((np.log2(freqs / 21)) / 0.15) ** 2)
+    level, (low, _) = plateau_reference(curve, freqs, DiagnoseParams())
+    assert level == pytest.approx(0.0, abs=0.1)
+    assert low > 22

@@ -791,10 +791,42 @@ have happened. Two of the causes are fixed here.
   so it is rejected. Applied only when the two-sided rule finds nothing, it changes
   13 Going on 30 alone (−64.7 dB, 48.7-94 Hz) and leaves Little Women NaN. With it patched
   in, 13 Going on 30 is accepted end to end: three low shelves, peak boost +28.3 dB, 82%
-  of a ~36 dB deficit below 25 Hz supported, judged over 5-58 Hz. Not implemented.
+  of a ~36 dB deficit below 25 Hz supported, judged over 5-58 Hz. Implemented for the mix
+  only; see the next section.
 * **Mono sources (beqdesigner).** `load_channels` of a one-channel WAV returned `{}`, so
   `channels_missing_low_end` had nothing to compare. It now returns `{"FC": samples}`. The
   interface document says so, and no one-channel multichannel project is written.
+
+
+## One-sided plateau fallback for the mix (11 October 2026)
+
+When no region within ±`reference_tolerance_db` of the threshold qualifies,
+`plateau_reference` now tries once more, keeping every bin above the band as well. A channel's
+diagnosis opts out (`one_sided_fallback=False`). Every mix reference keeps the fallback: the
+target, the judged band, the restoration anchor, the blockers and verification.
+
+* **Is the accepted correction real?** Each 13 Going on 30 channel, measured against its own
+  two-sided plateau, shows the same shape: a corner near 40 Hz and 30-34 dB down below 25 Hz
+  (FL −33.6, FR −32.2, FC −30.3 at 5 Hz). So the reference does not create the filter. The
+  mix's fallback reference reads 2-5 dB deeper (−35.8 at 5 Hz), because its plateau spans
+  the 65-70 Hz crest. A reference built from the channels would be less generous; that
+  evidence is recorded under TODO 16.
+* **First version: fallback everywhere, rejected.** The survey checked only mix plateaus, but
+  `plateau_reference` also judges each channel. There "no plateau" is a finding. With the
+  fallback, nine channels across six baseline titles gained a plateau and were judged
+  filtered: Alto Knights L and LFE, Ballad of Wallis Island LFE, Black Bag R, Dossier C, Ls
+  and Rs (150-198 Hz), Safe House R, Send Help LFE. Four titles' targets moved. Send Help's
+  LFE took its authored 15-27 Hz hump as a plateau, and its counterfactual peak moved from
+  5.5 to 15.6 dB. The protocol and corpus were unchanged.
+* **Validation of the mix-only version.** Probe: `compare --tol 0` reports nothing on all
+  eleven titles against `b126055`. Protocol, seeds 101 and 947: identical. Corpus, seeds
+  1-9: identical apart from timings (gated 0/45, gate pass 0.079). Full suite: 800 passed,
+  2 skipped. New tests in `tests/test_design_references.py`: a crest that splits the plateau
+  (found; NaN with the opt-out), and a hump beside a plateau that is found stays out.
+* **End to end through `designer.design()`.** 13 Going on 30 is accepted with the same
+  design as the patched run: plateau 48.7-94 Hz at −64.7 dB, three low shelves (39.3 Hz
+  +8.9 dB, 44.9 Hz +16.9 dB, 16.3 Hz +1.2 dB), 82% supported, sub feed −19.9 dBFS. Little
+  Women stays declined (`no_usable_plateau`, plus no qualifying loud events).
 
 
 ## Windows output encoding and fit-pool sizing (3 October 2026)

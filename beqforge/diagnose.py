@@ -257,12 +257,26 @@ def plateau_reference(
     freqs: np.ndarray,
     params: DiagnoseParams,
     exclude_bands_hz: tuple[tuple[float, float], ...] = (),
+    *,
+    one_sided_fallback: bool = True,
 ) -> tuple[float, tuple[float, float]]:
     """Find this spectrum's contiguous plateau and its median level.
 
     Median-filter for discovery, retain near-high-percentile flat regions,
     then prefer the widest, flattest and lowest one. Its raw median anchors
     measured deficits and keeps targets and verification on the same reference.
+
+    Only when no region qualifies are bins above the band kept as well. A peak more than the
+    tolerance above the threshold otherwise splits the passband in two, and neither half is
+    flat on its own (13 Going on 30: a 65-70 Hz crest left 48.7-68 Hz at +9.5 dB/oct and
+    76.5-94 Hz at -14). Applied everywhere, a one-sided band lets an authored hump win
+    "widest first" (Send Help absorbed its 18-23 Hz hump and moved 1.4 dB); applied only as
+    a fallback, it changes no mix that finds a plateau today.
+
+    A channel's diagnosis opts out (`one_sided_fallback=False`): there no plateau is itself the
+    finding. With the fallback, nine channels across six baseline titles gained one and were
+    judged filtered, among them Send Help's LFE on its authored 15-27 Hz hump, which moved
+    that title's counterfactual peak from 5.5 to 15.6 dB.
     """
     grid = np.geomspace(params.band_hz[0], params.band_hz[1], REFERENCE_POINTS)
     bands = (*params.exclude_bands_hz, *exclude_bands_hz)
@@ -283,10 +297,36 @@ def plateau_reference(
     if not finite.any():
         return math.nan, (math.nan, math.nan)
     threshold = float(np.percentile(curve[finite], params.reference_percentile))
-    within = finite & (np.abs(discovery - threshold) <= params.reference_tolerance_db)
-    regions = retained_regions(grid, within, bands)
+    offset = discovery - threshold
+    tolerance = params.reference_tolerance_db
+    bands_to_try = [finite & (np.abs(offset) <= tolerance)]
+    if one_sided_fallback:
+        bands_to_try.append(finite & (offset >= -tolerance))
+    for within in bands_to_try:
+        candidates = _plateau_candidates(discovery, curve, grid, within, bands, params)
+        if candidates:
+            break
+    else:
+        return math.nan, (math.nan, math.nan)
+    # Widest first, then flattest, then lowest frequency: deterministic and never bridges a valley.
+    region = max(candidates, key=lambda item: item[:3])[3]
+    return float(np.median(curve[region])), (
+        float(grid[region[0]]),
+        float(grid[region[-1]]),
+    )
+
+
+def _plateau_candidates(
+    discovery: np.ndarray,
+    curve: np.ndarray,
+    grid: np.ndarray,
+    within: np.ndarray,
+    bands: tuple[tuple[float, float], ...],
+    params: DiagnoseParams,
+) -> list[tuple[float, float, int, np.ndarray]]:
+    """Each retained region's flat cut, keyed widest, then flattest, then lowest."""
     candidates = []
-    for region in regions:
+    for region in retained_regions(grid, within, bands):
         if len(region) < 3:
             continue
         trimmed = _trim_to_flat_subwindow(
@@ -302,14 +342,7 @@ def plateau_reference(
         candidates.append(
             (width, -float(np.ptp(curve[trimmed])), -int(trimmed[0]), trimmed)
         )
-    if not candidates:
-        return math.nan, (math.nan, math.nan)
-    # Widest first, then flattest, then lowest frequency: deterministic and never bridges a valley.
-    region = max(candidates, key=lambda item: item[:3])[3]
-    return float(np.median(curve[region])), (
-        float(grid[region[0]]),
-        float(grid[region[-1]]),
-    )
+    return candidates
 
 
 def _trim_to_flat_subwindow(
@@ -609,7 +642,9 @@ def diagnose(
     channels: dict[str, ChannelDiagnosis] = {}
     for name in material.channels:
         response = spectra[name][band]
-        level, plateau = plateau_reference(response, freqs, params)
+        level, plateau = plateau_reference(
+            response, freqs, params, one_sided_fallback=False
+        )
         response = np.where(
             unexcluded(freqs, params.exclude_bands_hz), response, np.nan
         )
