@@ -1,9 +1,8 @@
 {
-  "schema": 1,
   "implementation": {
     "schema": 1,
     "version": "0.2.0",
-    "core": "7593172a55f9016b81ba351a796a7e1956b69a7588d9304270726e6caa71d152",
+    "core": "4108088a75c8d8197477f214945371fb2a5f7b77510f6bba0e9dac9ab2999f1e",
     "biquad": "8cd9ef4ea6bf3b0b6ac928ff4953e48ef9e8de8340a875d3a15df51b683ad89e",
     "numpy": "2.4.2",
     "scipy": "1.18.1",
@@ -15,25 +14,30 @@
   "provenance": {
     "catalogue_sha256": "ed4454b612ef3e30aa734962119015a50c4addf7cb8bc5192fbbfe8869428dda",
     "code_sha256": "36e3eb32ef10a56e1468969022e1dd29b7b7a5b43d8661979abc4616c98469a7",
+    "entry_rate_results": 30848,
+    "matplotlib": "3.11.2",
+    "numpy": "2.4.2",
+    "report_revision": "d5a08c3",
+    "scipy": "1.18.1",
     "settings": {
-      "margin_db": 0.5,
       "band_hz": [
         2.0,
         200.0
       ],
-      "passes": 6,
       "grid_points": 512,
-      "validation_points": 8192,
-      "numerical_tolerance_db": 1e-06
+      "margin_db": 0.5,
+      "numerical_tolerance_db": 1e-06,
+      "passes": 6,
+      "validation_points": 8192
     },
-    "numpy": "2.4.2",
-    "scipy": "1.18.1",
-    "matplotlib": "3.11.2",
     "unique_filter_rate_jobs": 29620,
-    "report_revision": "d5a08c3",
-    "entry_rate_results": 30848,
+    "unique_numerical_results": 29566,
     "unsupported_entry_rate_results": 104,
-    "unique_numerical_results": 29566
+    "rekeyed": {
+      "from_core_sha256": "7593172a55f9016b81ba351a796a7e1956b69a7588d9304270726e6caa71d152",
+      "reason": "core.py took NUMERICAL_VERSION in place of the release version; results byte-identical"
+    }
   },
-  "seed_sha256": "5cc0d3d0bb1d0d81707834b19eaf49c005eabbc92ec5fd54c5e11bbb95c997e0"
+  "schema": 1,
+  "seed_sha256": "c62823d4b290df278aebb53d28dd20bed04e3f3cf35f1e055bed195a8b76cfd1"
 }

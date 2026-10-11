@@ -225,6 +225,20 @@ def test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search(
     assert not (tmp_path / "unused").exists()
 
 
+def test_shipped_seed_matches_the_numerical_code():
+    """The test above substitutes the seed's identity, so on its own it cannot see the code
+    move under the seed: a `core.py` edit left every production lookup a miss. The code half
+    of the identity is the same on every host, so it is checked here against the live code."""
+    manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "beqoptimiser/data/seed-manifest.json"
+        ).read_text()
+    )["implementation"]
+    live = caching.implementation_identity()
+    for field in ("schema", "version", "core", "biquad"):
+        assert manifest[field] == live[field], field
+
+
 @pytest.mark.parametrize(
     "field", ["system", "machine", "numpy", "scipy", "longdouble_mantissa_bits"]
 )

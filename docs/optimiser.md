@@ -89,7 +89,7 @@ beqoptimiser entry.json --rate 48000 --margin-db 0.5 --out optimisation.json
 
 Both rates are processed by default. Outputs are separate reports/optional variants;
 original catalogue files are never rewritten. Outputs include snapshot and source digests,
-loading model, precision, rate, settings, optimiser version and predicted errors. Nonfinite
+loading model, precision, rate, settings, optimiser version (`NUMERICAL_VERSION`) and predicted errors. Nonfinite
 CLI diagnostic values are JSON `null`.
 
 The initial variant schema is an integration proposal, not a field already understood by
@@ -141,10 +141,14 @@ most for from-scratch work, such as the catalogue report or a beqcatalogue devic
 re-evaluated after a profile revision bump, and for fresh CI runners with empty caches; a
 beqcatalogue device build normally only evaluates newly added titles, which no seed covers yet.
 
-Any change to the numerical code (`core.py`, `biquad.py`), the default settings, the version or
-the pinned NumPy/SciPy changes the implementation identity, so the existing seed silently stops
-being reused (every lookup misses) and `test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search`
-fails. Rebuild the seed as described below before releasing such a change.
+Any change to the numerical code (`core.py`, `biquad.py`), the default settings,
+`core.NUMERICAL_VERSION` or the pinned NumPy/SciPy changes the implementation identity, so the
+existing seed silently stops being reused (every lookup misses) and
+`test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search` fails. Rebuild the seed as
+described below before releasing such a change. `NUMERICAL_VERSION` is the version of what the
+optimiser computes, not the release: bump it with a change that alters any result. A release
+that leaves the optimiser alone keeps the seed (until 0.2.1 the release version was in the key,
+so every release invalidated it).
 
 The disk cache defaults to `$XDG_CACHE_HOME/beqoptimiser`, or `~/.cache/beqoptimiser`.
 Set `BEQOPTIMISER_CACHE_DIR` or pass an explicit cache for catalogue build jobs:

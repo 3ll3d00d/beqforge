@@ -48,13 +48,15 @@ strings with additive feedback; internal SOS uses subtractive feedback.
 
 Cache numerical results only: source catalogue identity, title metadata and volume offsets
 are rebuilt on every adapter call. Keys must cover coefficients, rate, all settings, precision
-configuration, numerical source/version, dependency versions and execution architecture.
+configuration, numerical source and `core.NUMERICAL_VERSION` (never the release version),
+dependency versions and execution architecture.
 Custom precision implementations without a complete explicit `cache_identity()` bypass caching.
 Corrupt entries are misses; unwritable storage must not prevent calculation or seed reuse.
 Use atomic writes and retain checksums, request identity and publication-policy validation.
 
 Bundled seeds are reusable only in their recorded numerical environment. Changes to numerical
-code or settings invalidate them; do not relabel old results as compatible. Rebuild the seed
+code or settings invalidate them; do not relabel old results as compatible. Bump
+`NUMERICAL_VERSION` with any change that alters a result; a release alone must not. Rebuild the seed
 with `tools/build_optimiser_seed.py` from a committed report's library cache (see
 docs/optimiser.md). The historical report-cache importer is `tools/seed_optimiser_cache.py`:
 preserve its source/environment checks.

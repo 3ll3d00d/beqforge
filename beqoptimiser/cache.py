@@ -17,10 +17,16 @@ from pathlib import Path
 import numpy as np
 import scipy
 
-from beq_common import __version__
-
 from . import core
-from .core import FixedPoint, Float32, Precision, Result, Settings, stable
+from .core import (
+    NUMERICAL_VERSION,
+    FixedPoint,
+    Float32,
+    Precision,
+    Result,
+    Settings,
+    stable,
+)
 
 LOGGER = logging.getLogger(__name__)
 CACHE_SCHEMA = 1
@@ -39,7 +45,7 @@ def implementation_identity() -> dict:
     """Scope results to the numerical implementation and execution environment."""
     return {
         "schema": CACHE_SCHEMA,
-        "version": __version__,
+        "version": NUMERICAL_VERSION,
         "core": hashlib.sha256(
             files("beqoptimiser").joinpath("core.py").read_bytes()
         ).hexdigest(),
@@ -99,7 +105,7 @@ def _request(
         "storage": storage.name,
         "transport": transport.name if transport else "float64",
         "settings": asdict(cfg),
-        "version": __version__,
+        "version": NUMERICAL_VERSION,
     }
     source = hashlib.sha256(
         json.dumps(payload, sort_keys=True, allow_nan=False).encode()
@@ -166,7 +172,7 @@ def _restore(envelope: dict, request) -> Result:
     result = Result(**body)
     if (
         result.source_digest != source
-        or result.version != __version__
+        or result.version != NUMERICAL_VERSION
         or result.rate != rate
         or result.precision != storage.name
         or result.transport_precision != (transport.name if transport else "float64")

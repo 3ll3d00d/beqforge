@@ -9,8 +9,12 @@ from typing import Protocol
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from beq_common import __version__
 from beq_common.biquad import HighShelf, LowShelf, PeakingEQ
+
+# The version of what this module computes, not of the release: results and the bundled seed are
+# keyed by it, so bump it when a change alters any result, and only then. It was the shared
+# release version, so a designer-only release invalidated every cached result and the seed.
+NUMERICAL_VERSION = "0.2.0"
 
 
 class Precision(Protocol):
@@ -161,7 +165,7 @@ class Result:
     replacement: tuple[tuple[float, ...], ...] | None = None
     evaluations: int = 0
     source_digest: str = ""
-    version: str = __version__
+    version: str = NUMERICAL_VERSION
 
 
 def _maximum(reference, candidate, rate, band, points):
@@ -254,7 +258,7 @@ def optimise(
                 "storage": p.name,
                 "transport": transport.name if transport else "float64",
                 "settings": asdict(cfg),
-                "version": __version__,
+                "version": NUMERICAL_VERSION,
             },
             sort_keys=True,
             allow_nan=False,

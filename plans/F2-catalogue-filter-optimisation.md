@@ -446,3 +446,23 @@ optimiser, report, cache and package-boundary tests passed, as did Ruff, whitesp
 a fresh offline installation of the built optimiser wheel, including bundled-seed reuse.
 The wheel and source distribution explicitly include the seed and provenance manifest.
 No designer or shared numerical implementation changed, so no designer probe was required.
+
+### Numerical version apart from the release (11 October 2026)
+
+Results, cache keys and the seed identity carried `beq_common.__version__`, the version of the
+whole distribution. So a release that left the optimiser alone (0.2.1: designer fixes only)
+still invalidated every cached result and the bundled seed. They now carry
+`core.NUMERICAL_VERSION` instead: the version of what the optimiser computes, bumped only with a
+change that alters a result. It starts at "0.2.0", so every key's request payload and every
+result's `version` and source digest are unchanged.
+
+The edit itself changed `core.py`'s digest, which is part of the implementation identity. The
+seed was re-keyed rather than rebuilt. Each of its 29,566 keys was re-derived from the
+catalogue it was built from (beqcatalogue `5ea769fe4`, sha256 `ed4454b6…`), and every result
+envelope was kept byte for byte. The manifest records the change under
+`provenance.rekeyed`. This is not relabelling different numerics. The `core.py` diff against
+v0.2.0 is only the constant, with the same value. 500 random entries at both rates (1,000
+jobs), recomputed cold with the new code, gave results identical to the re-keyed seed in every
+field. `test_shipped_seed_matches_the_numerical_code` now checks the seed's code digests and
+numerical version against the live code on every host. The existing reuse test substitutes
+the seed's identity, so it could not see this.
