@@ -2,6 +2,7 @@
 
 import copy
 import gzip
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -228,15 +229,21 @@ def test_shipped_seed_reuses_a_catalogue_entry_without_disk_or_search(
 def test_shipped_seed_matches_the_numerical_code():
     """The test above substitutes the seed's identity, so on its own it cannot see the code
     move under the seed: a `core.py` edit left every production lookup a miss. The code half
-    of the identity is the same on every host, so it is checked here against the live code."""
-    manifest = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "beqoptimiser/data/seed-manifest.json"
-        ).read_text()
-    )["implementation"]
+    of the identity is checked here against the live code, hashed as the wheel ships it: a
+    Windows checkout has CRLF line endings, so its raw digest never matches."""
+    root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((root / "beqoptimiser/data/seed-manifest.json").read_text())[
+        "implementation"
+    ]
     live = caching.implementation_identity()
-    for field in ("schema", "version", "core", "biquad"):
+    for field in ("schema", "version"):
         assert manifest[field] == live[field], field
+    for field, source in (
+        ("core", "beqoptimiser/core.py"),
+        ("biquad", "beq_common/biquad.py"),
+    ):
+        shipped = (root / source).read_bytes().replace(b"\r\n", b"\n")
+        assert manifest[field] == hashlib.sha256(shipped).hexdigest(), field
 
 
 @pytest.mark.parametrize(
