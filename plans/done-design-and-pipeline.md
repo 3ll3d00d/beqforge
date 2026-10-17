@@ -748,6 +748,41 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## The designer server answers `/health` during a design (17 October 2026)
+
+A deployed image went unhealthy while it designed correctly. `serve-designer` was a plain
+`HTTPServer` running `design()` on its only thread, so a `GET /health` waited behind a 50-110 s
+design; the image's `HEALTHCHECK` gives up after 3 s and three failures mark the container
+unhealthy. It had been single-threaded on purpose: the fitter forks its pool, and forking a
+multi-threaded process risks a deadlock.
+
+The server is now a `ThreadingHTTPServer`, and every design runs in one long-lived worker
+process started with "spawn" (`_DesignWorker` in `tools/designer_server.py`). The worker's
+only thread runs the design, so the fitter forks from a single-threaded process as before. Its
+log records come back over a `SimpleQueue` (a `Queue` would start a feeder thread in it) and
+go through the parent's loggers, and the parent waits for a request's records before
+answering. One worker keeps designs serial. A worker that dies answers 500 and is replaced.
+SIGTERM now shuts down as Ctrl-C does (as a container's PID 1 the server used to ignore it),
+and closing stops the worker's process group, fit pool included, rather than wait for a
+design in progress. The timing line gains `queued`. Nothing under `beqforge/` changed, so the
+decision regression probe does not apply.
+
+* **Checks.** New tests: `/health` answers within 3 s while a real design runs, and a killed
+  worker gives a 500 and then a working replacement. The existing server, image and startup
+  tests now build `DesignServer` with `DesignSettings` (51 passed). Against the installed
+  `beqforge serve-designer`: `/health` took at most 16 ms during a design, and SIGTERM in the
+  middle of one exited in 0.3 s with no worker or fit-pool process left. Before the
+  process-group fix, the fit pool was orphaned and kept computing. The image built and
+  `packaging/designer/smoke.py` passed, inline and by reference. Full designer suite with
+  coverage: 741 passed, 1 skipped. The fork-from-a-threaded-process warnings in it come from
+  xdist's own worker threads and appear without these changes.
+* **Coverage.** CI now measures coverage (`pytest-cov`; `[tool.coverage.run]` in
+  `pyproject.toml`, with `concurrency = multiprocessing` so the design worker and fit pools
+  count on every platform; `patch = fork` is unsupported on Windows). Both test jobs upload
+  `coverage.xml` to Codecov with `CODECOV_TOKEN`, and the release workflow passes its secrets
+  to the tests it calls.
+
+
 ## The mix plateau diagnosis tracks from is the pipeline's (17 October 2026)
 
 `diagnose` found the mix plateau on the spectrum cut off at the analysis band's top, while

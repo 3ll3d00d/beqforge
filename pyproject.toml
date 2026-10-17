@@ -30,11 +30,28 @@ all = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-xdist>=3.8", "ruff>=0.14.10", "scipy-stubs>=1.17.1,<1.19.0"]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8",
+    "ruff>=0.14.10",
+    "scipy-stubs>=1.17.1,<1.19.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+# the repository root, so every report path is the file's path in the repository
+source = ["."]
+omit = ["tests/*", ".venv/*", "build/*", "packaging/*"]
+# the designer server's design worker and the fitter's pool are `multiprocessing` processes,
+# measured too (and on every platform, unlike `patch = ["fork"]`); every process writes its
+# own data file and they are combined at the end of the run
+concurrency = ["multiprocessing", "thread"]
+patch = ["subprocess"]
+relative_files = true
 
 [build-system]
 requires = ["hatchling"]

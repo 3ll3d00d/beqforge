@@ -72,6 +72,8 @@ jobs:
     needs: previous_tests
     if: needs.previous_tests.outputs.reusable != 'true'
     uses: ./.github/workflows/tests.yml
+    # CODECOV_TOKEN, for the coverage upload
+    secrets: inherit
     permissions:
       contents: read
 

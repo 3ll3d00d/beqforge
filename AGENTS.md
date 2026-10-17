@@ -56,7 +56,9 @@ importing them; use an isolated worktree for simultaneous experiments.
 The root build configuration includes every workflow and the optimiser's bundled seed in one
 wheel and source distribution. `.github/workflows/tests.yml` checks isolated dependency
 profiles and runs the suite in parallel (`pytest -n auto`, so tests must not share mutable state
-or fixed ports). Feature branch pushes test on Linux only and a newer push cancels the branch's
+or fixed ports), with coverage (`--cov`, configured in `pyproject.toml`, `multiprocessing`
+children included) uploaded to Codecov by each test job using the `CODECOV_TOKEN` secret;
+release runs inherit it. Feature branch pushes test on Linux only and a newer push cancels the branch's
 previous run; `main`, tags and manual runs test Linux, macOS and Windows and are never cancelled. `.github/workflows/build-executable.yml` builds release executables and distributions;
 tag pushes publish to PyPI after validation and successful executable builds. Tags must match
 the shared version exactly (`vX.Y.Z`). Manual runs build artifacts without publishing.

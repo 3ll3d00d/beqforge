@@ -76,7 +76,17 @@ jobs:
 
       # the device-check tests run in their own job below, in parallel, with the extra installed
       - name: Run tests
-        run: uv run --extra designer pytest -n auto --durations=25 --ignore-glob='tests/test_device_check_*.py'
+        run: uv run --extra designer pytest -n auto --durations=25 --ignore-glob='tests/test_device_check_*.py' --cov --cov-report=xml
+
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          flags: designer,${{ runner.os }}
+          name: designer-${{ runner.os }}
 
   device-check:
     name: Device check (${{ matrix.os }})
@@ -100,7 +110,17 @@ jobs:
 
       - name: Run device-check tests
         shell: bash
-        run: uv run --extra device-check pytest -n auto --durations=25 tests/test_device_check_*.py
+        run: uv run --extra device-check pytest -n auto --durations=25 tests/test_device_check_*.py --cov --cov-report=xml
+
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          flags: device-check,${{ runner.os }}
+          name: device-check-${{ runner.os }}
 
   package-profiles:
     name: Install profile (${{ matrix.profile }})
