@@ -748,6 +748,41 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## The mix plateau diagnosis tracks from is the pipeline's (17 October 2026)
+
+`diagnose` found the mix plateau on the spectrum cut off at the analysis band's top, while
+`pipeline` finds it on the whole spectrum. `plateau_reference`'s grid ends exactly at the band
+top with `right=nan`, so the cut-off copy always lost the top grid point, and a plateau reaching
+that edge could vanish. Diagnosis then took `_temporal_evidence`'s early return (no strata, the
+tracking floor set to the band top), and the pipeline's plateau blocker read that as "nothing
+below it tracks the programme (tracking stops at 200.0 Hz)". The mix plateau is now found on
+the whole spectrum, as the pipeline finds it. Channel plateaus are unchanged.
+
+* **Found in the full-library run (beqdesigner).** A Few Good Men (5.1) declined
+  `no_usable_plateau`: the pipeline's plateau was 150.5-200 Hz, diagnosis had none, and its
+  record showed no strata and a tracking floor of exactly 200.0. `band_tracking` against the
+  pipeline's plateau passes every octave band to ~13 Hz (0.53-0.62). Patched, it accepts two
+  low shelves (16.8 Hz +5.8 dB, 26.8 Hz +6.5 dB, confidence 0.91). Before the Devil Knows
+  You're Dead and Blink Twice show the same record signature.
+* **First version: every plateau on the whole spectrum, rejected.** Handing channels the whole
+  spectrum too moved channel plateaus on eight baseline titles (an extra finite top point moves
+  the 90th-percentile threshold), changed counterfactual targets on four, and in real runs
+  against HEAD flipped counterfactual verdicts on Alto Knights and Obsession. As with the
+  one-sided fallback above, the channel calls were left alone.
+* **Validation of the mix-only version**, against 7a1702f. Probe: 28 Years Later's tracking
+  floor 20.50 -> 20.30 Hz (judged band and targets by up to 0.17 dB); Dossier 137's filter
+  floor 59.3 -> 79.8 Hz and Send Help's 20.0 -> 20.8 Hz, nothing else; the other eight titles
+  unchanged. 28 Years Later's real run against a HEAD run: the winner changes `parametric` ->
+  `flatten`, both passing either way; the accepted corrections agree within 0.6 dB in every band
+  from 5 to 80 Hz (+5.8/+6.0/+6.6/+3.3/+0.6 -> +5.9/+6.6/+6.4/+3.1/+0.7 dB), the same answer.
+  Protocol, seeds 101 and 947: identical false acceptances, abstentions, selections and recovery.
+  Corpus, seeds 1-9: gated 0/45, gate pass 0.079; positives 7/9 (median recovery 1.27 dB RMS);
+  `natural_droop` 4/9 against the committed file's 5/9 (an older revision; reported, not gated).
+  Full suite: 804 passed, 2 skipped. New test in `tests/test_design_diagnose.py`: a mix
+  high-passed at 144-146 Hz, whose only plateau reaches the band top, is tracked from that
+  plateau (fails on the old code: no strata, floor at 200 Hz).
+
+
 ## Levels beside an omission, and mains-hum notches as texture (11 October 2026)
 
 Three titles from a beqdesigner run against `/media/beq` were declined in ways that should not

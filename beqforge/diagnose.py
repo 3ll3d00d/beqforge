@@ -618,15 +618,21 @@ def diagnose(
     constrain channel restoration and the band over which a filter is judged.
     """
     params = params or DiagnoseParams()
-    freqs, mix_db = mean_spectrum(material.mono_mix, material.fs)
-    band = (freqs >= params.band_hz[0]) & (freqs <= params.band_hz[1])
-    freqs, mix_db = freqs[band], mix_db[band]
+    spectrum_freqs, mix_spectrum = mean_spectrum(material.mono_mix, material.fs)
+    band = (spectrum_freqs >= params.band_hz[0]) & (spectrum_freqs <= params.band_hz[1])
+    freqs, mix_db = spectrum_freqs[band], mix_spectrum[band]
     spectra = {
         name: mean_spectrum(samples, material.fs)[1]
         for name, samples in material.channels.items()
     }
     shares, share_errors = coherent_shares(material)
-    _, mix_plateau = plateau_reference(mix_db, freqs, params)
+    # The mix plateau is found on the whole spectrum, exactly as `pipeline` finds it, so tracking
+    # is measured from the plateau the run judges against. The reference grid ends exactly at the
+    # band top: cut off at the last bin below it, a plateau reaching that edge loses its top point
+    # and can vanish. Diagnosis then lost the plateau `pipeline` had, measured no tracking at all
+    # and reported the band top as where tracking stopped (A Few Good Men: 150.5-200 Hz found by
+    # one, none by the other).
+    _, mix_plateau = plateau_reference(mix_spectrum, spectrum_freqs, params)
     from beqforge.extraction import ExtractionParams, extract
 
     extraction_params = extraction_params or ExtractionParams()

@@ -52,7 +52,9 @@ def test_mix_floor_is_measured_on_mix_not_walled_lfe():
     material = material_from({"L": source, "LFE": high_passed(source, 25, 10)})
     result = diagnose(material)
     params = DiagnoseParams()
-    _, plateau = plateau_reference(result.mix_db, result.freqs, params)
+    # found on the whole mix spectrum, as diagnosis and the pipeline both find it
+    freqs, mix_db = mean_spectrum(material.mono_mix, 1000)
+    _, plateau = plateau_reference(mix_db, freqs, params)
     axis, strata = stratified_response(material.mono_mix, 1000, params, plateau)
     from beqforge.diagnose import smooth_unexcluded
 

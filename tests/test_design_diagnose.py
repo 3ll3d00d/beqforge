@@ -9,7 +9,9 @@ from beqforge.diagnose import (
     band_slope,
     band_tracking,
     diagnose,
+    mean_spectrum,
     mix_shares,
+    plateau_reference,
     steepest_slope,
     stratified_response,
 )
@@ -190,6 +192,34 @@ def test_the_plateau_reference_follows_the_channel_not_a_constant() -> None:
     assert (
         result.channels["LFE"].plateau_hz[0] > result.channels["C"].plateau_hz[0] * 1.5
     )
+
+
+@pytest.mark.parametrize("corner_hz", [144.0, 145.0, 146.0])
+def test_a_plateau_reaching_the_band_top_is_the_one_the_pipeline_finds(
+    corner_hz,
+) -> None:
+    """Diagnosis measures tracking from the mix plateau the pipeline judges against.
+
+    A plateau that runs into the band's top edge was lost when the spectrum was cut off at the
+    last bin below it: diagnosis then measured no strata or tracking and reported the band top as
+    where tracking stopped, which the pipeline read as "nothing below it tracks" (A Few Good Men,
+    150.5-200 Hz).
+    """
+    rng = np.random.default_rng(0)
+    mix = signal.sosfilt(
+        signal.butter(8, corner_hz, btype="high", fs=FS, output="sos"),
+        rng.standard_normal(int(FS * DURATION_S)),
+    )
+    mix = mix + 1e-3 * rng.standard_normal(mix.size)
+    freqs, spectrum = mean_spectrum(mix, FS)
+    level, plateau = plateau_reference(spectrum, freqs, PARAMS)
+    assert np.isfinite(level) and plateau[1] == PARAMS.band_hz[1]
+
+    result = diagnose(Material("edge", FS, mix, {}, "complete_programme"), PARAMS)
+
+    assert result.stratified
+    # nothing below the high-pass tracks, so tracking stops at the plateau's lower edge
+    assert result.noise_floor_hz == pytest.approx(plateau[0])
 
 
 def test_the_plateau_reference_clears_the_knee() -> None:
