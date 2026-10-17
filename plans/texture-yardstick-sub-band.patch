@@ -1,0 +1,154 @@
+diff --git a/beqforge/pipeline.py b/beqforge/pipeline.py
+index 699762d..6a6b345 100644
+--- a/beqforge/pipeline.py
++++ b/beqforge/pipeline.py
+@@ -814,8 +814,21 @@ def mains_hum_notches(
+     return ()
+ 
+ 
++def _sub_feed_edge_hz(params: "PipelineParams") -> float:
++    """The top of the band the sub plays: the lower of the crossover and the sub-bus low-pass."""
++    return min(
++        corner
++        for corner in (params.playback.crossover_hz, params.playback.bus_lowpass_hz)
++        if corner is not None
++    )
++
++
+ def passband_ripple_db(
+-    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
++    material: Material,
++    params: "PipelineParams",
++    noise_floor_hz: float = math.nan,
++    *,
++    in_sub_band: bool = False,
+ ) -> tuple[float, tuple[float, float]] | None:
+     """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
+ 
+@@ -823,6 +836,16 @@ def passband_ripple_db(
+     correction — the top of the judged band to the top of the analysis band — as the spread of
+     the curve about its own log-frequency trend, so a tilted passband is not read as ripple.
+ 
++    `in_sub_band` ends that passband at the sub feed's low-pass (`_sub_feed_edge_hz`) unless the
++    judged band already reaches past it. The mix's texture blocker asks for it: above the sub
++    edge the mix's shape is not texture the sub plays. In an LFE-led mix the level falls away
++    where the LFE channel's content ends, a knee a linear trend cannot remove, which read as
++    ripple and withheld a real deficit (9, 2009: 8.8 dB of "ripple" over 23-200 Hz against a
++    6.2 dB shortfall, 5.1 dB up to the 80 Hz crossover). Each channel's own rule
++    (`channels_missing_low_end`) keeps the whole passband: there the smaller yardstick judged
++    more channels short, grew counterfactual targets (Caught Stealing 4.3 -> 12.3 dB) and
++    admitted a broadband negative on the corpus.
++
+     Crest to trough, not a one-sided dip, because the reference sits near the 90th percentile
+     of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
+     negative corpus (IMPROVEMENT_PLAN E2) every unfiltered title's low-end deficit came in
+@@ -841,7 +864,11 @@ def passband_ripple_db(
+         _judged_top_hz(anchor, params, noise_floor_hz),
+         params.diagnose.band_hz[1],
+     )
++    # a hum comb is recognised by its harmonics, so it is looked for over the whole passband
++    # even where the ripple is then measured on less of it: below 80 Hz only one is left
+     bands = (*params.exclude_bands_hz, *mains_hum_notches(freqs, response, low, high))
++    if in_sub_band and low < _sub_feed_edge_hz(params):
++        high = min(high, _sub_feed_edge_hz(params))
+     band = (freqs >= low) & (freqs <= high) & unexcluded(freqs, bands)
+     if band.sum() < 8:
+         return None
+@@ -1537,11 +1564,7 @@ def analyse(
+         # (Black Bag with LR4 @ 30 injected — plateau 50-83 Hz gone, content tracking to
+         # 9 Hz), and that low end is content to restore, not an absence of bass. NaN means
+         # every band tracked.
+-        sub_edge = min(
+-            corner
+-            for corner in (params.playback.crossover_hz, params.playback.bus_lowpass_hz)
+-            if corner is not None
+-        )
++        sub_edge = _sub_feed_edge_hz(params)
+         if region[0] >= sub_edge and diagnosis.noise_floor_hz >= sub_edge:
+             blockers.append(
+                 "no usable contiguous mix plateau in the band the sub plays: the mix's only "
+@@ -1550,7 +1573,9 @@ def analyse(
+                 f"programme (tracking stops at {diagnosis.noise_floor_hz:.1f} Hz), so there "
+                 "is no bass passband to restore towards; restoration withheld"
+             )
+-        texture = passband_ripple_db(material, params, diagnosis.noise_floor_hz)
++        texture = passband_ripple_db(
++            material, params, diagnosis.noise_floor_hz, in_sub_band=True
++        )
+         low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+         if texture is not None and low_end is not None:
+             ripple, (edge_low, edge_high) = texture
+diff --git a/tests/test_design_ripple_band.py b/tests/test_design_ripple_band.py
+new file mode 100644
+index 0000000..c0559b9
+--- /dev/null
++++ b/tests/test_design_ripple_band.py
+@@ -0,0 +1,68 @@
++"""The mix's texture yardstick is measured in the band the sub plays (9, 2009, 2026-10)."""
++
++import numpy as np
++from scipy import signal
++
++from beqforge.material import Material
++from beqforge.pipeline import PipelineParams, passband_ripple_db
++
++FS = 1000
++
++
++def _lfe_led(
++    high_pass_hz: float = 20.0, knee_hz: float = 70.0, seed: int = 5
++) -> Material:
++    """Noise high-passed at `high_pass_hz` whose level falls away above `knee_hz`.
++
++    The knee stands in for an LFE-led mix, where the level drops where the LFE channel's content
++    ends: real programme shape, but not texture the sub plays.
++    """
++    rng = np.random.default_rng(seed)
++    noise = rng.standard_normal(240 * FS)
++    bass = signal.sosfilt(
++        signal.butter(4, knee_hz, btype="low", fs=FS, output="sos"),
++        signal.sosfilt(
++            signal.butter(4, high_pass_hz, btype="high", fs=FS, output="sos"), noise
++        ),
++    )
++    mains = 0.05 * signal.sosfilt(
++        signal.butter(4, high_pass_hz, btype="high", fs=FS, output="sos"),
++        rng.standard_normal(noise.size),
++    )
++    return Material("lfe-led", FS, 0.01 * (bass + mains), {}, "complete_programme")
++
++
++def test_the_ripple_is_measured_up_to_the_sub_edge():
++    params = PipelineParams()
++    ripple = passband_ripple_db(_lfe_led(), params, in_sub_band=True)
++    assert ripple is not None
++    assert ripple[1][1] == params.playback.crossover_hz
++
++
++def test_a_knee_above_the_sub_edge_is_not_read_as_texture():
++    material = _lfe_led()
++    params = PipelineParams()
++    in_sub_band = passband_ripple_db(material, params, in_sub_band=True)
++    # what the yardstick is over the whole passband, as each channel's own rule measures it
++    to_band_top = passband_ripple_db(material, params)
++    assert in_sub_band is not None and to_band_top is not None
++    assert to_band_top[1][1] == params.diagnose.band_hz[1]
++    assert in_sub_band[0] < to_band_top[0] - 3.0
++
++
++def test_a_judged_band_past_the_sub_edge_keeps_the_analysis_band():
++    # a passband that only starts above the crossover: there is nothing below the sub edge to
++    # measure, so the yardstick is the one it always was
++    params = PipelineParams()
++    ripple = passband_ripple_db(
++        _lfe_led(high_pass_hz=110.0, knee_hz=400.0), params, in_sub_band=True
++    )
++    assert ripple is None or ripple[1][1] == params.diagnose.band_hz[1]
++
++
++def test_a_channel_s_own_rule_keeps_the_whole_passband():
++    # the per-channel texture rule: a smaller yardstick there judged more channels short and
++    # admitted a broadband negative on the corpus
++    params = PipelineParams()
++    ripple = passband_ripple_db(_lfe_led(), params)
++    assert ripple is not None and ripple[1][1] == params.diagnose.band_hz[1]
