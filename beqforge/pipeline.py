@@ -772,6 +772,9 @@ MAINS_HZ = (50.0, 60.0)
 # inside the 50 Hz spacing so it never reaches the next harmonic
 HUM_NOTCH_HALF_WIDTH_HZ = 2.5
 HUM_SURROUND_HALF_WIDTH_HZ = 10.0
+# the mix's texture is measured about a cubic in log frequency, so an LFE-led mix's knee above
+# the crossover is trend, not ripple (plans/texture-yardstick-sub-band.md)
+MIX_TEXTURE_TREND_DEGREE = 3
 
 
 def mains_hum_notches(
@@ -815,13 +818,28 @@ def mains_hum_notches(
 
 
 def passband_ripple_db(
-    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
+    material: Material,
+    params: "PipelineParams",
+    noise_floor_hz: float = math.nan,
+    *,
+    trend_degree: int = 1,
 ) -> tuple[float, tuple[float, float]] | None:
     """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
 
     Measured on the same smoothed mean spectrum the deficit is, over the passband above the
     correction — the top of the judged band to the top of the analysis band — as the spread of
     the curve about its own log-frequency trend, so a tilted passband is not read as ripple.
+
+    The trend is a polynomial of `trend_degree` in log frequency. The mix's texture blocker
+    asks for a cubic (`MIX_TEXTURE_TREND_DEGREE`). In an LFE-led mix the level falls away
+    where the LFE channel's content ends (60-100 Hz), a knee a straight line cannot remove, so
+    it read as ripple and withheld a real deficit: 9 (2009) measured 8.8 dB of "ripple" against
+    a 6.2 dB shortfall, 2.2 dB about a cubic. The band is not shortened instead. Crest to
+    trough shrinks with the number of bins even on noise, so ending it at the crossover lowered
+    every yardstick and admitted a broadband negative on the corpus. A cubic keeps the band the
+    1x boundary was calibrated on and leaves the negatives where they were: at most 0.76x about
+    a cubic against 0.77x about a line, with every real and filtered title at 1.08x and up.
+    Each channel's own rule (`channels_missing_low_end`) keeps the line.
 
     Crest to trough, not a one-sided dip, because the reference sits near the 90th percentile
     of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
@@ -847,7 +865,7 @@ def passband_ripple_db(
         return None
     smooth = smooth_unexcluded(response, freqs, bands, 15, levels=True)[band]
     octaves = np.log2(freqs[band])
-    about = smooth - np.polyval(np.polyfit(octaves, smooth, 1), octaves)
+    about = smooth - np.polyval(np.polyfit(octaves, smooth, trend_degree), octaves)
     return float(np.max(about) - np.min(about)), (low, high)
 
 
@@ -1550,7 +1568,12 @@ def analyse(
                 f"programme (tracking stops at {diagnosis.noise_floor_hz:.1f} Hz), so there "
                 "is no bass passband to restore towards; restoration withheld"
             )
-        texture = passband_ripple_db(material, params, diagnosis.noise_floor_hz)
+        texture = passband_ripple_db(
+            material,
+            params,
+            diagnosis.noise_floor_hz,
+            trend_degree=MIX_TEXTURE_TREND_DEGREE,
+        )
         low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
         if texture is not None and low_end is not None:
             ripple, (edge_low, edge_high) = texture

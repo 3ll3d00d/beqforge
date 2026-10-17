@@ -1,8 +1,9 @@
 # Texture yardstick: measure it in the band the sub plays
 
-**Status: design, not built.** A handoff from the beqdesigner library design run (October
+**Status: implemented (17 October 2026), as a cubic detrend over the unchanged band, not as
+either width-normalised measure below.** See [Outcome](#outcome-17-october-2026). The rest of
+this document is the original handoff, from the beqdesigner library design run (October
 2026), where every decline of the full JRiver library (~1,290 films) is being reviewed. The
-person who owns both projects asked for the width-normalised measure below to be tried. The
 first two attempts, which only shorten the band, are in
 [texture-yardstick-sub-band.patch](texture-yardstick-sub-band.patch); it applies to `main`
 at `fd9ae22`. It fails the corpus gate, so it was not committed.
@@ -122,3 +123,93 @@ It reruns the title as deployed, then with the yardstick capped at the crossover
 the material digest against the deployed request. The patch's
 `tests/test_design_ripple_band.py` has a synthetic LFE-led source (noise with a knee at 70
 Hz) that is a reasonable unit test for any replacement.
+
+## Outcome (17 October 2026)
+
+### Neither width-normalised form separates the corpus
+
+Both forms were scored offline before any code changed. Each candidate measured the same
+residual as `passband_ripple_db`, over the full band and capped at the sub edge, on all 63
+corpus cases (seeds 1-9), the 11 baseline titles, the 43 variants and the 8 library titles
+above. A scaled spread took the corpus median of crest-to-trough/spread over the full band as
+its scale. Shortfall/yardstick, where above 1 is accepted:
+
+| Sub-band yardstick | Worst gated negative | 9 | Beauty and the Beast | Despicable Me 3 |
+| --- | --- | --- | --- | --- |
+| crest-to-trough (the patch) | 1.11 (`sparse_dialogue/9`)\* | 1.22 | 1.20 | 1.39 |
+| 4.79 x standard deviation | 1.05 (`broadband/5`)\* | 1.15 | 1.10 | 1.09 |
+| 1.48 x 5th-95th percentile | 1.06 (`broadband/5`)\* | 1.33 | 0.99 | 1.12 |
+| largest ¾-octave window | 1.11 (`sparse_dialogue/9`)\* | 1.14 | 1.13 | 1.30 |
+
+\* Excluding `sparse_dialogue/5`, at 3.2-5.2x on every one. Its judged top is 77 Hz, so its
+sub band is 0.06 octaves wide. A sub-band yardstick also needs a minimum width, which neither
+form had.
+
+The handoff's premise is only half right. `broadband/5`'s sub band is smoother in fact, not
+just shorter: its standard deviation falls from 0.9 to 0.6 dB, and so does every
+width-invariant statistic. A shorter band also lets the linear trend take up more of the slow
+structure. No statistic over the sub band left a margin worth calling a separation.
+
+### What was built: a cubic trend over the same band
+
+The knee is a trend problem, not a band problem, so the band stays where the 1x boundary was
+calibrated (judged top to `diagnose.band_hz[1]`), and only the mix's detrend changes.
+`passband_ripple_db` takes `trend_degree` (1 by default). The mix's texture blocker passes
+`MIX_TEXTURE_TREND_DEGREE` = 3. `channels_missing_low_end` keeps the line, as the handoff
+advised.
+
+The same study, full band, mix rule:
+
+| Trend | Worst gated negative | Lowest real/filtered/variant | 9 | B&tB | CSL | DM3 | Carrie |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| line (before) | 0.77 | 1.01 (Incredible Hulk) | 0.71 | 0.98 | 0.98 | 0.62 | 0.82 |
+| quadratic | 0.82 | 1.05 (Bugonia) | 1.21 | 1.00 | 1.06 | 1.31 | 0.86 |
+| hinge at 80 Hz | 0.77 | 1.05 (Bugonia) | 1.00 | 1.01 | 1.08 | 1.14 | 0.87 |
+| **cubic** | **0.76** | **1.08 (Bugonia)** | **2.79** | **1.11** | **1.06** | **1.43** | **0.85** |
+
+The cubic is the only trend that widens the separation at both ends. Over all 125 items, it
+changes the texture verdict on exactly four: 9, Beauty and the Beast (1991), Crazy, Stupid,
+Love and Despicable Me 3. A cubic can raise a yardstick as well as lower it (`sparse_dialogue/9`
+measures 5.54 dB about it against 5.24 about a line), but no verdict went that way. Battle: Los
+Angeles (0.28) and Changeling (0.89) stay declined.
+
+### Regression check
+
+* **Probe** (11 baseline titles, default params): unchanged on every title.
+* **Protocol**, seeds 101 and 947, before in a HEAD worktree (`a4b4d06`, the code of `fd9ae22`) and after: every decision,
+  score and failure identical. The only difference is the ripple figure quoted in two
+  `within_programme_ripple` notes per seed.
+* **Negative corpus**, seeds 1-9: 0/45 false acceptances on the gated shapes, upper bound
+  0.079 against 0.100, **pass**. All of `broadband/*` abstains. Ungated: `natural_droop` 4/9,
+  `filtered` 7/9 true positives, median recovery 1.27 dB RMS. The committed
+  `negative_corpus.json` is from an older revision (`4c6d5c3`), and 7 cases differ from it:
+  5 in recovery or peak boost on accepted cascades, and `natural_droop/7`, now abstaining.
+  None is this change: no corpus case's texture verdict moves under the cubic, and the
+  blocker is all the change touches. The committed file was not refreshed.
+* **Library titles**, real `designer.design` runs with the deployed request shape (bass
+  management `lpf_fs` 80):
+
+  | Title | Material digest | Accepted | Confidence |
+  | --- | --- | --- | --- |
+  | 9 (2009) | `c942feb4…`, matches the deployed request | `flatten`: LowShelf 13.0 Hz +6.4 dB Q 0.72 | 0.97 |
+  | Beauty and the Beast (1991) | `8d98789b…` | LowShelf 13.8 Hz +2.4 dB, LowShelf 35.1 Hz +1.0 dB, PeakingEQ 24.4 Hz +4.6 dB | 0.95 |
+  | Crazy, Stupid, Love | `df2456f6…` | `flatten`: LowShelf 34.5 Hz +10.0 dB Q 0.79, PeakingEQ 28.6 Hz −7.6 dB Q 2.07 | 0.93 |
+  | Despicable Me 3 | `7cf1e523…` | LowShelf 28.2 Hz +1.6 dB, LowShelf 15.0 Hz +1.0 dB | 0.96 |
+
+  9 is the correction the handoff expected, and Beauty and the Beast is the cascade the
+  patch's second attempt found. Crazy, Stupid, Love's cascade looks odd until its corrected
+  curve is checked: the average goes from a steep fall below about 25 Hz to flat at about
+  −72 dB down to about 5 Hz. The cut shapes the shelf; it does not fight it.
+* **Carrie stays declined**: an 8.4 dB shortfall against 9.9 dB of ripple about a cubic
+  (10.3 about a line). Its judged band starts at 10 Hz, so its passband runs 4.3 octaves,
+  and the texture there is broadband, not a knee. Shortening the band would accept it. Nothing
+  measured here licenses doing that.
+
+### Caveat: the degree is a choice made on this data
+
+Degree 3 was picked from three degrees and a hinge after seeing the corpus and the library
+ratios. That is a modelling choice informed by the corpus, so the completion criterion's E10
+clause applies. Fresh validation should precede treating it as settled. The hinge at the
+crossover is the one variant with no free choice (its bend is the playback crossover). It
+leaves every corpus ratio as it was, but puts 9 at exactly 1.00x, so it does not fix the
+reported title.

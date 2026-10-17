@@ -333,7 +333,11 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
   (`pipeline.passband_ripple_db`) is left alone: it abstains with `within_programme_ripple`
   before any strategy runs. That ripple is the title's own yardstick, so there is no constant.
   Crest to trough rather than a one-sided dip, because the reference sits on the crests. This
-  is what took the negative corpus from 4 false acceptances in 45 to 0.
+  is what took the negative corpus from 4 false acceptances in 45 to 0. The mix's ripple is
+  taken about a cubic in log frequency, so an LFE-led mix's knee above the crossover is trend,
+  not texture; each channel's is taken about a line. Don't shorten the band instead:
+  crest to trough shrinks with bin count, and the 1x boundary was calibrated on the full band
+  ([plans/texture-yardstick-sub-band.md](../plans/texture-yardstick-sub-band.md)).
 * **Steep filters: the default declines them; `judge_from_content_edge` is an opt-in that
   recovers them and lifts some noise.** Below a steep filter's edge the priced target already
   falls into the quiet floor with the programme — contrast bounds it — and the shape clauses
