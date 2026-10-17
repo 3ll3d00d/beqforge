@@ -6,7 +6,8 @@ Everything else about the designer binding is tested in isolation in
 `test_design_designer.py`, on purpose (see that file's docstring) — this file exists because
 none of those tests ever go through an actual HTTP request, so a bug in `_Handler` itself (a
 wrong status code, a header the client can't parse, `do_POST` never reaching `design()`) would
-be invisible to them.
+be invisible to them. Every server here runs its designs in its own spawned worker process,
+as production does.
 
 The accepted-candidate case costs a real, bounded fit — `strategies=("flatten",)` measured
 directly at ~4-8s (AGENTS.md's "40-80s a title" is for a full multi-strategy run against real,
@@ -35,17 +36,15 @@ from beqforge.designer import (
 from beqforge.harness import apply_high_pass
 from beqforge.material import LFE_GAIN
 from beqforge.pipeline import PipelineParams
-from tools.designer_server import DESIGN_PATH, HTTPServer, _Handler
+from tools.designer_server import DESIGN_PATH, DesignServer, DesignSettings
 
 
 @pytest.fixture(scope="module")
 def server():
-    """`HTTPServer`, same as production (see its fork-safety comment) — driven from a
-    background thread here only because the test itself needs the main thread free to make
-    requests; the real deployment calls `serve_forever()` from the process's only thread.
-    """
-    _Handler.params = PipelineParams(strategies=("flatten",))
-    httpd = HTTPServer(("127.0.0.1", 0), _Handler)
+    """`DesignServer`, same as production, its designs in a spawned worker process."""
+    httpd = DesignServer(
+        ("127.0.0.1", 0), DesignSettings(PipelineParams(strategies=("flatten",)))
+    )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -53,6 +52,7 @@ def server():
     finally:
         httpd.shutdown()
         thread.join(timeout=5)
+        httpd.server_close()
 
 
 DESIGN_TIMEOUT_S = 900.0
@@ -223,15 +223,61 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     validate_response(_response_from_json(body))  # must not raise
 
 
-def _serve(monkeypatch, params: PipelineParams, cache):
-    """A server of its own, with its own settings — `_Handler`'s are class attributes, so
-    these are restored when the test ends and the module's shared server is unaffected."""
+def test_health_answers_while_a_design_runs(server) -> None:
+    """The designs run in the worker process, so a health check never waits behind one."""
+    answered = []
+    designing = threading.Thread(
+        target=lambda: answered.append(
+            _request(
+                server,
+                "POST",
+                DESIGN_PATH,
+                body=_known_filter_request(),
+                timeout=DESIGN_TIMEOUT_S,
+            )
+        )
+    )
+    designing.start()
+    try:
+        status, _ = _request(server, "GET", "/health", timeout=3.0)
+        assert status == 200
+        assert designing.is_alive()
+    finally:
+        designing.join(timeout=DESIGN_TIMEOUT_S)
+    assert answered[0][0] == 200
+
+
+def test_a_dead_worker_is_a_500_and_the_next_request_gets_a_new_one() -> None:
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None)
+    try:
+        for process in list(httpd.worker._pool._processes.values()):
+            process.kill()
+            process.join(timeout=10)
+        status, body = _request(
+            httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
+        )
+        assert status == 500
+        assert "worker died" in body["error"]
+        status, body = _request(
+            httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
+        )
+        assert status == 200
+        assert body["decline_reason"] == "channel_evidence_unavailable"
+    finally:
+        _stop(httpd, thread)
+
+
+def _serve(params: PipelineParams, cache, shared_root=None):
+    """A server of its own, with its own settings and its own worker process."""
     # These tests exercise transport and cache identity/reuse, not section-budget
     # escalation. Still run the real pipeline with a bounded numerical search;
     # test_accepts_a_real_injected_rolloff_over_http retains the full budget.
-    monkeypatch.setattr(_Handler, "params", replace(params, max_sections=1))
-    monkeypatch.setattr(_Handler, "cache", cache)
-    httpd = HTTPServer(("127.0.0.1", 0), _Handler)
+    httpd = DesignServer(
+        ("127.0.0.1", 0),
+        DesignSettings(
+            replace(params, max_sections=1), cache=cache, shared_root=shared_root
+        ),
+    )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd, thread
@@ -255,14 +301,12 @@ BOTH = ("flatten", "parametric")
 
 
 def test_a_repeat_request_reuses_every_stage_and_answers_the_same(
-    monkeypatch, tmp_path, caplog
+    tmp_path, caplog
 ) -> None:
     """R2a: `--cache-dir` — the second request for a title skips its analysis."""
     from beqforge.cache import DirStore
 
-    httpd, thread = _serve(
-        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
-    )
+    httpd, thread = _serve(PipelineParams(strategies=BOTH), DirStore(tmp_path))
     try:
         request = _known_filter_request()
         first = _request(
@@ -280,16 +324,12 @@ def test_a_repeat_request_reuses_every_stage_and_answers_the_same(
     assert list((tmp_path / "analysis").iterdir())
 
 
-def test_another_server_setting_reuses_the_analysis_only(
-    monkeypatch, tmp_path, caplog
-) -> None:
+def test_another_server_setting_reuses_the_analysis_only(tmp_path, caplog) -> None:
     from beqforge.accept import AcceptParams
     from beqforge.cache import DirStore
 
     request = _known_filter_request()
-    httpd, thread = _serve(
-        monkeypatch, PipelineParams(strategies=BOTH), DirStore(tmp_path)
-    )
+    httpd, thread = _serve(PipelineParams(strategies=BOTH), DirStore(tmp_path))
     try:
         _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
     finally:
@@ -297,7 +337,7 @@ def test_another_server_setting_reuses_the_analysis_only(
     tilted = PipelineParams(
         strategies=BOTH, accept=AcceptParams(target_tilt_db_per_octave=1.0)
     )
-    httpd, thread = _serve(monkeypatch, tilted, DirStore(tmp_path))
+    httpd, thread = _serve(tilted, DirStore(tmp_path))
     caplog.clear()
     try:
         with caplog.at_level(logging.INFO, logger="beqforge.cache"):
@@ -311,15 +351,11 @@ def test_another_server_setting_reuses_the_analysis_only(
     assert len(list((tmp_path / "parametric").iterdir())) == 2
 
 
-def test_bass_management_alone_reuses_the_analysis(
-    monkeypatch, tmp_path, caplog
-) -> None:
+def test_bass_management_alone_reuses_the_analysis(tmp_path, caplog) -> None:
     from beqforge.cache import DirStore
 
     request = _known_filter_request()
-    httpd, thread = _serve(
-        monkeypatch, PipelineParams(strategies=("flatten",)), DirStore(tmp_path)
-    )
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), DirStore(tmp_path))
     try:
         _request(httpd.server_address, "POST", DESIGN_PATH, request, DESIGN_TIMEOUT_S)
         managed = {
@@ -343,8 +379,8 @@ def test_bass_management_alone_reuses_the_analysis(
     assert "analysis" in _reused(caplog)
 
 
-def test_without_a_cache_dir_nothing_is_written(monkeypatch, tmp_path) -> None:
-    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+def test_without_a_cache_dir_nothing_is_written(tmp_path) -> None:
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None)
     try:
         status, _ = _request(
             httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
@@ -393,9 +429,8 @@ def _by_reference(request: dict, root) -> dict:
     }
 
 
-def test_health_says_whether_references_are_accepted(monkeypatch, tmp_path) -> None:
-    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
-    monkeypatch.setattr(_Handler, "shared_root", tmp_path)
+def test_health_says_whether_references_are_accepted(tmp_path) -> None:
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None, tmp_path)
     try:
         status, body = _request(httpd.server_address, "GET", "/health")
     finally:
@@ -404,14 +439,13 @@ def test_health_says_whether_references_are_accepted(monkeypatch, tmp_path) -> N
     assert body == {"status": "ok", "contract_version": "1.2", "shared_root": True}
 
 
-def test_a_request_by_reference_answers_as_the_same_request_inline(
-    monkeypatch, tmp_path
-) -> None:
+def test_a_request_by_reference_answers_as_the_same_request_inline(tmp_path) -> None:
     """R2b over a real socket: same audio by path, same response."""
     inline = {**_known_filter_request(), "contract_version": "1.2"}
     by_reference = _by_reference(inline, tmp_path)
-    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
-    monkeypatch.setattr(_Handler, "shared_root", tmp_path.resolve())
+    httpd, thread = _serve(
+        PipelineParams(strategies=("flatten",)), None, tmp_path.resolve()
+    )
     try:
         first = _request(
             httpd.server_address, "POST", DESIGN_PATH, inline, DESIGN_TIMEOUT_S
@@ -425,11 +459,9 @@ def test_a_request_by_reference_answers_as_the_same_request_inline(
     assert first[1] == second[1]
 
 
-def test_a_reference_without_a_shared_root_is_422_naming_the_array(
-    monkeypatch, tmp_path
-) -> None:
+def test_a_reference_without_a_shared_root_is_422_naming_the_array(tmp_path) -> None:
     by_reference = _by_reference(_known_filter_request(duration_s=20.0), tmp_path)
-    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None)
     try:
         status, body = _request(httpd.server_address, "POST", DESIGN_PATH, by_reference)
     finally:
@@ -439,7 +471,7 @@ def test_a_reference_without_a_shared_root_is_422_naming_the_array(
     assert "no shared root" in body["reason"]
 
 
-def test_an_escaping_path_is_422_and_both_forms_is_400(monkeypatch, tmp_path) -> None:
+def test_an_escaping_path_is_422_and_both_forms_is_400(tmp_path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     by_reference = _by_reference(_known_filter_request(duration_s=20.0), root)
@@ -456,8 +488,9 @@ def test_an_escaping_path_is_422_and_both_forms_is_400(monkeypatch, tmp_path) ->
         **by_reference,
         "mono_mix": {**by_reference["mono_mix"], "data_base64": "AAAA"},
     }
-    httpd, thread = _serve(monkeypatch, PipelineParams(strategies=("flatten",)), None)
-    monkeypatch.setattr(_Handler, "shared_root", root.resolve())
+    httpd, thread = _serve(
+        PipelineParams(strategies=("flatten",)), None, root.resolve()
+    )
     try:
         escaped = _request(httpd.server_address, "POST", DESIGN_PATH, escaping)
         doubled = _request(httpd.server_address, "POST", DESIGN_PATH, both)

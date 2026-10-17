@@ -244,8 +244,9 @@ The image's defaults, all overridable with the environment variables above:
 
 It runs as uid/gid 1000 (`--build-arg PUID=… PGID=…` to change), which must be able to write
 the shared root and the cache: the server checks both with a write at startup. Its
-`HEALTHCHECK` asks `/health`. The server answers one request at a time (its fitter forks), so a
-caller sending several at once queues them; size the caller's timeout for that.
+`HEALTHCHECK` asks `/health`, which answers while a design runs: designs run in a separate
+worker process, one at a time, so a caller sending several at once queues them; size the
+caller's timeout for that. `docker stop` stops a design in progress.
 
 Build and check it locally from the repository root:
 

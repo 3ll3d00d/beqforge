@@ -17,14 +17,23 @@ contract.
 """
 
 import argparse
+import itertools
 import json
 import logging
+import logging.handlers
 import math
+import multiprocessing
 import os
+import signal
 import sys
 import tempfile
+import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from multiprocessing.queues import SimpleQueue
 from pathlib import Path
 from typing import override
 
@@ -126,11 +135,236 @@ def _prepare_directory(path: Path) -> None:
         probe.flush()
 
 
-class _Handler(BaseHTTPRequestHandler):
-    params: PipelineParams  # set on the class before serving
+@dataclass(frozen=True, slots=True)
+class DesignSettings:
+    """Everything server-wide a design needs: what the worker process is started with."""
+
+    params: PipelineParams
     record_dir: Path | None = None
     cache: Store | None = None
     shared_root: Path | None = None
+
+
+# The worker process's own state, set once by `_start_worker`.
+_worker_settings: DesignSettings | None = None
+_worker_logs: SimpleQueue | None = None
+
+
+class _LogToParent(logging.handlers.QueueHandler):
+    """A `QueueHandler` onto a `SimpleQueue`, which has no `put_nowait`. A `SimpleQueue` and
+    not a `Queue` because `Queue.put` starts a feeder thread, and the worker must stay
+    single-threaded when the fitter forks (see `_DesignWorker`)."""
+
+    @override
+    def enqueue(self, record: logging.LogRecord) -> None:
+        self.queue.put(record)
+
+
+def _start_worker(settings: DesignSettings, logs: SimpleQueue, level: int) -> None:
+    global _worker_settings, _worker_logs
+    _worker_settings = settings
+    _worker_logs = logs
+    root = logging.getLogger()
+    root.handlers[:] = [_LogToParent(logs)]
+    root.setLevel(level)
+    if hasattr(os, "setpgrp"):
+        # its own process group, the fitter's processes in it too: `_DesignWorker.close`
+        # stops them all, and a terminal's Ctrl-C reaches only the server, which does that
+        os.setpgrp()
+
+
+def _ready() -> None:
+    """A no-op task: once it answers, the worker has started and imported the pipeline."""
+
+
+def _design_in_worker(raw: bytes, token: int) -> tuple[int, dict, dict[str, float]]:
+    """One request body to (status, JSON payload, timings), in the worker process.
+
+    Every log record the request produced is in the log queue ahead of `token`, so the
+    parent can wait for them before answering (`_DesignWorker.run`).
+    """
+    assert _worker_settings is not None and _worker_logs is not None
+    settings = _worker_settings
+    try:
+        started = time.perf_counter()
+        try:
+            body = json.loads(raw)
+            parsed = time.perf_counter()
+            request = request_from_json(body, shared_root=settings.shared_root)
+            decoded = time.perf_counter()
+        except UnusableReference as refused:
+            # a well-formed reference this server cannot honour: a configuration error on one
+            # side or the other, never a decline and never retried inline (§3, §4)
+            logger.warning(f"unusable reference: {refused}")
+            return (
+                422,
+                {
+                    "error": f"cannot use {refused.array} by reference: {refused.reason}",
+                    "array": refused.array,
+                    "reason": refused.reason,
+                },
+                {},
+            )
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as malformed:
+            logger.warning(f"malformed request body: {malformed}")
+            return 400, {"error": f"malformed DesignRequest: {malformed}"}, {}
+
+        response = design(
+            request,
+            settings.params,
+            record_dir=settings.record_dir,
+            cache=settings.cache,
+        )
+        designed = time.perf_counter()
+        try:
+            validate_response(response)
+        except ContractViolation as bug:
+            # our own mapping is wrong, never the caller's fault -- never ship it.
+            logger.error(f"response failed self-validation: {bug}")
+            return 500, {"error": f"designer produced an invalid response: {bug}"}, {}
+        outcome = (
+            "declined"
+            if response.decline_reason
+            else f"{len(response.candidates)} candidate(s)"
+        )
+        logger.info(f"POST {DESIGN_PATH}: {outcome}")
+        payload = response_to_json(response)
+        return (
+            200,
+            payload,
+            {
+                "parse": parsed - started,
+                "decode": decoded - parsed,
+                "design": designed - decoded,
+                "worker": time.perf_counter() - started,
+            },
+        )
+    finally:
+        _worker_logs.put(token)
+
+
+class _DesignWorker:
+    """One long-lived process that runs every design, one at a time, for a threaded server.
+
+    The fitter forks worker processes (`beqforge.filters.PARALLEL_FITS`, a default-context
+    `ProcessPoolExecutor`) when a fit escalates past one section count, and forking a
+    multi-threaded process risks a deadlock: a lock another thread holds at fork time is never
+    released in the child. The HTTP server is threaded, so `/health` answers while a design
+    runs; the design itself runs here, in a process started with "spawn" (no inherited threads
+    or locks) whose only thread is the one running the design. One worker also keeps designs
+    serial, as the contract expects (one synchronous POST per `design()` call,
+    designer-interface.md §1): concurrent requests queue.
+
+    The worker's log records come back over a queue and are handled by the parent's loggers,
+    so they reach whatever handlers the server (or a test's `caplog`) has configured.
+    """
+
+    def __init__(self, settings: DesignSettings, log_level: int = logging.INFO):
+        self._context = multiprocessing.get_context("spawn")
+        self._settings = settings
+        self._log_level = log_level
+        self._logs: SimpleQueue = self._context.SimpleQueue()
+        self._tokens = itertools.count()
+        self._flushed: dict[int, threading.Event] = {}
+        self._flushed_lock = threading.Lock()
+        self._forwarder = threading.Thread(
+            target=self._forward_logs, name="design-worker-logs", daemon=True
+        )
+        self._forwarder.start()
+        self._pool_lock = threading.Lock()
+        self._closed = False
+        self._pool = self._start()
+
+    def _start(self) -> ProcessPoolExecutor:
+        pool = ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=self._context,
+            initializer=_start_worker,
+            initargs=(self._settings, self._logs, self._log_level),
+        )
+        # start it now: a worker that cannot import the pipeline fails here, not on a title
+        pool.submit(_ready).result()
+        return pool
+
+    def _forward_logs(self) -> None:
+        while (item := self._logs.get()) is not None:
+            if isinstance(item, int):
+                with self._flushed_lock:
+                    event = self._flushed.pop(item, None)
+                if event is not None:
+                    event.set()
+                continue
+            named = logging.getLogger(item.name)
+            if named.isEnabledFor(item.levelno):
+                named.handle(item)
+
+    def run(self, raw: bytes) -> tuple[int, dict, dict[str, float]]:
+        """Design one request body; raises `BrokenProcessPool` if the worker died doing it,
+        having started a new worker for the next request."""
+        token = next(self._tokens)
+        flushed = threading.Event()
+        with self._flushed_lock:
+            self._flushed[token] = flushed
+        pool = self._pool
+        try:
+            result = pool.submit(_design_in_worker, raw, token).result()
+        except BrokenProcessPool:
+            with self._flushed_lock:
+                self._flushed.pop(token, None)
+            with self._pool_lock:
+                if self._pool is pool and not self._closed:
+                    logger.error("design worker died; starting another")
+                    self._pool = self._start()
+            raise
+        flushed.wait(timeout=10.0)
+        return result
+
+    def close(self) -> None:
+        # an idle worker exits as soon as it is told to; one still designing is stopped, with
+        # the fitter's processes, rather than waited for: a stopping server has no one to
+        # answer, and `docker stop` allows 10 s
+        with self._pool_lock:
+            self._closed = True
+            pool = self._pool
+        workers = list(pool._processes.values())
+        pool.shutdown(wait=False, cancel_futures=True)
+        for process in workers:
+            process.join(timeout=1)
+            if process.is_alive():
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except (AttributeError, ProcessLookupError):
+                    process.terminate()
+                process.join(timeout=5)
+        self._logs.put(None)
+        self._forwarder.join(timeout=5)
+
+
+class DesignServer(ThreadingHTTPServer):
+    """A thread per connection for HTTP, the designs themselves in one `_DesignWorker`."""
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        settings: DesignSettings,
+        log_level: int = logging.INFO,
+    ):
+        self.settings = settings
+        self.worker = _DesignWorker(settings, log_level)
+        try:
+            super().__init__(address, _Handler)
+        except BaseException:
+            self.worker.close()
+            raise
+
+    @override
+    def server_close(self) -> None:
+        super().server_close()
+        self.worker.close()
+
+
+class _Handler(BaseHTTPRequestHandler):
+    server: DesignServer
 
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
@@ -145,7 +379,7 @@ class _Handler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "contract_version": CONTRACT_VERSION,
-                    "shared_root": self.shared_root is not None,
+                    "shared_root": self.server.settings.shared_root is not None,
                 },
             )
             return
@@ -162,56 +396,23 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         read = time.perf_counter()
         try:
-            body = json.loads(raw)
-            parsed = time.perf_counter()
-            request = request_from_json(body, shared_root=self.shared_root)
-            decoded = time.perf_counter()
-        except UnusableReference as refused:
-            # a well-formed reference this server cannot honour: a configuration error on one
-            # side or the other, never a decline and never retried inline (§3, §4)
-            logger.warning(f"unusable reference: {refused}")
-            self._respond(
-                422,
-                {
-                    "error": f"cannot use {refused.array} by reference: {refused.reason}",
-                    "array": refused.array,
-                    "reason": refused.reason,
-                },
+            status, payload, timing = self.server.worker.run(raw)
+        except BrokenProcessPool:
+            self._respond(500, {"error": "the design worker died during this request"})
+            return
+        returned = time.perf_counter()
+        self._respond(status, payload)
+        if timing:
+            # the wire's share of a request, apart from the design itself: what decides
+            # whether requests by reference are worth having (IMPROVEMENT_PLAN R2a/R2b).
+            # "queued" is the wait behind other requests plus the trip to the worker.
+            logger.info(
+                f"request timing: body {length / 1e6:.1f} MB, read {read - started:.2f} s, "
+                f"parse {timing['parse']:.2f} s, decode {timing['decode']:.2f} s, "
+                f"design {timing['design']:.2f} s, "
+                f"respond {time.perf_counter() - returned:.2f} s, "
+                f"queued {returned - read - timing['worker']:.2f} s"
             )
-            return
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as malformed:
-            logger.warning(f"malformed request body: {malformed}")
-            self._respond(400, {"error": f"malformed DesignRequest: {malformed}"})
-            return
-
-        response = design(
-            request, self.params, record_dir=self.record_dir, cache=self.cache
-        )
-        designed = time.perf_counter()
-        try:
-            validate_response(response)
-        except ContractViolation as bug:
-            # our own mapping is wrong, never the caller's fault -- never ship it.
-            logger.error(f"response failed self-validation: {bug}")
-            self._respond(
-                500, {"error": f"designer produced an invalid response: {bug}"}
-            )
-            return
-        outcome = (
-            "declined"
-            if response.decline_reason
-            else f"{len(response.candidates)} candidate(s)"
-        )
-        logger.info(f"POST {DESIGN_PATH}: {outcome}")
-        self._respond(200, response_to_json(response))
-        # the wire's share of a request, apart from the design itself: what decides whether
-        # requests by reference are worth having (IMPROVEMENT_PLAN R2a/R2b)
-        logger.info(
-            f"request timing: body {length / 1e6:.1f} MB, read {read - started:.2f} s, "
-            f"parse {parsed - read:.2f} s, decode {decoded - parsed:.2f} s, "
-            f"design {designed - decoded:.2f} s, "
-            f"respond {time.perf_counter() - designed:.2f} s"
-        )
 
     def _respond(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -375,18 +576,17 @@ def main() -> int:
                     f"{option} {directory}: cannot create or write directory: {error}"
                 )
 
-    _Handler.params = params
-    _Handler.record_dir = args.record_dir
-    _Handler.cache = DirStore(args.cache_dir) if args.cache_dir else None
-    _Handler.shared_root = args.shared_root.resolve() if args.shared_root else None
-    # single-threaded, deliberately: beqforge.filters' fitter forks worker processes
-    # (ProcessPoolExecutor, PARALLEL_FITS) when a fit escalates past one section count, and
-    # forking a multi-threaded process risks a deadlock (a lock held by another thread at fork
-    # time is never released in the child). Serving one request at a time keeps the process
-    # single-threaded when that fork happens. Costs nothing real: the contract is one
-    # synchronous POST per design() call (designer-interface.md §1), so there is no concurrent
-    # request to lose.
-    server = HTTPServer((args.host, args.port), _Handler)
+    settings = DesignSettings(
+        params=params,
+        record_dir=args.record_dir,
+        cache=DirStore(args.cache_dir) if args.cache_dir else None,
+        shared_root=args.shared_root.resolve() if args.shared_root else None,
+    )
+    server = DesignServer(
+        (args.host, args.port),
+        settings,
+        log_level=logging.WARNING if args.quiet else logging.INFO,
+    )
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"
@@ -395,13 +595,22 @@ def main() -> int:
         + (f"; audio by reference under {args.shared_root}" if args.shared_root else "")
         + ")"
     )
+    # SIGTERM (`docker stop`, a supervisor, a smoke test) stops the server as Ctrl-C does, so
+    # `server_close` stops the design worker rather than leaving it behind. As a container's
+    # PID 1 the server would otherwise ignore SIGTERM until Docker's SIGKILL.
+    previous = signal.signal(signal.SIGTERM, _interrupt)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        signal.signal(signal.SIGTERM, previous)
     return 0
+
+
+def _interrupt(signum: int, frame) -> None:
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

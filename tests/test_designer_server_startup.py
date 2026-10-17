@@ -1,5 +1,6 @@
 """Configuration failures must be caught before the designer starts listening."""
 
+import logging
 import os
 import sys
 from unittest.mock import Mock
@@ -16,14 +17,7 @@ def startup(monkeypatch):
             monkeypatch.delenv(name)
     server = Mock()
     constructor = Mock(return_value=server)
-    monkeypatch.setattr(designer_server, "HTTPServer", constructor)
-    for name in ("params", "record_dir", "cache", "shared_root"):
-        monkeypatch.setattr(
-            designer_server._Handler,
-            name,
-            getattr(designer_server._Handler, name, None),
-            raising=False,
-        )
+    monkeypatch.setattr(designer_server, "DesignServer", constructor)
 
     def run(*arguments):
         monkeypatch.setattr(sys, "argv", ["serve-designer", *arguments])
@@ -41,7 +35,7 @@ def test_directory_is_ready_before_listening(startup, tmp_path, option, existing
         (directory / "existing").write_text("keep me")
     run, constructor, server = startup
 
-    def bind(*_):
+    def bind(*_, **__):
         assert directory.is_dir()
         assert sorted(p.name for p in directory.iterdir()) == (
             ["existing"] if existing else []
@@ -138,8 +132,10 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
     args = parsed[0]
     assert set(settings) == {name.upper() for name in vars(args)}
     assert args.quiet is True
-    constructor.assert_called_once_with(("127.0.0.2", 9123), designer_server._Handler)
-    params = designer_server._Handler.params
+    (address, settings), options = constructor.call_args
+    assert address == ("127.0.0.2", 9123)
+    assert options == {"log_level": logging.WARNING}
+    params = settings.params
     assert params.realisation.fs == 48000
     assert params.realisation.coefficient_bits == 24
     assert params.realisation.integer_bits == 3
@@ -148,9 +144,9 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
     assert params.accept.target_tilt_db_per_octave == -1.5
     assert params.judge_from_content_edge is True
     assert params.strategies == ("flatten", "counterfactual")
-    assert designer_server._Handler.record_dir == tmp_path / "records"
-    assert designer_server._Handler.cache.root == tmp_path / "cache"
-    assert designer_server._Handler.shared_root == (tmp_path / "shared").resolve()
+    assert settings.record_dir == tmp_path / "records"
+    assert settings.cache.root == tmp_path / "cache"
+    assert settings.shared_root == (tmp_path / "shared").resolve()
     assert (tmp_path / "cache").is_dir()
     assert (tmp_path / "shared").is_dir()
 
@@ -179,8 +175,10 @@ def test_cli_replaces_environment_values_including_repeated_and_boolean_options(
         )
         == 0
     )
-    constructor.assert_called_once_with(("127.0.0.1", 8123), designer_server._Handler)
-    params = designer_server._Handler.params
+    (address, settings), options = constructor.call_args
+    assert address == ("127.0.0.1", 8123)
+    assert options == {"log_level": logging.INFO}
+    params = settings.params
     assert params.strategies == ("flatten", "counterfactual")
     assert params.exclude_bands_hz == ((30.0, 32.0),)
     assert params.judge_from_content_edge is False
@@ -189,9 +187,10 @@ def test_cli_replaces_environment_values_including_repeated_and_boolean_options(
 @pytest.mark.parametrize("value", ["0", "false", "NO", "off"])
 def test_false_environment_boolean(startup, monkeypatch, value):
     monkeypatch.setenv("BEQFORGE_CONTENT_EDGE", value)
-    run, _, _ = startup
+    run, constructor, _ = startup
     assert run() == 0
-    assert designer_server._Handler.params.judge_from_content_edge is False
+    (_, settings), _ = constructor.call_args
+    assert settings.params.judge_from_content_edge is False
 
 
 @pytest.mark.parametrize(

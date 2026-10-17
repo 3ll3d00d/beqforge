@@ -6,13 +6,12 @@ these keep the recipe and the check honest without Docker.
 
 import importlib.util
 import threading
-from http.server import HTTPServer
 from pathlib import Path
 
 import pytest
 
 from beqforge.pipeline import PipelineParams
-from tools.designer_server import _Handler
+from tools.designer_server import DesignServer, DesignSettings
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "packaging" / "designer" / "Dockerfile"
@@ -67,17 +66,15 @@ def test_the_smoke_digest_is_the_designers_own_arithmetic(tmp_path):
 
 
 @pytest.fixture
-def server(monkeypatch, tmp_path):
+def server(tmp_path):
     """What the image runs: the designer with a shared root, here in-process."""
-    monkeypatch.setattr(
-        _Handler,
-        "params",
-        PipelineParams(strategies=("flatten",), max_sections=1),
-        raising=False,  # a class attribute only the server's main() sets
+    httpd = DesignServer(
+        ("127.0.0.1", 0),
+        DesignSettings(
+            PipelineParams(strategies=("flatten",), max_sections=1),
+            shared_root=tmp_path.resolve(),
+        ),
     )
-    monkeypatch.setattr(_Handler, "cache", None)
-    monkeypatch.setattr(_Handler, "shared_root", tmp_path.resolve())
-    httpd = HTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}", tmp_path
