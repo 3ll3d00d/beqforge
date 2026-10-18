@@ -320,7 +320,9 @@ def test_one_noisy_bin_does_not_end_the_level_invariance_run(monkeypatch) -> Non
     freqs = np.fft.rfftfreq(d.WELCH_NPERSEG, 1 / FS)[1:]
     loud = np.zeros_like(freqs)
     quiet = np.zeros_like(freqs)
-    quiet[np.argmin(np.abs(freqs - 23.9))] = 12.0  # one noisy bin just under the plateau
+    quiet[np.argmin(np.abs(freqs - 23.9))] = (
+        12.0  # one noisy bin just under the plateau
+    )
     monkeypatch.setattr(
         d,
         "stratified_response",
@@ -331,3 +333,49 @@ def test_one_noisy_bin_does_not_end_the_level_invariance_run(monkeypatch) -> Non
     subject = np.random.default_rng(0).standard_normal(int(FS * 60))
     _, _, floor, _, _ = d._temporal_evidence(subject, FS, params, (24.3, 40.0), freqs)
     assert floor < 5.0, floor
+
+
+def _same(a, b) -> bool:
+    import dataclasses
+
+    if dataclasses.is_dataclass(a):
+        return all(
+            _same(getattr(a, f.name), getattr(b, f.name)) for f in dataclasses.fields(a)
+        )
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, (np.ndarray, float, np.floating)):
+        return bool(np.array_equal(a, b, equal_nan=True))
+    return a == b
+
+
+def test_channels_in_parallel_give_the_serial_diagnosis_and_log(
+    monkeypatch, caplog
+) -> None:
+    """Each channel's evidence is computed in its own process when the fitter may run in
+    parallel; the diagnosis and the log, in channel order, are the serial ones."""
+    import logging
+
+    from beqforge import filters
+
+    samples = int(FS * 120.0)
+    material = material_from(
+        {
+            "L": high_passed(scened_noise(1, samples), 20.0),
+            "R": scened_noise(2, samples),
+            "LFE": high_passed(scened_noise(3, samples), 12.0),
+        }
+    )
+    runs = {}
+    for parallel in (False, True):
+        monkeypatch.setattr(filters, "PARALLEL_FITS", parallel)
+        monkeypatch.setattr(filters, "FIT_WORKERS", 3)
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            result = diagnose(material, PARAMS)
+        runs[parallel] = (result, [r.getMessage() for r in caplog.records])
+    assert _same(runs[True][0], runs[False][0])
+    assert runs[True][1] == runs[False][1]
+    assert any(m.startswith("Extracted") for m in runs[True][1])

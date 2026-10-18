@@ -748,6 +748,41 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## Channels decomposed in parallel (18 October 2026)
+
+A cold analysis was almost all one serial loop. On Alto Knights (8 channels, 123 minutes)
+`diagnose` took 53 s, 51 s of it each channel's `extract` (44 s) and `_temporal_evidence` (7 s);
+the mix's own extraction and identification took 3 s. Each channel's two calls read only its
+own samples and the plateau found for it beforehand, and `extract` seeds its own generator
+(`default_rng(0)`), so they are independent of every other channel and of the process they run
+in.
+
+`diagnose` now maps them over a process pool, a process per channel up to `filters.FIT_WORKERS`,
+whenever `filters.PARALLEL_FITS` is set; otherwise it works through the channels in turn as
+before. Pool processes return their log records instead of emitting them (a spawned process
+has none of the parent's handlers, a forked one would print out of order), and the parent logs
+them in channel order. Tools that set `PARALLEL_FITS = False` to run titles side by side get
+serial channels with it.
+
+* **Time.** Alto Knights' `diagnose`: 19.7 s against 51.8 s serial (7 workers, 8-core Ryzen
+  7 PRO 8840HS), so a cold design falls by about 32 s. A warm request reads the cached analysis
+  and is unchanged.
+* **Exactness.** The same diagnosis field by field and the same log line for line, parallel
+  against serial. A cold real run (`--no-cache`) of Alto Knights on committed code and on this
+  change: `compare_records.py` identical. Probe at `--tol 0`: eight titles unchanged; the
+  `parametric` target moved by at most 1e-4 dB on 28 Years Later, Alto Knights and Ballad of
+  Wallis Island, but the "before" snapshot read those proposals from an older stage cache while
+  "after" recomputed them (the analysis key moved). Committed code probed from a cold cache in
+  a worktree with its own `data/` gives exactly "after" on all three, so the change moves
+  nothing. Not run: the synthetic protocol and corpus, since no decision can move.
+* **Checks.** New test: a three-channel diagnosis is the same, as is its log, in parallel and
+  serial. Full suite 839 passed, 2 skipped.
+* **Concurrent designs and SMT.** The same day `fit_share` changed to split the logical
+  processors (see the next section). Two designs at once on this machine (Alto Knights and
+  Obsession from a warm cache): 119 s one after the other, 88 s together at 3 fit workers each
+  (the old share), 80 s at 7 each (the new), the same twice over, with identical records.
+
+
 ## Several designs at once, advertised on `/health` (18 October 2026)
 
 A Windows machine that could design two titles at once was added beside the container as a
@@ -760,8 +795,12 @@ endpoint's `parallel`) now runs N `_DesignWorker`s, each still one spawned, sing
 process. A request takes the next idle worker and waits for one when none is, so arrival order
 is kept and a worker that dies fails only its own request. `/health` gains `"parallel": N` for
 a caller to size its sends from; beqdesigner was sent the caller-side proposal. With N > 1 each
-worker's fit pool is `filters.FIT_WORKERS // N` (`fit_share`), so N designs do not each claim
-the whole machine; an explicit `BEQ_FIT_WORKERS` is left as each design's own. `_run_fits`
+worker's fit pool was `filters.FIT_WORKERS // N` (`fit_share`), so N designs did not each claim
+the whole machine; an explicit `BEQ_FIT_WORKERS` is left as each design's own. That split the
+physical cores, so on an SMT machine two designs together had what one already had and
+`--workers 2` gained nothing (reported on Windows the same day). The share is now the logical
+processors less one, divided by N, capped at `FIT_WORKERS` each: 7 each for two designs on 8
+cores with SMT, 3 each without SMT. `_run_fits`
 returns results in submission order from fixed seeds, so pool size moves timing and never an
 answer. Nothing under `beqforge/` changed, so the decision regression probe does not apply.
 

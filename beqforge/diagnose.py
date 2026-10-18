@@ -8,6 +8,7 @@ unknown source spectrum.
 
 import logging
 import math
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -633,7 +634,7 @@ def diagnose(
     # and reported the band top as where tracking stopped (A Few Good Men: 150.5-200 Hz found by
     # one, none by the other).
     _, mix_plateau = plateau_reference(mix_spectrum, spectrum_freqs, params)
-    from beqforge.extraction import ExtractionParams, extract
+    from beqforge.extraction import ExtractionParams
 
     extraction_params = extraction_params or ExtractionParams()
     extraction_params = replace(
@@ -645,12 +646,18 @@ def diagnose(
         ),
     )
 
+    plateaus = {
+        name: plateau_reference(
+            spectra[name][band], freqs, params, one_sided_fallback=False
+        )
+        for name in material.channels
+    }
+    evidence = _channel_evidence(material, params, extraction_params, plateaus, freqs)
+
     channels: dict[str, ChannelDiagnosis] = {}
     for name in material.channels:
         response = spectra[name][band]
-        level, plateau = plateau_reference(
-            response, freqs, params, one_sided_fallback=False
-        )
+        level, plateau = plateaus[name]
         response = np.where(
             unexcluded(freqs, params.exclude_bands_hz), response, np.nan
         )
@@ -666,10 +673,19 @@ def diagnose(
         passband_share = (
             float(share[in_share_band].mean()) if in_share_band.any() else 0.0
         )
-        _, channel_spread, _, _, tracking = _temporal_evidence(
-            material.channels[name], material.fs, params, plateau, freqs
-        )
-        envelope = extract(material.channels[name], material.fs, extraction_params)
+        if name in evidence:
+            (_, channel_spread, _, _, tracking), envelope, records = evidence[name]
+            for record in records:
+                logging.getLogger(record.name).handle(record)
+        else:
+            (_, channel_spread, _, _, tracking), envelope = _one_channel(
+                material.channels[name],
+                material.fs,
+                params,
+                plateau,
+                freqs,
+                extraction_params,
+            )
         channels[name] = ChannelDiagnosis(
             name=name,
             response_db=response,
@@ -705,6 +721,80 @@ def diagnose(
         filter_floor_hz=filter_floor,
         noise_floor_hz=noise_floor,
     )
+
+
+def _one_channel(samples, fs, params, plateau, freqs, extraction_params):
+    """A channel's temporal evidence and envelopes: most of a cold analysis's time, and
+    independent of every other channel's."""
+    from beqforge.extraction import extract
+
+    return (
+        _temporal_evidence(samples, fs, params, plateau, freqs),
+        extract(samples, fs, extraction_params),
+    )
+
+
+class _Collect(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # made picklable: the message rendered, any traceback as text
+        record.msg, record.args = record.getMessage(), None
+        if record.exc_info:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+            record.exc_info = None
+        self.records.append(record)
+
+
+def _one_channel_logged(level, *args):
+    """`_one_channel` in a pool process, its log records returned rather than emitted, so the
+    parent logs them in channel order on every platform: a spawned process has none of the
+    parent's handlers, and a forked one would print them out of order."""
+    root = logging.getLogger()
+    handlers, previous = root.handlers[:], root.level
+    collect = _Collect()
+    root.handlers[:] = [collect]
+    root.setLevel(level)
+    try:
+        return (*_one_channel(*args), collect.records)
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(previous)
+
+
+def _channel_evidence(material, params, extraction_params, plateaus, freqs):
+    """`_one_channel` for every channel, with its log records, computed in parallel: a
+    process per channel up to the fitter's pool size, when the fitter may run in parallel
+    (`filters.PARALLEL_FITS`, `filters.FIT_WORKERS`). Empty otherwise, and `diagnose` works
+    through the channels in turn as it always did. Each channel's work is seeded and
+    self-contained, so the answer is the serial one; only the time differs."""
+    from beqforge import filters
+
+    names = list(material.channels)
+    tasks = [
+        (
+            material.channels[n],
+            material.fs,
+            params,
+            plateaus[n][1],
+            freqs,
+            extraction_params,
+        )
+        for n in names
+    ]
+    workers = min(len(names), filters.FIT_WORKERS) if filters.PARALLEL_FITS else 1
+    if workers < 2:
+        return {}
+    level = logging.getLogger().getEffectiveLevel()
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        results = list(
+            pool.map(
+                _one_channel_logged, [level] * len(tasks), *zip(*tasks, strict=True)
+            )
+        )
+    return dict(zip(names, results, strict=True))
 
 
 def _temporal_evidence(

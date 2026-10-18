@@ -254,12 +254,23 @@ def test_help_lists_every_environment_option_even_with_invalid_environment(
     constructor.assert_not_called()
 
 
-def test_concurrent_designs_share_the_fit_pool(monkeypatch):
+@pytest.mark.parametrize(
+    ("threads", "workers", "share"),
+    [
+        (16, 1, None),  # one design: its usual pool
+        (16, 2, 7),  # 8 cores with SMT: two designs use the threads, 7 each
+        (16, 3, 5),
+        (8, 2, 3),  # 8 cores without SMT: nothing extra, split the cores
+        (16, 8, 1),
+    ],
+)
+def test_concurrent_designs_share_the_logical_processors(
+    monkeypatch, threads, workers, share
+):
     monkeypatch.delenv("BEQ_FIT_WORKERS", raising=False)
     monkeypatch.setattr(designer_server.filters, "FIT_WORKERS", 7)
-    assert designer_server.fit_share(1) is None
-    assert designer_server.fit_share(2) == 3
-    assert designer_server.fit_share(8) == 1
+    monkeypatch.setattr(designer_server.os, "process_cpu_count", lambda: threads)
+    assert designer_server.fit_share(workers) == share
 
 
 def test_an_explicit_fit_pool_is_each_designs_own(monkeypatch):

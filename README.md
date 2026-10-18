@@ -164,8 +164,9 @@ measures cold and warm requests.
 **Several designs at once.** `--workers N` (1-8, default 1) runs N designs at once, each in
 its own worker process; further requests queue. `GET /health` reports it as `parallel`, so a
 caller can send each server as many designs as it takes rather than be configured with that
-number. Each design's fit pool gets an equal share of the machine's cores (`BEQ_FIT_WORKERS`,
-if set, stays each design's own). The share changes how long a fit takes, never its answer.
+number. Concurrent designs share the machine's logical processors, SMT threads included, each
+at most the width one design uses alone (`BEQ_FIT_WORKERS`, if set, stays each design's own).
+The share changes how long a fit takes, never its answer.
 
 Every `serve-designer` configuration option can also be set through an environment variable.
 Explicit CLI options take precedence; for repeatable options, CLI values replace the entire

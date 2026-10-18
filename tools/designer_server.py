@@ -257,14 +257,18 @@ def fit_share(workers: int) -> int | None:
     """Each design worker's fit pool when `workers` designs run at once, or None to leave
     `filters.FIT_WORKERS` alone.
 
-    Every design's fitter sizes its pool to the whole machine less a core, so two at once
-    would put twice the processes on it. Split that between them instead. Only the time a fit
-    takes depends on its pool, never its answer (`filters._run_fits`). An explicit
-    `BEQ_FIT_WORKERS` is left as each design's own, as it always was.
+    One design's pool is the physical cores less one (`filters.FIT_WORKERS`): wider than that,
+    one design's fits gain nothing from SMT threads. Several designs at once are what can use
+    them, so they share the logical processors, less one, capped at that width each. Dividing
+    the physical cores instead gave two designs together the machine one already had, and
+    `--workers 2` gained nothing on an SMT machine. Only the time a fit takes depends on its
+    pool, never its answer. An explicit `BEQ_FIT_WORKERS` is left as each design's own, as
+    it always was.
     """
     if workers <= 1 or os.environ.get("BEQ_FIT_WORKERS"):
         return None
-    return max(1, filters.FIT_WORKERS // workers)
+    threads = os.process_cpu_count() or os.cpu_count() or 1
+    return max(1, min(filters.FIT_WORKERS, (threads - 1) // workers))
 
 
 class _DesignWorker:
@@ -589,8 +593,9 @@ def main() -> int:
         metavar="N",
         help=(
             f"how many designs to run at once, 1-{MAX_WORKERS} (default 1); more queue. "
-            "Reported on /health as `parallel`. Each design's fit pool gets its share of "
-            "the cores unless BEQ_FIT_WORKERS is set"
+            "Reported on /health as `parallel`. Concurrent designs share the logical "
+            "processors (SMT threads included), each at most one design's usual width, "
+            "unless BEQ_FIT_WORKERS is set"
         ),
     )
     parser.add_argument(
