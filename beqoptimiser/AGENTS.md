@@ -41,7 +41,8 @@ strings with additive feedback; internal SOS uses subtractive feedback.
 | File | Responsibility |
 | --- | --- |
 | `core.py` | Precision models, deterministic bounded search and independent validation |
-| `cache.py` | Public cached optimisation, immutable numerical results and seed lookup |
+| `parameters.py` | Parameter (freq/Q/gain) search for several (rate, precision) profiles at once, on the publication grid |
+| `cache.py` | Public cached optimisation (coefficients and parameters), immutable numerical results and seed lookup |
 | `cli.py` | Catalogue preparation, current-entry metadata, variant export and CLI |
 | `__init__.py` | Public library exports, including the cached `optimise` wrapper |
 | `data/seed.json.gz`, `data/seed-manifest.json` | Bundled numerical results and provenance |
@@ -53,6 +54,9 @@ dependency versions and execution architecture.
 Custom precision implementations without a complete explicit `cache_identity()` bypass caching.
 Corrupt entries are misses; unwritable storage must not prevent calculation or seed reuse.
 Use atomic writes and retain checksums, request identity and publication-policy validation.
+Parameter results are keyed by that identity plus `parameters.py`'s own hash and
+`PARAMETER_VERSION`, kept out of `implementation_identity()` so they never invalidate the seed;
+put parameter-search code in `parameters.py`, never `core.py`, for the same reason.
 
 Bundled seeds are reusable only in their recorded numerical environment. Changes to numerical
 code or settings invalidate them; do not relabel old results as compatible. Bump

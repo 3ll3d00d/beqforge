@@ -17,15 +17,24 @@ from pathlib import Path
 import numpy as np
 import scipy
 
-from . import core
+from . import core, parameters
 from .core import (
     NUMERICAL_VERSION,
+    PUBLISHED_OUTCOMES,
     FixedPoint,
     Float32,
     Precision,
     Result,
+    Section,
     Settings,
     stable,
+)
+from .parameters import (
+    PARAMETER_VERSION,
+    Fixed,
+    ParameterResult,
+    ParameterSettings,
+    ProfileError,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -263,10 +272,13 @@ class ResultCache:
         self.directory = Path(directory)
         self.use_seed = use_seed
 
-    def get(self, request) -> Result | None:
+    def get(self, request, restore=None):
+        """The cached result for a request, or None; `restore` checks an envelope against
+        its request (`_restore` for coefficient results, the default)."""
+        restore = restore or _restore
         key = request[0]
         try:
-            result = _restore(
+            result = restore(
                 json.loads((self.directory / f"{key}.json").read_text()), request
             )
             LOGGER.debug(f"Optimiser disk cache hit: {key}")
@@ -277,7 +289,7 @@ class ResultCache:
             try:
                 envelope = _bundled_entries().get(key)
                 if envelope is not None:
-                    result = _restore(envelope, request)
+                    result = restore(envelope, request)
                     LOGGER.debug(f"Optimiser bundled cache hit: {key}")
                     return result
             except (ValueError, KeyError, TypeError, OverflowError):
@@ -371,5 +383,171 @@ def optimise(
     result = core.optimise(reference, **kwargs)
     envelope = _envelope(request[0], result)
     _restore(envelope, request)
+    store._write(envelope)
+    return result
+
+
+PARAMETER_OUTCOMES = (
+    "within_margin",
+    "replacement",
+    "improvement",
+    "no_replacement",
+    "unresolved",
+)
+
+
+def _section_identity(section) -> dict:
+    return {"kind": type(section).__name__, **asdict(section)}
+
+
+def _parameter_request(sections, *, profiles, settings=None):
+    """(key, sections, profiles, settings), or None when a request cannot be cached: an
+    invalid one (left for `optimise_parameters` to refuse) or a precision without a complete
+    identity. Keyed by the coefficient optimiser's implementation identity plus this module's
+    own source and `PARAMETER_VERSION`, so the coefficient seed is unaffected."""
+    cfg = settings or ParameterSettings()
+    cascade = tuple(sections)
+    chosen = list(profiles)
+    if (
+        not cascade
+        or not chosen
+        or not all(isinstance(s, (Section, Fixed)) for s in cascade)
+    ):
+        return None
+    identities = []
+    for rate, precision in chosen:
+        identity = _precision_identity(precision)
+        if identity is None or rate not in parameters.RATES:
+            return None
+        identities.append({"rate": rate, "name": precision.name, "identity": identity})
+    try:
+        implementation = implementation_identity() | {
+            "parameters": hashlib.sha256(
+                files("beqoptimiser").joinpath("parameters.py").read_bytes()
+            ).hexdigest(),
+            "parameter_version": PARAMETER_VERSION,
+        }
+        payload = {
+            "sections": [_section_identity(s) for s in cascade],
+            "profiles": identities,
+            "settings": asdict(cfg),
+        }
+        key = _digest({"implementation": implementation, "request": payload})
+    except (OSError, TypeError, ValueError):
+        return None
+    return key, cascade, chosen, cfg
+
+
+def _parameter_envelope(key: str, result: ParameterResult) -> dict:
+    body = _encode(
+        asdict(result)
+        | {
+            "sections": None
+            if result.sections is None
+            else [_section_identity(s) for s in result.sections]
+        }
+    )
+    return {
+        "schema": CACHE_SCHEMA,
+        "kind": "parameters",
+        "key": key,
+        "result": body,
+        "checksum": _digest(body),
+    }
+
+
+def _decode_section(value: dict):
+    kind = value.pop("kind")
+    if kind == "Section":
+        return Section(**value)
+    if kind == "Fixed":
+        return Fixed(tuple((int(r), tuple(row)) for r, row in value["coefficients"]))
+    raise ValueError(f"unknown section kind {kind!r}")
+
+
+def _restore_parameters(envelope: dict, request) -> ParameterResult:
+    key, cascade, chosen, cfg = request
+    if (
+        envelope["schema"] != CACHE_SCHEMA
+        or envelope.get("kind") != "parameters"
+        or envelope["key"] != key
+        or envelope["checksum"] != _digest(envelope["result"])
+    ):
+        raise ValueError("invalid cache envelope")
+    body = _decode(envelope["result"])
+    body["band_hz"] = tuple(body["band_hz"])
+    body["profiles"] = tuple(ProfileError(**p) for p in body["profiles"])
+    if body["sections"] is not None:
+        body["sections"] = tuple(_decode_section(dict(s)) for s in body["sections"])
+    result = ParameterResult(**body)
+    expected = [(rate, p.name) for rate, p in chosen]
+    if (
+        result.version != PARAMETER_VERSION
+        or result.outcome not in PARAMETER_OUTCOMES
+        or result.margin_db != cfg.margin_db
+        or result.band_hz != cfg.band_hz
+        or [(p.rate, p.precision) for p in result.profiles]
+        != list(dict.fromkeys(expected))
+        or np.isnan(result.original_error_db)
+        or result.original_error_db < 0
+        or result.evaluations < 0
+    ):
+        raise ValueError("cache result does not match request")
+    if result.outcome in PUBLISHED_OUTCOMES:
+        if (
+            result.sections is None
+            or len(result.sections) != len(cascade)
+            or result.candidate_error_db is None
+            or not np.isfinite(result.candidate_error_db)
+            or result.original_error_db <= cfg.margin_db
+        ):
+            raise ValueError("cached replacement violates publication policy")
+        for old, new in zip(cascade, result.sections, strict=True):
+            if type(old) is not type(new) or (isinstance(old, Fixed) and old != new):
+                raise ValueError("cached replacement changes the cascade's structure")
+            if isinstance(new, Section) and (
+                new.type != old.type
+                or round(new.freq, 2) != new.freq
+                or round(new.q, 4) != new.q
+                or round(new.gain, 2) != new.gain
+            ):
+                raise ValueError("cached replacement is off the publication grid")
+        if result.outcome == "replacement" and (
+            result.candidate_error_db > cfg.margin_db
+        ):
+            raise ValueError("cached replacement violates publication policy")
+        if (
+            result.outcome == "improvement"
+            and result.candidate_error_db
+            >= result.original_error_db - cfg.numerical_tolerance_db
+        ):
+            raise ValueError("cached improvement violates publication policy")
+    elif result.sections is not None:
+        raise ValueError("unexpected cached replacement")
+    return result
+
+
+def optimise_parameters(
+    sections,
+    *,
+    profiles,
+    settings: ParameterSettings | None = None,
+    cache: ResultCache | bool | None = None,
+) -> ParameterResult:
+    """`parameters.optimise_parameters` with automatic cache reuse; use cache=False for a
+    fresh calculation."""
+    kwargs = {"profiles": profiles, "settings": settings}
+    if cache is False or os.environ.get("BEQOPTIMISER_CACHE") == "0":
+        return parameters.optimise_parameters(sections, **kwargs)
+    request = _parameter_request(sections, **kwargs)
+    if request is None:
+        return parameters.optimise_parameters(sections, **kwargs)
+    store = cache if isinstance(cache, ResultCache) else ResultCache()
+    result = store.get(request, _restore_parameters)
+    if result is not None:
+        return result
+    result = parameters.optimise_parameters(sections, **kwargs)
+    envelope = _parameter_envelope(request[0], result)
+    _restore_parameters(envelope, request)
     store._write(envelope)
     return result

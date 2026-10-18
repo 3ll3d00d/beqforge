@@ -67,6 +67,56 @@ using two independent dense grids with local extremum refinement, not certified 
 bounds. Magnitude matching can change phase/transients; there is no phase-preservation claim.
 No audio means no soundtrack clipping prediction; the original volume offset is preserved.
 
+## Parameters for several devices
+
+`optimise` returns coefficients for one rate and precision. `optimise_parameters` searches each
+section's frequency, Q and gain instead, for several device profiles at once. A BEQ is
+published and loaded as parameters, so the result needs no new catalogue schema: beqdesigner,
+the catalogue and ezbeq carry it as they are, and every device realises it from the same numbers.
+
+```python
+from beqoptimiser import FixedPoint, Float32, Section, optimise_parameters
+
+result = optimise_parameters(
+    [Section("LowShelf", 15, 0.9, 4)] * 3 + [Section("PeakingEQ", 5, 6, 6)],
+    profiles=[(96000, Float32()), (48000, FixedPoint(5, 23))],
+)
+for profile in result.profiles:
+    print(profile.rate, profile.precision, profile.original_error_db, profile.candidate_error_db)
+if result.sections is not None:
+    sections = result.sections  # the same types, in order, with new freq/q/gain
+```
+
+* **Reference and realisation.** The reference is each authored section's ideal float64 RBJ
+  response at the profile's rate. A profile realises the candidate as RBJ coefficients at its
+  rate, published as 17-digit decimals and stored at its precision. The original is the
+  authored parameters on the publication grid, realised the same way.
+* **The grid.** Frequency to 0.01 Hz, Q to 0.0001, gain to 0.01 dB: what beqdesigner shows and
+  the exports keep. beqdesigner, `beq_common.biquad` and ezbeq compute identical coefficients
+  on this grid. Off it they do not, because ezbeq rounds Q and gain before computing, so the
+  search never leaves it. A shelf's Q is searched; S is only another way to display it.
+* **Bounds.** `ParameterSettings` limits each parameter to ±1% frequency, ±2% Q and ±0.1 dB gain
+  about the authored value by default, so the result is still the author's filter.
+* **Several profiles.** The search minimises the worst matching-band error over the profiles. It
+  refuses any change that makes a profile worse than both its original error and the margin,
+  so helping one device cannot quietly cost another. Each profile's error before and after,
+  and the candidate's out-of-band `guard_error_db`, are reported.
+* **Structure.** Section count, order and types are kept. Identical adjacent sections (a
+  repeated shelf) move together and stay identical. `Fixed` holds a biquad the search may
+  not change, as SOS for each rate (a pass filter, a gain stage); it counts in the response
+  and is stored at each profile's precision.
+* **Outcomes** follow `optimise`, judged on the worst profile: `within_margin` (no search),
+  `replacement` (every profile meets the margin), `improvement` (the worst is strictly better),
+  `no_replacement` and `unresolved`. A cascade with nothing searchable that needs a search is
+  `no_replacement`.
+* **Search.** A deterministic compass search on the integer grid, with steps halving from half
+  each bound to one grid unit, then every ±1 combination of each section's three parameters
+  until nothing improves; `max_evaluations` bounds it. Like `optimise`, it is local.
+
+Results are cached like `optimise`'s. The key adds `beqoptimiser/parameters.py` and
+`PARAMETER_VERSION` to the coefficient optimiser's identity, so the bundled seed is unaffected.
+Bump `PARAMETER_VERSION` when a change alters a parameter result.
+
 ## Catalogue adapter and CLI
 
 ```python

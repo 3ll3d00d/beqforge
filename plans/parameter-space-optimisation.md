@@ -1,6 +1,6 @@
 # Optimising a filter's parameters for several device profiles at once
 
-**Status: design, not built.** A request from beqdesigner (October 2026), for a feature in its main window: a filter
+**Status: implemented (`beqoptimiser.optimise_parameters`, 18 October 2026); released with the next tag. See [Outcome](#outcome-18-october-2026).** Originally: A request from beqdesigner (October 2026), for a feature in its main window: a filter
 designer picks one or more device profiles, sees what each does to the filter, and asks for the filter to be optimised
 before it is published. The person who owns both projects decided that the search belongs here, in `beqoptimiser`, and
 beqdesigner only provides the interface. Parameter search is already listed as a follow-up in
@@ -73,3 +73,54 @@ guard (out-of-band) error, with the numerical version and settings for provenanc
   objective protecting each profile, the parameter grid and bounds, fixed non-searchable sections, and cache identity.
 * A short benchmark against `optimise()` on the catalogue report's worst float32 cases, recorded here.
 * Released in a `beqforge` version beqdesigner can pin.
+
+## Outcome (18 October 2026)
+
+`optimise_parameters(sections, *, profiles, settings=None, cache=None)` in
+`beqoptimiser/parameters.py`, cached through `beqoptimiser/cache.py`, exported from `beqoptimiser`,
+documented in [docs/optimiser.md](../docs/optimiser.md#parameters-for-several-devices). The
+interface is as proposed, with three additions: `ParameterSettings` (margin, band, the bounds,
+`max_evaluations`) rather than `Settings`; `Fixed` for sections the search may not change, given
+as SOS per rate; and identical adjacent sections (a repeated shelf) moving together, so a shelf ×3
+stays one.
+
+**Open points, decided.**
+
+* **Whose RBJ.** beqdesigner (`model/iir.py`), `beq_common.biquad` and ezbeq (`ezbeq/iir.py`)
+  agree bit for bit on the publication grid: 20,000 random peaks and shelves at 48 and 96 kHz,
+  maximum coefficient difference 0. beqdesigner's `BiquadWithQ.__init__`, the three
+  `_compute_coeffs` and `q_to_s`/`s_to_q` are AST-identical to `beq_common`'s. Off the grid,
+  every case differed: ezbeq rounds Q to 4 and gain to 3 decimals before computing, the others
+  do not (`w0` uses the unrounded frequency in all three). So the search never leaves the grid,
+  and `Section.sos` models every consumer. A shelf's Q is searched, as stored.
+* **Search method.** Deterministic compass search on the integer grid, steps halving from half
+  each bound to one unit, then every ±1 combination of each section's three parameters until
+  nothing improves; only changed sections are re-evaluated. Joint objective: the worst
+  profile's matching-band error, with any step refused that makes a profile worse than both its
+  original error and the margin. The original is the authored parameters on the grid.
+* **Whether it ever helps.** Yes. `tools/experiments/parameter_benchmark.py` on the committed
+  report's 25 worst distinct cascades at each rate (catalogue `5ea769f`, the report's snapshot,
+  SHA-256 checked), float32 storage, both searches uncached from the authored parameters:
+
+  | Rate | Original | Within margin (coefficient / parameter) | Median after | Time per entry |
+  | --- | --- | --- | --- | --- |
+  | 48 kHz | 2.5-5.7 dB | 20 / 21 | 0.11 / 0.21 dB | 1.5-11 s / 0.2-4 s |
+  | 96 kHz | 9.8-16.6 dB | 16 / 10 | 0.45 / 0.69 dB | 1.2-14 s / 0.4-4 s |
+
+  Both published (replacement or improvement) for all 50; all 50 were on the grid. Neither
+  dominates: parameter search met the margin where coefficient search only improved (Predator
+  96 kHz 0.29 vs 2.12 dB, Unbreakable 48 kHz 0.21 vs 0.69 dB) and the reverse (Listening 96 kHz
+  1.52 vs 0.08 dB). At 96 kHz the coefficient grid is finer than a ±1%/2%/0.1 dB parameter
+  neighbourhood can reach, which is where it falls behind. Its result needs no published
+  coefficients and reaches every consumer as it is.
+
+**Checks.** `tests/test_optimiser_parameters.py` (19): both rates and precisions, the joint
+objective's per-profile guarantee, grid and bounds (and zero bounds giving `no_replacement`),
+fixed sections kept and counted, nothing searchable, off-grid authored parameters, repeated
+shelves, invalid requests, a cache hit, the key covering sections/profiles/settings, an
+off-grid tampered entry being a miss, and the coefficient seed's identity unchanged. The
+parameter cache key adds `parameters.py`'s hash and `PARAMETER_VERSION` to
+`implementation_identity()` without changing it, so the bundled seed still loads.
+
+**Not done.** Phase is not considered, as for `optimise`. Bounds are not derived from what a
+listener would notice; ±1%/2%/0.1 dB is the proposal's default, configurable.

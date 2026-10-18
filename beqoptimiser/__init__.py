@@ -8,6 +8,9 @@ from .cache import (
 from .cache import (
     optimise as optimise,
 )
+from .cache import (
+    optimise_parameters as optimise_parameters,
+)
 from .core import (
     FixedPoint as FixedPoint,
 )
@@ -31,4 +34,16 @@ from .core import (
 )
 from .core import (
     stable as stable,
+)
+from .parameters import (
+    Fixed as Fixed,
+)
+from .parameters import (
+    ParameterResult as ParameterResult,
+)
+from .parameters import (
+    ParameterSettings as ParameterSettings,
+)
+from .parameters import (
+    ProfileError as ProfileError,
 )
