@@ -5,13 +5,14 @@ order and plain wording, for a reader who has only the designer response. The re
 otherwise carried the basis for a correction scattered through 2,000 characters of
 limitation notes and a `PipelineParams` repr, which is complete and unreadable.
 
-Three parts, each a short paragraph:
+Its parts, each a short paragraph:
 
 * **found** — the reference the deficit is measured against, where the programme stops
   tracking it, where the attenuation stops being level-invariant, and which channels show a
   steep knee. Present for every run that got as far as a diagnosis, including declines.
 * **correction** — the chosen candidate: how much it was asked for, how much the evidence
   licensed, the cascade, and the corrected low end against the reference, before and after.
+* **fit** — how closely the filter, as the device plays it, delivers that licensed boost.
 * **alternatives** — every other candidate, and why it lost.
 """
 
@@ -173,6 +174,34 @@ def correction(candidate: Candidate, report: Report | None = None) -> str:
         rows.append(row)
     parts.append("frequency by frequency, dB against the reference: " + ", ".join(rows))
     return "; ".join(parts)
+
+
+def fit(candidate: Candidate) -> str:
+    """How closely the filter, as the device plays it, delivers the boost it was asked for.
+
+    The target is what the content supports, not what the low end is missing — `correction`
+    says how much of that the content supports. So this says the filter does what was asked,
+    never that the ask was right.
+    """
+    tf = candidate.target_fit
+    if tf is None:
+        return "fit: not measured"
+    band = f"{tf.band_hz[0]:.1f}-{tf.band_hz[1]:.1f} Hz"
+    worst = (
+        f"worst {tf.max_error_db:.1f} dB {'over' if tf.over else 'short of'} it at "
+        f"{_hz(tf.at_hz)}"
+    )
+    if math.isnan(tf.rms_db):
+        lead = f"fit: the target asks for no boost over {band}; {worst}"
+    else:
+        lead = (
+            f"fit: as the device plays it, the filter matches the boost the content supports "
+            f"to {tf.rms_db:.1f} dB RMS over {band}, with {tf.within_tolerance:.0%} of that "
+            f"boost within ±{tf.tolerance_db:g} dB; {worst}"
+        )
+    return (
+        f"{lead} — a match to the target, not a measure of whether the target is right"
+    )
 
 
 def clipping(candidate: Candidate, from_request: bool) -> str:

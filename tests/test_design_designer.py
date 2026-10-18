@@ -22,6 +22,7 @@ from beqforge.designer import (
     DesignCandidate,
     DesignRequest,
     DesignResponse,
+    _candidate_to_json,
     _decline_for_blockers,
     _decline_for_no_passing_candidate,
     _ndarray_from_json,
@@ -34,7 +35,14 @@ from beqforge.designer import (
 )
 from beqforge.filters import Realisation
 from beqforge.material import PlaybackParams
-from beqforge.pipeline import Candidate, FitStats, PipelineParams, Report, Timings
+from beqforge.pipeline import (
+    Candidate,
+    FitStats,
+    PipelineParams,
+    Report,
+    TargetFit,
+    Timings,
+)
 from beqforge.verify import Correction
 
 FREQS = np.logspace(np.log10(4.0), np.log10(60.0), 240)
@@ -75,6 +83,17 @@ def _headroom(offset_db: float, unavailable_reason: str | None = None):
     )
 
 
+_FIT = TargetFit(
+    band_hz=(5.0, 212.0),
+    max_error_db=0.12,
+    at_hz=9.0,
+    over=False,
+    rms_db=0.05,
+    within_tolerance=0.96,
+    tolerance_db=0.5,
+)
+
+
 def _candidate(
     label: str = "flatten",
     *,
@@ -83,6 +102,7 @@ def _candidate(
     offset_db: float = -1.2,
     fit_error_db: float = 0.3,
     method: str = "fitted",
+    target_fit: TargetFit | None = _FIT,
 ) -> Candidate:
     return Candidate(
         label=label,
@@ -94,6 +114,7 @@ def _candidate(
         method=method,
         headroom=_headroom(offset_db),
         correction_support_score=confidence,
+        target_fit=target_fit,
     )
 
 
@@ -226,16 +247,46 @@ def test_response_to_json_decline_omits_candidates() -> None:
 
 
 def test_to_design_candidate_maps_the_expected_fields() -> None:
-    candidate = _candidate(confidence=0.62, offset_db=-3.4, fit_error_db=0.12)
+    candidate = _candidate(confidence=0.62, offset_db=-3.4, fit_error_db=0.3)
     params = PipelineParams()
     mapped = _to_design_candidate(candidate, params, report_gain_reduction=True)
     assert mapped.confidence == pytest.approx(0.62)
     assert mapped.mv_adjust_db == pytest.approx(candidate.mv_adjust_db)
     assert mapped.method == "fitted"
     assert mapped.gain_reduction_db == pytest.approx(-3.4)
-    assert mapped.residual_db == pytest.approx(0.12)
-    assert mapped.residual_band_hz == params.residual_band_hz
     assert mapped.commentary["strategy"] == "flatten"
+
+
+def test_to_design_candidate_reports_the_published_fit_not_the_fit_objective() -> None:
+    """TODO 14: `residual_db` is what plays against its target, over the band actually
+    scored — not `fit_error_db` (0.3 here) over the nominal `residual_band_hz`."""
+    mapped = _to_design_candidate(
+        _candidate(fit_error_db=0.3), PipelineParams(), report_gain_reduction=False
+    )
+    assert mapped.residual_db == pytest.approx(0.12)
+    assert mapped.residual_band_hz == (5.0, 212.0)
+    assert mapped.residual_at_hz == pytest.approx(9.0)
+    assert mapped.residual_direction == "under"
+    assert mapped.residual_rms_db == pytest.approx(0.05)
+    assert mapped.residual_within_tolerance == pytest.approx(0.96)
+    assert mapped.residual_tolerance_db == pytest.approx(0.5)
+
+
+def test_to_design_candidate_omits_the_weighted_fit_when_no_boost_was_asked_for() -> (
+    None
+):
+    fit = dataclasses.replace(
+        _FIT, rms_db=math.nan, within_tolerance=math.nan, over=True
+    )
+    mapped = _to_design_candidate(
+        _candidate(target_fit=fit), PipelineParams(), report_gain_reduction=False
+    )
+    assert mapped.residual_db == pytest.approx(0.12)
+    assert mapped.residual_direction == "over"
+    assert mapped.residual_rms_db is None
+    assert mapped.residual_within_tolerance is None
+    assert mapped.residual_tolerance_db is None
+    validate_response(DesignResponse(contract_version="1.3", candidates=[mapped]))
 
 
 def test_to_design_candidate_clamps_nan_confidence_to_zero() -> None:
@@ -264,13 +315,18 @@ def test_to_design_candidate_omits_gain_reduction_when_unavailable() -> None:
     assert mapped.gain_reduction_db is None
 
 
-def test_to_design_candidate_leaves_residual_none_without_a_finite_error() -> None:
-    candidate = _candidate(fit_error_db=math.nan)
-    mapped = _to_design_candidate(
-        candidate, PipelineParams(), report_gain_reduction=False
-    )
-    assert mapped.residual_db is None
-    assert mapped.residual_band_hz is None
+def test_to_design_candidate_leaves_residual_none_without_a_measured_fit() -> None:
+    for fit in (None, dataclasses.replace(_FIT, max_error_db=math.nan)):
+        mapped = _to_design_candidate(
+            _candidate(target_fit=fit), PipelineParams(), report_gain_reduction=False
+        )
+        assert mapped.residual_db is None
+        assert mapped.residual_band_hz is None
+        assert mapped.residual_at_hz is None
+        assert mapped.residual_direction is None
+        assert mapped.residual_rms_db is None
+        assert mapped.residual_within_tolerance is None
+        assert mapped.residual_tolerance_db is None
 
 
 def test_to_design_candidate_output_satisfies_the_response_validator() -> None:
@@ -374,6 +430,71 @@ def test_validate_response_rejects_a_positive_gain_reduction() -> None:
                 candidates=[_valid_candidate(gain_reduction_db=1.0)],
             )
         )
+
+
+_MEASURED_FIT = dict(
+    residual_db=1.1,
+    residual_band_hz=(5.0, 212.0),
+    residual_at_hz=9.0,
+    residual_direction="under",
+    residual_rms_db=0.3,
+    residual_within_tolerance=0.96,
+    residual_tolerance_db=0.5,
+)
+
+
+def test_validate_response_accepts_a_measured_fit() -> None:
+    validate_response(
+        DesignResponse(
+            contract_version="1.3", candidates=[_valid_candidate(**_MEASURED_FIT)]
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"residual_db": None, "residual_band_hz": None}, "without residual_db"),
+        ({"residual_at_hz": None}, "come together"),
+        ({"residual_direction": "sideways"}, "'over' or 'under'"),
+        ({"residual_at_hz": 300.0}, "outside residual_band_hz"),
+        ({"residual_rms_db": 1.2}, r"residual_rms_db .* must be in"),
+        ({"residual_rms_db": -0.1}, r"residual_rms_db .* must be in"),
+        ({"residual_tolerance_db": None}, "come together"),
+        ({"residual_rms_db": None}, "share one weighting"),
+        ({"residual_within_tolerance": 1.5}, r"must be in \[0, 1\]"),
+        ({"residual_tolerance_db": 0.0}, "must be > 0"),
+        ({"residual_rms_db": math.nan}, "must be finite"),
+    ],
+)
+def test_validate_response_rejects_an_inconsistent_fit(overrides, match) -> None:
+    with pytest.raises(ContractViolation, match=match):
+        validate_response(
+            DesignResponse(
+                contract_version="1.3",
+                candidates=[_valid_candidate(**{**_MEASURED_FIT, **overrides})],
+            )
+        )
+
+
+def test_response_to_json_carries_the_fit_only_when_measured() -> None:
+    measured = _candidate_to_json(_valid_candidate(**_MEASURED_FIT))
+    assert measured["residual_at_hz"] == 9.0
+    assert measured["residual_direction"] == "under"
+    assert measured["residual_rms_db"] == 0.3
+    assert measured["residual_within_tolerance"] == 0.96
+    assert measured["residual_tolerance_db"] == 0.5
+    unmeasured = _candidate_to_json(_valid_candidate())
+    assert (
+        not {
+            "residual_at_hz",
+            "residual_direction",
+            "residual_rms_db",
+            "residual_within_tolerance",
+            "residual_tolerance_db",
+        }
+        & unmeasured.keys()
+    )
 
 
 def test_validate_response_rejects_a_non_publishable_biquad_type() -> None:
@@ -561,7 +682,13 @@ def test_an_accepted_candidate_names_the_build_that_made_it(monkeypatch) -> None
     commentary = design(_small_request()).candidates[0].commentary
     assert commentary["beqforge_revision"] == "abc123+src:def456"
     # the plain-language account leads, before the notes and parameters that qualify it
-    assert list(commentary)[:4] == ["found", "correction", "clipping", "alternatives"]
+    assert list(commentary)[:5] == [
+        "found",
+        "correction",
+        "clipping",
+        "fit",
+        "alternatives",
+    ]
     assert commentary["strategy"] == "flatten"  # added to, not replaced
     assert "run_record" not in commentary  # nothing asked for one
 

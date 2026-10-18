@@ -350,6 +350,12 @@ def _candidate(candidate) -> dict[str, Any]:
             key: (_num(value) if isinstance(value, float) else value)
             for key, value in asdict(candidate.evidence_excess).items()
         },
+        "target_fit": None
+        if candidate.target_fit is None
+        else {
+            key: (_num(value) if isinstance(value, float) else value)
+            for key, value in asdict(candidate.target_fit).items()
+        },
         "preference_shaping": "plateau-relative target; original source spectrum unknown",
         "correction": {
             "freqs": _arr(correction.freqs),

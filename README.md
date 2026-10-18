@@ -224,10 +224,19 @@ diagnosis, in this order:
   carried `bass_management`, otherwise the assumed LR4 80 Hz model, and it says which).
   Clipping is reported, never used to reject a filter. The typed `gain_reduction_db` field is
   filled only when the request carries `bass_management`, as the contract requires.
+* `fit` — how closely the filter, as the device plays it, delivers the boost the content
+  supports: the typical error, the share of that boost within ±0.5 dB, and the worst miss,
+  where and which way. It is a match to that target, not a verdict on whether the target is
+  right; `correction` says how much of what is missing that target restores.
 * `alternatives` — why each other candidate was rejected or not chosen.
 
 The commentary then continues with `target_notes`, `verdict_notes` (what the checks themselves
-noticed), `effective_params` and `beqforge_revision` (which build answered). The raw
+noticed), `effective_params` and `beqforge_revision` (which build answered). The same fit is
+in typed fields (contract 1.3): `residual_db` is the worst absolute error over
+`residual_band_hz`, the band the fit was actually scored on, measured on the published filter
+as the device plays it; `residual_at_hz` and `residual_direction` say where and which way;
+`residual_rms_db` and `residual_within_tolerance` (against `residual_tolerance_db`) weight
+each frequency by the boost asked for there, as `confidence` does. The raw
 recovered and shaping fractions are kept in the run record, not the response. A decline's `decline_message` gives the reason first, then `| found: …` with
 the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;

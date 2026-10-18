@@ -307,6 +307,10 @@ class PipelineParams:
     because `_fit_all` now has to guarantee it contains every derived placement band, and a
     constant it cannot see is one it cannot check."""
 
+    fit_tolerance_db: float = 0.5
+    """The yardstick `TargetFit.within_tolerance` is stated against. Reporting only: it decides
+    nothing, and is reported beside the share it produced so a reader never has to assume it."""
+
     verify_floor_hz: float = 5.0
     """Lowest frequency any result is judged at; the tracking floor may raise it.
 
@@ -443,6 +447,83 @@ class Candidate:
 
     evidence_excess: "EvidenceExcess | None" = None
     """How far the published cascade boosts past what contrast licenses. Record-only."""
+
+    target_fit: "TargetFit | None" = None
+    """How closely the cascade that will play matches its target. Reported, never gated."""
+
+
+@dataclass(frozen=True, slots=True)
+class TargetFit:
+    """The published, quantised cascade against the target it was fitted to (TODO 14).
+
+    What the designer response reports as `residual_db` and its 1.3 companions. Not
+    `fit_error_db`, which is the fitter's objective: the larger of target error and
+    quantisation change, or pure target error after pruning, over the optimiser's raw
+    parameters. This is one quantity on the transfer that plays — canonical rounding, then the
+    device's coefficients at its own rate — over the band the fit was scored on, on the design
+    grid. A small error says the cascade does what it was asked; it does not say the target
+    was right ("Never trust a residual").
+    """
+
+    band_hz: tuple[float, float]
+    """The band the fit was scored on and this was measured over."""
+    max_error_db: float
+    """Largest absolute error inside `band_hz`."""
+    at_hz: float
+    over: bool
+    """True when the cascade boosts more than the target at `at_hz`."""
+    rms_db: float
+    """RMS error weighted by the boost the target asks for, the weighting the evidence score
+    uses; NaN when the target asks for no boost inside `band_hz`."""
+    within_tolerance: float
+    """Share of that requested boost within `tolerance_db` of the target; NaN as `rms_db`."""
+    tolerance_db: float
+
+
+def target_fit(
+    filters: list[BiquadSpec],
+    target_db: np.ndarray,
+    realisation: Realisation,
+    band_hz: tuple[float, float],
+    tolerance_db: float,
+) -> TargetFit | None:
+    """Measure `TargetFit`; `None` when unstable (no steady-state gain) or nothing to measure.
+
+    `filters` are the published ones. Exclusions are not masked: the target asks for zero
+    correction there and the fit is scored there too.
+    """
+    if filters and unstable_sections(filters, realisation):
+        return None
+    inside = (DESIGN_GRID >= band_hz[0]) & (DESIGN_GRID <= band_hz[1])
+    if not inside.any() or not np.isfinite(target_db[inside]).all():
+        return None
+    gain = (
+        magnitude_db(
+            realisation.quantise(biquad_sos(filters, realisation.fs)),
+            DESIGN_GRID,
+            realisation.fs,
+        )
+        if filters
+        else np.zeros_like(DESIGN_GRID)
+    )
+    error = (gain - target_db)[inside]
+    worst = int(np.argmax(np.abs(error)))
+    weight = np.maximum(target_db[inside], 0.0)
+    total = float(weight.sum())
+    if total > 0:
+        rms = math.sqrt(float(np.sum(weight * error**2)) / total)
+        within = float(np.sum(weight[np.abs(error) <= tolerance_db])) / total
+    else:
+        rms = within = math.nan
+    return TargetFit(
+        band_hz=(float(band_hz[0]), float(band_hz[1])),
+        max_error_db=float(abs(error[worst])),
+        at_hz=float(DESIGN_GRID[inside][worst]),
+        over=bool(error[worst] > 0),
+        rms_db=rms,
+        within_tolerance=within,
+        tolerance_db=tolerance_db,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1361,6 +1442,28 @@ def counterfactual_target(
     return target
 
 
+def _placements(
+    proposals: list[Proposal], params: PipelineParams
+) -> list[tuple[float, float]]:
+    """Each target's placement span, from its active correction."""
+    return [
+        correction_band_hz(p.target_db, DESIGN_GRID, params.lowest_frequency_hz)
+        for p in proposals
+    ]
+
+
+def _fit_band_hz(
+    placements: list[tuple[float, float]], params: PipelineParams
+) -> tuple[float, float]:
+    """The band `_fit_all` scores every fit on: `residual_band_hz`, widened to cover every
+    frequency at which a section can be placed. Shared, so it is also the band each fitted
+    candidate's `TargetFit` is measured over."""
+    return (
+        params.residual_band_hz[0],
+        max(params.residual_band_hz[1], *(high for _, high in placements)),
+    )
+
+
 def _fit_all(
     proposals: list[Proposal], params: PipelineParams
 ) -> list[tuple[list[BiquadSpec], float]]:
@@ -1369,12 +1472,7 @@ def _fit_all(
     Derive each target's placement span from its active correction, expand the
     scored band to cover those spans, and return the fitted cascades in order.
     """
-    placements = [
-        correction_band_hz(p.target_db, DESIGN_GRID, params.lowest_frequency_hz)
-        for p in proposals
-    ]
-    # Score every frequency at which a section can be placed.
-    score_high = max(params.residual_band_hz[1], *(high for _, high in placements))
+    placements = _placements(proposals, params)
     return fit_minimal_biquads_all(
         [
             FitRequest(p.target_db, placement, p.label)
@@ -1384,7 +1482,7 @@ def _fit_all(
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
-        band_hz=(params.residual_band_hz[0], score_high),
+        band_hz=_fit_band_hz(placements, params),
         max_gain_db=params.max_gain_db,
         realisation=params.realisation,
         seeds=params.fit_seeds,
@@ -1741,6 +1839,13 @@ def run(
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
         results = _fit_all(needs_fitting, params) if needs_fitting else []
+    # a proposal that arrives fitted is `parametric`'s, which `design` scored on its own
+    # `residual_band_hz` — the same setting, by `parametric_params`
+    shared_band = (
+        _fit_band_hz(_placements(needs_fitting, params), params)
+        if needs_fitting
+        else None
+    )
     fitted = dict(
         zip(
             [p.label for p in needs_fitting],
@@ -1787,6 +1892,19 @@ def run(
                     float(analysed.envelopes.freqs[-1]),
                 ),
                 params.exclude_bands_hz,
+            ),
+            target_fit=(
+                None
+                if proposal.target_db is None
+                else target_fit(
+                    candidates[-1].filters,
+                    proposal.target_db,
+                    params.realisation,
+                    params.residual_band_hz
+                    if proposal.filters is not None
+                    else shared_band,
+                    params.fit_tolerance_db,
+                )
             ),
         )
 

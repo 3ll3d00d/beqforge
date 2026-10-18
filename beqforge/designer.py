@@ -45,7 +45,7 @@ from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.2"
+CONTRACT_VERSION = "1.3"
 """The version this module implements. Responses echo the request's own version instead."""
 
 Coverage = Literal["complete_programme", "excerpt"]
@@ -108,6 +108,15 @@ class DesignCandidate:
     channel_scope: ChannelScope | None = None
     rejection_reasons: list[str] | None = None
     """1.1: non-empty on every entry of `DesignResponse.rejected`, None on every candidate."""
+    residual_at_hz: float | None = None
+    """1.3: where the error `residual_db` reports is, inside `residual_band_hz`."""
+    residual_direction: Literal["over", "under"] | None = None
+    """1.3: whether the cascade boosts more ("over") or less than the target there."""
+    residual_rms_db: float | None = None
+    """1.3: RMS error weighted by the target's requested boost; None when it requests none."""
+    residual_within_tolerance: float | None = None
+    """1.3: share of the requested boost within `residual_tolerance_db` of the target."""
+    residual_tolerance_db: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,11 +189,13 @@ def _to_design_candidate(
         if math.isfinite(offset):
             gain_reduction_db = min(offset, 0.0)
 
-    residual_db: float | None = candidate.fit_error_db
-    residual_band_hz: tuple[float, float] | None = params.residual_band_hz
-    if residual_db is None or not math.isfinite(residual_db):
-        residual_db = None
-        residual_band_hz = None
+    # what plays against what it was asked for (TODO 14), not the fitter's objective
+    # `fit_error_db`, which mixes in quantisation change and was reported against a band
+    # narrower than the one `_fit_all` scored
+    fit = candidate.target_fit
+    if fit is not None and not math.isfinite(fit.max_error_db):
+        fit = None
+    weighted = fit is not None and math.isfinite(fit.rms_db)
 
     commentary = {"strategy": candidate.label}
     if candidate.effective_params:
@@ -209,9 +220,14 @@ def _to_design_candidate(
         mv_adjust_db=candidate.mv_adjust_db,
         method=candidate.method or "non_parametric",
         gain_reduction_db=gain_reduction_db,
-        residual_db=residual_db,
-        residual_band_hz=residual_band_hz,
+        residual_db=None if fit is None else fit.max_error_db,
+        residual_band_hz=None if fit is None else fit.band_hz,
         commentary=commentary,
+        residual_at_hz=None if fit is None else fit.at_hz,
+        residual_direction=None if fit is None else ("over" if fit.over else "under"),
+        residual_rms_db=fit.rms_db if weighted else None,
+        residual_within_tolerance=fit.within_tolerance if weighted else None,
+        residual_tolerance_db=fit.tolerance_db if weighted else None,
     )
 
 
@@ -334,6 +350,7 @@ def design(
         "found": explain.found(report),
         "correction": explain.correction(accepted, report),
         "clipping": explain.clipping(accepted, from_request=report_gain_reduction),
+        "fit": explain.fit(accepted),
         "alternatives": explain.alternatives(report, accepted),
     }
     candidate = dataclasses.replace(
@@ -372,6 +389,7 @@ def _rejected(
             commentary={
                 "correction": explain.correction(c, report),
                 "clipping": explain.clipping(c, from_request=report_gain_reduction),
+                "fit": explain.fit(c),
                 **(mapped.commentary or {}),
             },
             rejection_reasons=[f for f in c.verdict.failures if f],
@@ -473,7 +491,23 @@ def _candidate_to_json(c: DesignCandidate) -> dict:
             if c.rejection_reasons is not None
             else {}
         ),
+        # 1.3, likewise only where measured
+        **{
+            name: getattr(c, name)
+            for name in _FIT_FIELDS
+            if getattr(c, name) is not None
+        },
     }
+
+
+_FIT_FIELDS = (
+    "residual_at_hz",
+    "residual_direction",
+    "residual_rms_db",
+    "residual_within_tolerance",
+    "residual_tolerance_db",
+)
+"""1.3's companions to `residual_db`, in wire order."""
 
 
 def response_to_json(response: DesignResponse) -> dict:
@@ -600,6 +634,7 @@ def _validate_candidate(
         )
     for i, spec in enumerate(candidate.filters):
         _validate_biquad_spec(spec, i, index, where)
+    _validate_fit(candidate, f"{where}[{index}]")
     if candidate.commentary is not None:
         if not isinstance(candidate.commentary, dict) or not all(
             isinstance(k, str) and isinstance(v, str)
@@ -608,6 +643,62 @@ def _validate_candidate(
             raise ContractViolation(
                 f"{where}[{index}].commentary must be a dict[str, str]"
             )
+
+
+def _validate_fit(candidate: DesignCandidate, prefix: str) -> None:
+    """1.3: `residual_db`'s companions are present only with it, and consistent with it."""
+    present = {name: getattr(candidate, name) for name in _FIT_FIELDS}
+    for name, value in present.items():
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ContractViolation(f"{prefix}.{name} must be finite, got {value}")
+    residual = candidate.residual_db
+    if residual is None:
+        orphans = [name for name, value in present.items() if value is not None]
+        if orphans:
+            raise ContractViolation(
+                f"{prefix} has {', '.join(orphans)} without residual_db"
+            )
+        return
+    if (candidate.residual_at_hz is None) != (candidate.residual_direction is None):
+        raise ContractViolation(
+            f"{prefix}.residual_at_hz and residual_direction come together or not at all"
+        )
+    if candidate.residual_direction not in (None, "over", "under"):
+        raise ContractViolation(
+            f"{prefix}.residual_direction must be 'over' or 'under', "
+            f"got {candidate.residual_direction!r}"
+        )
+    band = candidate.residual_band_hz
+    at = candidate.residual_at_hz
+    if at is not None and band is not None and not band[0] <= at <= band[1]:
+        raise ContractViolation(
+            f"{prefix}.residual_at_hz {at} is outside residual_band_hz {band}"
+        )
+    rms = candidate.residual_rms_db
+    if (rms is None) != (candidate.residual_within_tolerance is None):
+        raise ContractViolation(
+            f"{prefix}.residual_rms_db and residual_within_tolerance share one weighting, so "
+            "come together or not at all"
+        )
+    if rms is not None and not 0.0 <= rms <= residual + 1e-9:
+        raise ContractViolation(
+            f"{prefix}.residual_rms_db {rms} must be in [0, residual_db {residual}]"
+        )
+    within = candidate.residual_within_tolerance
+    tolerance = candidate.residual_tolerance_db
+    if (within is None) != (tolerance is None):
+        raise ContractViolation(
+            f"{prefix}.residual_within_tolerance and residual_tolerance_db come together "
+            "or not at all"
+        )
+    if within is not None and not 0.0 <= within <= 1.0:
+        raise ContractViolation(
+            f"{prefix}.residual_within_tolerance must be in [0, 1], got {within}"
+        )
+    if tolerance is not None and tolerance <= 0:
+        raise ContractViolation(
+            f"{prefix}.residual_tolerance_db must be > 0, got {tolerance}"
+        )
 
 
 def _validate_biquad_spec(

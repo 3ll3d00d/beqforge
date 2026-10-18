@@ -30,7 +30,6 @@ are retained so records and code comments remain traceable. Completed items are 
 | 11 | F4 follow-up | parked | Both fitter-objective selection spikes lost passes/true positives. Judge several fits only with a demonstrated usable alternative discarded before `_judge`; a smaller residual is insufficient evidence. |
 | 12 | F3 follow-up | parked | A fifth section moved no verdict when tried and costs more fitting. Reopen if an evidence-supported target has a demonstrated usable fit beyond four sections and no usable fit within four. |
 | 13 | T2 | parked | The steep-variant audit found no swept cap binding a weak winner. Derive caps only when a binding cap demonstrably prevents a better supported result. |
-| 14 | Residual (former TODO 5) | open | Correct the reported target error and its actual measurement band without changing fit selection. Primarily audit accuracy; any escalation/objective change is a separate, higher-impact decision. Non-parametric reporting is already allowed upstream. |
 | 15 | Authored features | parked | Manual `--exclude` works; no validated automatic detector exists. Reopen with real labelled features and negatives showing that detection preserves legitimate bass. |
 | 16 | Dynamic processing (former TODO 11) | parked | No suspected real case has scoped a useful tripwire. Reopen when compression/limiting demonstrably compromises this correction; non-LTI processing alone does not prove every BEQ is invalid. |
 | 17 | Tilted passband reference (goal/corpus follow-up) | parked | No real in-sub-band case needs a sloping reference yet; Dossier's abstention was decided. Reopen with one. Goal-aware corpus labels belong to the open E10 protocol work. Nearest so far: 13 Going on 30's mix tilts about −7 dB/oct above 50 Hz (bass is coherent across channels, ~200 Hz is not) and finds its plateau only through the one-sided fallback. That reference reads a 36 dB deficit below 25 Hz; each channel's own plateau reads 30-34 dB. A reference built from the channels would be 2-5 dB less generous there (see plans/done-design-and-pipeline.md, 11 October 2026). |
@@ -91,10 +90,6 @@ Evidence behind the order and the parked decisions:
   filtered/1 reached 5.6 dB over 0.28 octave. Real-title candidates stayed below 0.5 dB.
   Audit this with steep policy; it is not evidence specifically of single-bin holes or
   permission to add a blanket gate.
-* [`designer._to_design_candidate`](beqforge/designer.py) forwards `fit_error_db` and the
-  run's residual band, while [`filters._fit_structure`](beqforge/filters.py) returns a
-  target-error/device-drift objective and [`design._result`](beqforge/design.py) recomputes
-  pure target error. The actual fit score band can widen beyond the reported one.
 * The sibling [`designer-interface.md`](../beqdesigner/design/designer-interface.md)
   §§2–4 already adopts clipping cost, bass management, ordinal confidence, non-parametric
   residuals and decline/report rules. It deliberately excludes device preference.
@@ -122,20 +117,6 @@ deciding how to support them. Any unsupported configuration must be described ho
 supplying a dict is not enough to claim it was modelled. No hardware capture is needed for
 these software comparisons. Caller propagation requires a change in beqdesigner, outside
 this repo; both its batch job and library call omit the available argument today.
-
-### Residual reporting
-
-`Candidate.fit_error_db` reaches the response's `residual_db`. For fitted candidates it is
-normally the larger of target error and exact-coefficient quantisation change; after pruning
-it can be pure target error. The contract already permits residuals for every method with an
-explicit target and defines them as maximum absolute target error. Recompute the reported
-error from the canonical published cascade against its priced target on a stated band; make
-the evaluation rate and coefficient treatment explicit. Carry or recompute the actual band:
-`_fit_all` can widen it above `params.residual_band_hz`, and parametric proposals carry their
-own effective design settings. Keep the optimisation objective, drift screen and escalation
-unchanged in a reporting fix. Changing what `residual_target_db` compares against is a
-separate decision change and needs the full regression workflow. A small residual says the
-fit matched the constructed target, not that the target is correct.
 
 ### Fresh validation protocol and steep-filter policy
 

@@ -748,6 +748,45 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## How well the filter matches its target, reported (18 October 2026)
+
+TODO 14 (former TODO 5). The response's `residual_db` was `Candidate.fit_error_db`: the
+fitter's objective, the larger of target error and exact-coefficient quantisation change, or
+pure target error after `_prune` dropped a section. Its `residual_band_hz` was always
+`params.residual_band_hz`, though `_fit_all` scores fits on that band widened to cover every
+placement. One maximum also said nothing about where a miss was or which way it went.
+
+* **What is reported now.** `pipeline.target_fit` measures `Candidate.target_fit` on the
+  cascade that plays — published parameters, the device's quantised coefficients at its own
+  rate, the design grid — against the priced target, over the band the fit was scored on:
+  `_fit_band_hz` for `_fit_all`'s candidates, `residual_band_hz` for `parametric`, which
+  `design` scores there. It gives the worst absolute error, where and which way, and the RMS
+  error and the share of the requested boost within `PipelineParams.fit_tolerance_db` (0.5 dB,
+  a stated yardstick that decides nothing), both weighted by the positive target, the weighting
+  `confidence` uses. Unstable cascades get none. `fit_error_db`, the escalation's
+  `residual_target_db` comparison, the drift screen and selection are untouched.
+* **Contract 1.3**, agreed with beqdesigner (their `1de6fb9` and `3f5e758`):
+  `residual_db`/`residual_band_hz` are measured on the cascade as published and played over the
+  band actually measured, and five optional fields accompany them — `residual_at_hz`,
+  `residual_direction`, `residual_rms_db`, `residual_within_tolerance`,
+  `residual_tolerance_db` — present only with `residual_db`, the weighted pair together and
+  only when the target asks for boost inside the band. They go on the wire only when measured,
+  to any request version; `/health` reports 1.3. `validate_response` enforces the same six
+  rules as beqdesigner's. The contract now says these fields measure a match to the target
+  the designer built, not whether that target is right, and that how much of the deficit the
+  target restores is `commentary['correction']`'s, not theirs.
+* **In words.** `explain.fit` adds `commentary['fit']` to accepted and rejected candidates and
+  a line to `design_beq.py`'s per-candidate output; the run record carries `target_fit`.
+* **Regression.** Probe at `--tol 0`, before on `981b71f` from a worktree, after on this
+  change: all 11 titles unchanged, as a reporting change must be. No real run was named by the
+  probe, and the synthetic protocol and corpus do not apply: nothing reachable from a decision
+  changed.
+* **Checks.** New `tests/test_design_target_fit.py` (exact match, signed and weighted
+  shortfall, unrequested boost, band limits, instability, the sentence, and every run
+  candidate measured over its scored band and recorded); designer mapping, validation of every
+  rule, and wire tests.
+
+
 ## Channels decomposed in parallel (18 October 2026)
 
 A cold analysis was almost all one serial loop. On Alto Knights (8 channels, 123 minutes)

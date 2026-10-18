@@ -24,6 +24,7 @@ import numpy as np
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from beqforge import explain  # noqa: E402
 from beqforge.material import load  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.filters import Realisation  # noqa: E402
@@ -187,6 +188,7 @@ def show_candidates(report: Report) -> None:
             f"      recovered {recovered} of the measured deficit "
             f"(§14.1)   conditional evidence score {candidate.confidence:.2f} (uncalibrated)"
         )
+        print(f"      {explain.fit(candidate)}")
         print(f"      {v}")
         for note in (*candidate.target_notes, *v.notes):
             print(f"      note: {note}")

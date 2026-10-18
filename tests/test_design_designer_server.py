@@ -93,6 +93,11 @@ def _response_from_json(body: dict) -> DesignResponse:
                     tuple(c["residual_band_hz"]) if c.get("residual_band_hz") else None
                 ),
                 commentary=c.get("commentary"),
+                residual_at_hz=c.get("residual_at_hz"),
+                residual_direction=c.get("residual_direction"),
+                residual_rms_db=c.get("residual_rms_db"),
+                residual_within_tolerance=c.get("residual_within_tolerance"),
+                residual_tolerance_db=c.get("residual_tolerance_db"),
             )
             for c in body["candidates"]
         ]
@@ -152,7 +157,7 @@ def test_health_check(server) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.2",
+        "contract_version": "1.3",
         "shared_root": False,
         "parallel": 1,
     }
@@ -499,7 +504,7 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.2",
+        "contract_version": "1.3",
         "shared_root": True,
         "parallel": 1,
     }
