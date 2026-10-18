@@ -1,4 +1,6 @@
 import json
+import math
+import warnings
 
 import numpy as np
 import pytest
@@ -12,9 +14,9 @@ from beqoptimiser import (
     Section,
     magnitude,
     optimise_parameters,
+    parameters,
 )
 from beqoptimiser import cache as cache_module
-from beqoptimiser import parameters
 
 F32_48 = (48000, Float32())
 F32_96 = (96000, Float32())
@@ -105,6 +107,37 @@ def test_fixed_sections_are_kept_and_counted():
     assert result.sections[0] == gain
     alone = optimise_parameters([gain], profiles=[F32_48], cache=False)
     assert alone.outcome == "within_margin"
+
+
+def _high_pass(freq: float, q: float, rate: int) -> list[float]:
+    """RBJ high-pass, normalised: an exact zero at DC that float32 keeps."""
+    w = 2 * math.pi * freq / rate
+    alpha, cos = math.sin(w) / (2 * q), math.cos(w)
+    a0 = 1 + alpha
+    b0 = (1 + cos) / 2 / a0
+    return [b0, -2 * b0, b0, 1.0, -2 * cos / a0, (1 - alpha) / a0]
+
+
+def test_a_high_pass_agrees_at_dc_rather_than_making_the_guard_infinite():
+    # both responses are -inf dB at DC; core's subtraction made that NaN, an infinite guard
+    # error and numpy warnings
+    hpf = Fixed.of({rate: _high_pass(5, 0.7071, rate) for rate in (48000, 96000)})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = optimise_parameters([HARD, hpf], profiles=[F32_48], cache=False)
+    assert result.outcome == "replacement"
+    (profile,) = result.profiles
+    assert np.isfinite(profile.guard_error_db)
+    assert profile.guard_error_db == pytest.approx(
+        parameters._guard(
+            np.array([HARD.sos(48000), hpf.sos(48000)]),
+            Float32().quantise(
+                np.array([result.sections[0].sos(48000), hpf.sos(48000)])
+            ),
+            48000,
+            ParameterSettings(),
+        )
+    )
 
 
 def test_nothing_searchable_is_no_replacement():

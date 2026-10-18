@@ -100,7 +100,8 @@ if result.sections is not None:
 * **Several profiles.** The search minimises the worst matching-band error over the profiles. It
   refuses any change that makes a profile worse than both its original error and the margin,
   so helping one device cannot quietly cost another. Each profile's error before and after,
-  and the candidate's out-of-band `guard_error_db`, are reported.
+  and the candidate's out-of-band `guard_error_db`, are reported. A response both sides share
+  at DC or Nyquist, such as a high-pass's zero at DC, is no guard error.
 * **Structure.** Section count, order and types are kept. Identical adjacent sections (a
   repeated shelf) move together and stay identical. `Fixed` holds a biquad the search may
   not change, as SOS for each rate (a pass filter, a gain stage); it counts in the response

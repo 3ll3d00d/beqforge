@@ -47,7 +47,7 @@ from .core import Precision, Section, _validated_maximum, magnitude, stable
 
 # The version of what this module computes; cached parameter results are keyed by it. Bump it
 # when a change alters any result, and only then.
-PARAMETER_VERSION = "0.1.0"
+PARAMETER_VERSION = "0.1.1"
 
 SEARCHABLE = ("PeakingEQ", "LowShelf", "HighShelf")
 RATES = (48000, 96000)
@@ -212,14 +212,13 @@ def _guard(reference, candidate, rate, cfg) -> float:
         _validated_maximum(reference, candidate, rate, b, cfg)[0] for b in bands
     )
     endpoints = np.array([0.0, rate / 2])
-    endpoint = float(
-        np.max(
-            np.abs(
-                magnitude(candidate, endpoints, rate)
-                - magnitude(reference, endpoints, rate)
-            )
-        )
-    )
+    # A high-pass is exactly zero at DC, -inf dB, in the reference and in a candidate that
+    # keeps its zero: that agreement is no error, where core's subtraction makes it NaN, an
+    # infinite guard error and numpy warnings. A zero only one of them has is still infinite.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        got = magnitude(candidate, endpoints, rate)
+        want = magnitude(reference, endpoints, rate)
+        endpoint = float(np.max(np.where(got == want, 0.0, np.abs(got - want))))
     return max(value, endpoint) if np.isfinite(endpoint) else float("inf")
 
 

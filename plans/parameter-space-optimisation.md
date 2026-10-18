@@ -124,3 +124,16 @@ parameter cache key adds `parameters.py`'s hash and `PARAMETER_VERSION` to
 
 **Not done.** Phase is not considered, as for `optimise`. Bounds are not derived from what a
 listener would notice; ±1%/2%/0.1 dB is the proposal's default, configurable.
+
+**A high-pass at DC (18 October 2026, `PARAMETER_VERSION` 0.1.1).** beqdesigner, the first
+caller, held a 3 Hz high-pass as `Fixed` and saw numpy divide-by-zero warnings. They came from
+the guard's endpoint comparison, not from the unstable float32 section it also reported (that
+one is refused by `stable()` before any response is computed, and its `inf` original is
+correct). A high-pass is exactly zero at DC in the reference and in any realisation that keeps
+`b0 + b1 + b2 = 0`, which float32 does; both responses are `-inf` dB there, the subtraction is
+NaN, and every result with a high-pass reported an infinite `guard_error_db`. `_guard` now
+counts equal endpoint values as no error and keeps a zero only one side has as infinite. The
+outcome never depended on the guard, so no decision changes. `core.optimise`'s guard has the
+same flaw; it is left alone because `core.py` is in the seed identity, and its catalogue inputs
+(shelves and peaks) have no zero at DC. New test: a `Fixed` high-pass beside a searched peak
+gives a finite guard error and no warnings; it fails on the previous guard.
