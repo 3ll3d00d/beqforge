@@ -34,9 +34,10 @@ jobs:
               return;
             }
             const deadline = Date.now() + 15 * 60 * 1000;
-            try {
-              while (true) {
-                const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            while (true) {
+              let runs;
+              try {
+                runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
                   ...context.repo,
                   workflow_id: 'tests.yml',
                   head_sha: context.sha,
@@ -44,27 +45,34 @@ jobs:
                   event: 'push',
                   per_page: 100,
                 });
-                const matching = runs.filter(run =>
-                  run.head_sha === context.sha && run.head_branch === 'main' && run.event === 'push'
-                );
-                const passed = matching.find(run =>
-                  run.status === 'completed' && run.conclusion === 'success'
-                );
-                if (passed) {
-                  core.info(`Reusing successful main tests: ${passed.html_url}`);
-                  await core.summary.addLink('Reused main test run', passed.html_url).write();
-                  core.setOutput('reusable', 'true');
+              } catch (error) {
+                // a transient API failure is no reason to rerun the whole suite, so keep trying until the deadline
+                if (Date.now() >= deadline) {
+                  core.warning(`Unable to check main tests; running fresh release tests: ${error.message}`);
                   return;
                 }
-                if (!matching.some(run => run.status !== 'completed') || Date.now() >= deadline) {
-                  core.info('No successful main test run available; running fresh release tests.');
-                  return;
-                }
-                core.info('Main tests are still running; checking again in 30 seconds.');
+                core.info(`Unable to check main tests (${error.message}); trying again in 30 seconds.`);
                 await new Promise(resolve => setTimeout(resolve, 30_000));
+                continue;
               }
-            } catch (error) {
-              core.warning(`Unable to check main tests; running fresh release tests: ${error.message}`);
+              const matching = runs.filter(run =>
+                run.head_sha === context.sha && run.head_branch === 'main' && run.event === 'push'
+              );
+              const passed = matching.find(run =>
+                run.status === 'completed' && run.conclusion === 'success'
+              );
+              if (passed) {
+                core.info(`Reusing successful main tests: ${passed.html_url}`);
+                await core.summary.addLink('Reused main test run', passed.html_url).write();
+                core.setOutput('reusable', 'true');
+                return;
+              }
+              if (!matching.some(run => run.status !== 'completed') || Date.now() >= deadline) {
+                core.info('No successful main test run available; running fresh release tests.');
+                return;
+              }
+              core.info('Main tests are still running; checking again in 30 seconds.');
+              await new Promise(resolve => setTimeout(resolve, 30_000));
             }
 
   tests:

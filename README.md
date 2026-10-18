@@ -312,7 +312,8 @@ one locally: `uv pip install pyinstaller && uv run pyinstaller beqforge.spec`.
 
 The same workflow builds and checks the Python wheel and source distribution, verifies all
 five dependency profiles, and reuses a successful branch-push run of `tests.yml` on `main`
-at the exact tagged commit. If matching tests are still running, it waits up to 15 minutes;
+at the exact tagged commit. If matching tests are still running, or GitHub's API fails to answer, it
+keeps checking for up to 15 minutes;
 without a successful result, it runs the reusable tests workflow against the release commit.
 GitHub release creation and executable builds require those tests to pass on Linux, macOS
 and Windows, including device-check tests and isolated dependency profiles. PyPI publication
