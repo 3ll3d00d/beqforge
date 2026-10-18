@@ -317,6 +317,16 @@ def test_a_worker_count_outside_the_callers_range_is_refused() -> None:
             )
 
 
+def test_fewer_cores_than_workers_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"cores must be at least workers \(2\)"):
+        DesignServer(
+            ("127.0.0.1", 0),
+            DesignSettings(PipelineParams(strategies=("flatten",))),
+            workers=2,
+            cores=1,
+        )
+
+
 def _serve(params: PipelineParams, cache, shared_root=None, workers: int = 1):
     """A server of its own, with its own settings and its own worker processes."""
     # These tests exercise transport and cache identity/reuse, not section-budget

@@ -114,6 +114,7 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
         "CACHE_DIR": str(tmp_path / "cache"),
         "SHARED_ROOT": str(tmp_path / "shared"),
         "WORKERS": "2",
+        "CORES": "6",
         "QUIET": "1",
     }
     for name, value in settings.items():
@@ -135,7 +136,7 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
     assert args.quiet is True
     (address, settings), options = constructor.call_args
     assert address == ("127.0.0.2", 9123)
-    assert options == {"log_level": logging.WARNING, "workers": 2}
+    assert options == {"log_level": logging.WARNING, "workers": 2, "cores": 6}
     params = settings.params
     assert params.realisation.fs == 48000
     assert params.realisation.coefficient_bits == 24
@@ -178,7 +179,7 @@ def test_cli_replaces_environment_values_including_repeated_and_boolean_options(
     )
     (address, settings), options = constructor.call_args
     assert address == ("127.0.0.1", 8123)
-    assert options == {"log_level": logging.INFO, "workers": 1}
+    assert options == {"log_level": logging.INFO, "workers": 1, "cores": None}
     params = settings.params
     assert params.strategies == ("flatten", "counterfactual")
     assert params.exclude_bands_hz == ((30.0, 32.0),)
@@ -210,6 +211,8 @@ def test_false_environment_boolean(startup, monkeypatch, value):
         ("QUIET", "perhaps", "BEQFORGE_QUIET must be true/false"),
         ("WORKERS", "0", "workers must be 1-8"),
         ("WORKERS", "9", "workers must be 1-8"),
+        ("CORES", "0", "cores must be at least workers (1)"),
+        ("CORES", "two", "invalid int value"),
     ],
 )
 def test_invalid_environment_fails_before_listening(
@@ -248,6 +251,7 @@ def test_help_lists_every_environment_option_even_with_invalid_environment(
         "CACHE_DIR",
         "SHARED_ROOT",
         "WORKERS",
+        "CORES",
         "QUIET",
     ):
         assert f"BEQFORGE_{name}" in output
@@ -276,3 +280,33 @@ def test_concurrent_designs_share_the_logical_processors(
 def test_an_explicit_fit_pool_is_each_designs_own(monkeypatch):
     monkeypatch.setenv("BEQ_FIT_WORKERS", "4")
     assert designer_server.fit_share(2) is None
+
+
+@pytest.mark.parametrize(
+    ("workers", "cores", "share"),
+    [
+        (1, 4, 4),  # one design, held to 4
+        (1, 12, 7),  # never wider than one design's usual pool
+        (2, 8, 4),  # shared evenly
+        (2, 5, 2),
+        (3, 3, 1),
+    ],
+)
+def test_cores_cap_what_the_designs_use_between_them(
+    monkeypatch, workers, cores, share
+):
+    monkeypatch.setattr(designer_server.filters, "FIT_WORKERS", 7)
+    monkeypatch.setattr(designer_server.os, "process_cpu_count", lambda: 16)
+    assert designer_server.fit_share(workers, cores) == share
+    # an explicit BEQ_FIT_WORKERS is capped by --cores too
+    monkeypatch.setenv("BEQ_FIT_WORKERS", "7")
+    assert designer_server.fit_share(workers, cores) == share
+
+
+def test_cores_must_cover_the_workers(startup, capsys):
+    run, constructor, _ = startup
+    with pytest.raises(SystemExit) as refused:
+        run("--workers", "3", "--cores", "2")
+    assert refused.value.code == 2
+    assert "cores must be at least workers (3)" in capsys.readouterr().err
+    constructor.assert_not_called()

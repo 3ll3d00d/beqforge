@@ -166,7 +166,9 @@ its own worker process; further requests queue. `GET /health` reports it as `par
 caller can send each server as many designs as it takes rather than be configured with that
 number. Concurrent designs share the machine's logical processors, SMT threads included, each
 at most the width one design uses alone (`BEQ_FIT_WORKERS`, if set, stays each design's own).
-The share changes how long a fit takes, never its answer.
+`--cores N` caps the processors the designs use between them, for a machine with other work to
+do: concurrent designs split N evenly, and N must be at least `--workers`. The share changes
+how long a fit takes, never its answer.
 
 Every `serve-designer` configuration option can also be set through an environment variable.
 Explicit CLI options take precedence; for repeatable options, CLI values replace the entire
@@ -189,6 +191,7 @@ their existing CLI configuration.
 | `--cache-dir` | `BEQFORGE_CACHE_DIR` | path |
 | `--shared-root` | `BEQFORGE_SHARED_ROOT` | path |
 | `--workers` | `BEQFORGE_WORKERS` | integer, 1-8 |
+| `--cores` | `BEQFORGE_CORES` | integer, at least `--workers` |
 | `--quiet` | `BEQFORGE_QUIET` | boolean |
 
 Booleans accept `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`, ignoring case.
@@ -295,7 +298,8 @@ not already set: `BEQFORGE_HOST=0.0.0.0`, `BEQFORGE_PORT=8420` and
   `http://host.docker.internal:8420/design`; from another machine, use this one's LAN address.
   Check `http://<address>:8420/health` from there first.
 * **Several at once.** Set `BEQFORGE_WORKERS` (or pass `--workers 2`) for a machine that can
-  design more than one title at a time; `/health` reports it as `parallel`.
+  design more than one title at a time; `/health` reports it as `parallel`. To leave room for
+  other work, set `BEQFORGE_CORES` to the most processors the designer may use between them.
 * **The rest.** The exe is unsigned, so SmartScreen warns on first run. `serve-designer` does not need `ffmpeg`. Close the window, or
   press Ctrl+C, to stop.
 

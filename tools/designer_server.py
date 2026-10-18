@@ -253,7 +253,7 @@ def _design_in_worker(raw: bytes, token: int) -> tuple[int, dict, dict[str, floa
         _worker_logs.put(token)
 
 
-def fit_share(workers: int) -> int | None:
+def fit_share(workers: int, cores: int | None = None) -> int | None:
     """Each design worker's fit pool when `workers` designs run at once, or None to leave
     `filters.FIT_WORKERS` alone.
 
@@ -264,7 +264,13 @@ def fit_share(workers: int) -> int | None:
     `--workers 2` gained nothing on an SMT machine. Only the time a fit takes depends on its
     pool, never its answer. An explicit `BEQ_FIT_WORKERS` is left as each design's own, as
     it always was.
+
+    `cores` (`--cores`) caps the processors the server's designs use between them, for a
+    machine that has other work to do: they share it evenly, still at most one design's
+    width each, whether or not `BEQ_FIT_WORKERS` set that width.
     """
+    if cores is not None:
+        return max(1, min(filters.FIT_WORKERS, cores // workers))
     if workers <= 1 or os.environ.get("BEQ_FIT_WORKERS"):
         return None
     threads = os.process_cpu_count() or os.cpu_count() or 1
@@ -387,13 +393,16 @@ class DesignServer(ThreadingHTTPServer):
         settings: DesignSettings,
         log_level: int = logging.INFO,
         workers: int = 1,
+        cores: int | None = None,
     ):
         if not 1 <= workers <= MAX_WORKERS:
             raise ValueError(f"workers must be 1-{MAX_WORKERS}, not {workers}")
+        if cores is not None and cores < workers:
+            raise ValueError(f"cores must be at least workers ({workers}), not {cores}")
         self.settings = settings
         self.workers: list[_DesignWorker] = []
         self._idle: queue.SimpleQueue[_DesignWorker] = queue.SimpleQueue()
-        share = fit_share(workers)
+        share = fit_share(workers, cores)
         try:
             for _ in range(workers):
                 worker = _DesignWorker(settings, log_level, share)
@@ -599,6 +608,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--cores",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "the most processors this server's designs use between them, at least --workers "
+            "(default: all of them, less one). Shared evenly by concurrent designs"
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -628,6 +647,8 @@ def main() -> int:
         parser.error("device format requires 0 < integer bits < coefficient bits")
     if not 1 <= args.workers <= MAX_WORKERS:
         parser.error(f"workers must be 1-{MAX_WORKERS}")
+    if args.cores is not None and args.cores < args.workers:
+        parser.error(f"cores must be at least workers ({args.workers})")
 
     params = PipelineParams(
         realisation=Realisation(
@@ -667,8 +688,9 @@ def main() -> int:
         settings,
         log_level=logging.WARNING if args.quiet else logging.INFO,
         workers=args.workers,
+        cores=args.cores,
     )
-    share = fit_share(args.workers)
+    share = fit_share(args.workers, args.cores)
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"

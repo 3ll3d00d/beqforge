@@ -816,6 +816,13 @@ answer. Nothing under `beqforge/` changed, so the decision regression probe does
 * **Windows packaging.** `packaging/designer/beqforge-designer.cmd` starts the release's
   Windows executable with the container's defaults and is attached to each release; the README
   gains "Running the designer on Windows".
+* **A ceiling on processors.** `--cores N` (`BEQFORGE_CORES`) caps what the designs use
+  between them, for a machine with other work to do: each worker's pool, fits and the parallel
+  channel decomposition alike, is `N // workers`, still at most `FIT_WORKERS`, with or without
+  `--workers` and whether or not `BEQ_FIT_WORKERS` is set. N below `--workers` is refused, since
+  each design needs a processor. It limits processes, not threads inside one, and is not an OS
+  affinity. Tests cover the share, the refusal by server and CLI, and the environment; a real
+  server logged "3 fit worker(s) each" for `--cores 3` and for `--workers 2 --cores 6`.
 
 
 ## The designer server answers `/health` during a design (17 October 2026)

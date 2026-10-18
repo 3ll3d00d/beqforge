@@ -14,6 +14,10 @@ rem if not defined BEQFORGE_SHARED_ROOT set "BEQFORGE_SHARED_ROOT=D:\beq\work"
 rem How many titles to design at once, if this machine can take more than one (0.2.4 on).
 rem if not defined BEQFORGE_WORKERS set "BEQFORGE_WORKERS=2"
 
+rem The most processors (SMT threads count) the designs may use between them, to leave room for
+rem other work on this machine (0.2.6 on). Unset, they use all but one.
+rem if not defined BEQFORGE_CORES set "BEQFORGE_CORES=8"
+
 if not defined BEQFORGE_HOST set "BEQFORGE_HOST=0.0.0.0"
 if not defined BEQFORGE_PORT set "BEQFORGE_PORT=8420"
 if not defined BEQFORGE_CACHE_DIR set "BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache"
