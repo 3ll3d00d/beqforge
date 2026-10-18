@@ -24,6 +24,7 @@ import logging.handlers
 import math
 import multiprocessing
 import os
+import queue
 import signal
 import sys
 import tempfile
@@ -49,7 +50,7 @@ from beqforge.designer import (  # noqa: E402
     response_to_json,
     validate_response,
 )
-from beqforge import record  # noqa: E402
+from beqforge import filters, record  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.cache import DirStore, Store  # noqa: E402
 from beqforge.reference import UnusableReference  # noqa: E402
@@ -59,6 +60,10 @@ from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DESIGN_PATH = "/design"
+
+MAX_WORKERS = 8
+"""The most designs one server runs at once: the range beqdesigner accepts for an endpoint's
+`parallel` (its designer-interface.md §7.2)."""
 
 
 class _EnvironmentParser(argparse.ArgumentParser):
@@ -160,10 +165,15 @@ class _LogToParent(logging.handlers.QueueHandler):
         self.queue.put(record)
 
 
-def _start_worker(settings: DesignSettings, logs: SimpleQueue, level: int) -> None:
+def _start_worker(
+    settings: DesignSettings, logs: SimpleQueue, level: int, fit_workers: int | None
+) -> None:
     global _worker_settings, _worker_logs
     _worker_settings = settings
     _worker_logs = logs
+    if fit_workers is not None:
+        # this worker's share of the machine, when it designs beside others (`fit_share`)
+        filters.FIT_WORKERS = fit_workers
     root = logging.getLogger()
     root.handlers[:] = [_LogToParent(logs)]
     root.setLevel(level)
@@ -243,26 +253,46 @@ def _design_in_worker(raw: bytes, token: int) -> tuple[int, dict, dict[str, floa
         _worker_logs.put(token)
 
 
+def fit_share(workers: int) -> int | None:
+    """Each design worker's fit pool when `workers` designs run at once, or None to leave
+    `filters.FIT_WORKERS` alone.
+
+    Every design's fitter sizes its pool to the whole machine less a core, so two at once
+    would put twice the processes on it. Split that between them instead. Only the time a fit
+    takes depends on its pool, never its answer (`filters._run_fits`). An explicit
+    `BEQ_FIT_WORKERS` is left as each design's own, as it always was.
+    """
+    if workers <= 1 or os.environ.get("BEQ_FIT_WORKERS"):
+        return None
+    return max(1, filters.FIT_WORKERS // workers)
+
+
 class _DesignWorker:
-    """One long-lived process that runs every design, one at a time, for a threaded server.
+    """One long-lived process that runs designs, one at a time, for a threaded server.
 
     The fitter forks worker processes (`beqforge.filters.PARALLEL_FITS`, a default-context
     `ProcessPoolExecutor`) when a fit escalates past one section count, and forking a
     multi-threaded process risks a deadlock: a lock another thread holds at fork time is never
     released in the child. The HTTP server is threaded, so `/health` answers while a design
     runs; the design itself runs here, in a process started with "spawn" (no inherited threads
-    or locks) whose only thread is the one running the design. One worker also keeps designs
-    serial, as the contract expects (one synchronous POST per `design()` call,
-    designer-interface.md §1): concurrent requests queue.
+    or locks) whose only thread is the one running the design. Each worker designs one title
+    at a time; a server with `--workers N` has N of them, each its own process, so one that
+    dies fails only its own request.
 
     The worker's log records come back over a queue and are handled by the parent's loggers,
     so they reach whatever handlers the server (or a test's `caplog`) has configured.
     """
 
-    def __init__(self, settings: DesignSettings, log_level: int = logging.INFO):
+    def __init__(
+        self,
+        settings: DesignSettings,
+        log_level: int = logging.INFO,
+        fit_workers: int | None = None,
+    ):
         self._context = multiprocessing.get_context("spawn")
         self._settings = settings
         self._log_level = log_level
+        self._fit_workers = fit_workers
         self._logs: SimpleQueue = self._context.SimpleQueue()
         self._tokens = itertools.count()
         self._flushed: dict[int, threading.Event] = {}
@@ -280,7 +310,7 @@ class _DesignWorker:
             max_workers=1,
             mp_context=self._context,
             initializer=_start_worker,
-            initargs=(self._settings, self._logs, self._log_level),
+            initargs=(self._settings, self._logs, self._log_level, self._fit_workers),
         )
         # start it now: a worker that cannot import the pipeline fails here, not on a title
         pool.submit(_ready).result()
@@ -341,26 +371,56 @@ class _DesignWorker:
 
 
 class DesignServer(ThreadingHTTPServer):
-    """A thread per connection for HTTP, the designs themselves in one `_DesignWorker`."""
+    """A thread per connection for HTTP, the designs themselves in `workers` `_DesignWorker`s.
+
+    A request takes whichever worker is idle and waits for one when none is, so at most
+    `workers` designs run at once and the rest queue in arrival order.
+    """
 
     def __init__(
         self,
         address: tuple[str, int],
         settings: DesignSettings,
         log_level: int = logging.INFO,
+        workers: int = 1,
     ):
+        if not 1 <= workers <= MAX_WORKERS:
+            raise ValueError(f"workers must be 1-{MAX_WORKERS}, not {workers}")
         self.settings = settings
-        self.worker = _DesignWorker(settings, log_level)
+        self.workers: list[_DesignWorker] = []
+        self._idle: queue.SimpleQueue[_DesignWorker] = queue.SimpleQueue()
+        share = fit_share(workers)
         try:
+            for _ in range(workers):
+                worker = _DesignWorker(settings, log_level, share)
+                self.workers.append(worker)
+                self._idle.put(worker)
             super().__init__(address, _Handler)
         except BaseException:
-            self.worker.close()
+            self._close_workers()
             raise
+
+    def design(self, raw: bytes) -> tuple[int, dict, dict[str, float]]:
+        """`_DesignWorker.run` on the next idle worker."""
+        worker = self._idle.get()
+        try:
+            return worker.run(raw)
+        finally:
+            self._idle.put(worker)
+
+    def _close_workers(self) -> None:
+        # together, not one after another: each may take a few seconds to stop a design, and
+        # `docker stop` allows 10 s for all of them
+        closing = [threading.Thread(target=worker.close) for worker in self.workers]
+        for thread in closing:
+            thread.start()
+        for thread in closing:
+            thread.join()
 
     @override
     def server_close(self) -> None:
         super().server_close()
-        self.worker.close()
+        self._close_workers()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -373,13 +433,15 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             # 1.2: what a caller registering a by-reference designer checks first, so a
             # server without a shared root shows up at registration, not on its first title.
-            # "status" stays for anything already polling it.
+            # "parallel" is how many designs it runs at once, for a caller to send it that
+            # many rather than be told centrally. "status" stays for anything already polling it.
             self._respond(
                 200,
                 {
                     "status": "ok",
                     "contract_version": CONTRACT_VERSION,
                     "shared_root": self.server.settings.shared_root is not None,
+                    "parallel": len(self.server.workers),
                 },
             )
             return
@@ -396,7 +458,7 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         read = time.perf_counter()
         try:
-            status, payload, timing = self.server.worker.run(raw)
+            status, payload, timing = self.server.design(raw)
         except BrokenProcessPool:
             self._respond(500, {"error": "the design worker died during this request"})
             return
@@ -521,6 +583,17 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            f"how many designs to run at once, 1-{MAX_WORKERS} (default 1); more queue. "
+            "Reported on /health as `parallel`. Each design's fit pool gets its share of "
+            "the cores unless BEQ_FIT_WORKERS is set"
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -548,6 +621,8 @@ def main() -> int:
         parser.error("device rate must be finite and positive")
     if not 0 < args.integer_bits < args.coefficient_bits:
         parser.error("device format requires 0 < integer bits < coefficient bits")
+    if not 1 <= args.workers <= MAX_WORKERS:
+        parser.error(f"workers must be 1-{MAX_WORKERS}")
 
     params = PipelineParams(
         realisation=Realisation(
@@ -586,10 +661,14 @@ def main() -> int:
         (args.host, args.port),
         settings,
         log_level=logging.WARNING if args.quiet else logging.INFO,
+        workers=args.workers,
     )
+    share = fit_share(args.workers)
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"
+        + f"; {args.workers} design(s) at once"
+        + (f", {share} fit worker(s) each" if share is not None else "")
         + (f"; records to {args.record_dir}" if args.record_dir else "")
         + (f"; stage cache in {args.cache_dir}" if args.cache_dir else "")
         + (f"; audio by reference under {args.shared_root}" if args.shared_root else "")

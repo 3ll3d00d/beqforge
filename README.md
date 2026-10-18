@@ -161,6 +161,12 @@ naming the array, rather than a design decline. Inline requests remain supported
 logs read, parse, decode, design and response timings; `tools/experiments/request_timing.py`
 measures cold and warm requests.
 
+**Several designs at once.** `--workers N` (1-8, default 1) runs N designs at once, each in
+its own worker process; further requests queue. `GET /health` reports it as `parallel`, so a
+caller can send each server as many designs as it takes rather than be configured with that
+number. Each design's fit pool gets an equal share of the machine's cores (`BEQ_FIT_WORKERS`,
+if set, stays each design's own). The share changes how long a fit takes, never its answer.
+
 Every `serve-designer` configuration option can also be set through an environment variable.
 Explicit CLI options take precedence; for repeatable options, CLI values replace the entire
 environment list. `--help` lists the variable beside each option. Other subcommands retain
@@ -181,6 +187,7 @@ their existing CLI configuration.
 | `--record-dir` | `BEQFORGE_RECORD_DIR` | path |
 | `--cache-dir` | `BEQFORGE_CACHE_DIR` | path |
 | `--shared-root` | `BEQFORGE_SHARED_ROOT` | path |
+| `--workers` | `BEQFORGE_WORKERS` | integer, 1-8 |
 | `--quiet` | `BEQFORGE_QUIET` | boolean |
 
 Booleans accept `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`, ignoring case.
@@ -244,9 +251,9 @@ The image's defaults, all overridable with the environment variables above:
 
 It runs as uid/gid 1000 (`--build-arg PUID=… PGID=…` to change), which must be able to write
 the shared root and the cache: the server checks both with a write at startup. Its
-`HEALTHCHECK` asks `/health`, which answers while a design runs: designs run in a separate
-worker process, one at a time, so a caller sending several at once queues them; size the
-caller's timeout for that. `docker stop` stops a design in progress.
+`HEALTHCHECK` asks `/health`, which answers while a design runs: designs run in separate
+worker processes, `BEQFORGE_WORKERS` (default 1) at a time, so a caller sending more at once
+queues them; size the caller's timeout for that. `docker stop` stops a design in progress.
 
 Build and check it locally from the repository root:
 
@@ -257,6 +264,38 @@ python3 packaging/designer/smoke.py beqforge-designer
 
 The smoke script checks `/health` and one design inline and one by reference;
 `tests/test_designer_image.py` runs the same check against an in-process server.
+
+### Running the designer on Windows
+
+The release's `beqforge-windows-x86_64.exe` runs the same server natively, for a beqdesigner
+container (or install) that calls out to a Windows machine. Put `beqforge-designer.cmd`, which
+is attached to the same release (source: `packaging/designer/beqforge-designer.cmd`), beside the
+exe and double-click it, or run the exe directly:
+
+```bat
+beqforge-windows-x86_64.exe serve-designer --host 0.0.0.0 --port 8420 ^
+  --shared-root D:\beq\work --cache-dir %LOCALAPPDATA%\beqforge\cache
+```
+
+The launcher sets the image's defaults through the environment variables above, each only if
+not already set: `BEQFORGE_HOST=0.0.0.0`, `BEQFORGE_PORT=8420` and
+`BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache`. Arguments pass through to `serve-designer`.
+
+* **Listen on the network.** The CLI's default host is `127.0.0.1`, which a container cannot
+  reach; the launcher uses `0.0.0.0`. Windows Firewall asks the first time: allow private
+  networks.
+* **Shared root.** For audio by reference, set `BEQFORGE_SHARED_ROOT` (or edit the commented
+  line in the launcher) to the Windows folder bind-mounted into beqdesigner's container as its
+  work directory. Without it, beqdesigner must send audio inline.
+* **beqdesigner's side.** Under Docker Desktop on the same machine, register
+  `http://host.docker.internal:8420/design`; from another machine, use this one's LAN address.
+  Check `http://<address>:8420/health` from there first.
+* **Several at once.** Set `BEQFORGE_WORKERS` (or pass `--workers 2`) for a machine that can
+  design more than one title at a time; `/health` reports it as `parallel`.
+* **The rest.** The exe is unsigned, so SmartScreen warns on first run. `serve-designer` does not need `ffmpeg`. Close the window, or
+  press Ctrl+C, to stop.
+
+### Building and releasing
 
 For a machine without Python/`uv`, a standalone `beqforge` executable (every subcommand,
 including `serve-designer`) is built for Linux/macOS/Windows by

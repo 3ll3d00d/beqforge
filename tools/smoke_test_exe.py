@@ -22,6 +22,11 @@ digest is present, so a hit on the analysis covers them all.
 Last, the same audio is sent by reference (contract 1.2): written to float64 WAVs under the
 server's `--shared-root` and named by path with each column's SHA-256. The answer must be the
 same again — the proof that WAV decoding and the path checks work inside the executable.
+
+The server runs two design workers (`--workers 2`) and must say so on `/health`. An idle
+worker is taken in turn, so the three requests alternate between them: both spawned workers
+design for real inside the executable, and the cache hit is one worker reusing what the other
+wrote.
 """
 
 import argparse
@@ -130,24 +135,23 @@ def _by_reference(root: Path) -> dict:
     }
 
 
-def _wait_for_health(port: int, deadline: float) -> bool:
+def _wait_for_health(port: int, deadline: float) -> dict | None:
     while time.time() < deadline:
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
             try:
                 conn.request("GET", "/health")
                 response = conn.getresponse()
-                if (
-                    response.status == 200
-                    and json.loads(response.read()).get("status") == "ok"
-                ):
-                    return True
+                if response.status == 200:
+                    health = json.loads(response.read())
+                    if health.get("status") == "ok":
+                        return health
             finally:
                 conn.close()
         except OSError:
             pass
         time.sleep(0.5)
-    return False
+    return None
 
 
 def main() -> int:
@@ -157,8 +161,9 @@ def main() -> int:
     )
     parser.add_argument("--port", type=int, default=8423)
     # guards against a hang, not speed limits: CI runners are several times slower than a
-    # desktop, and a onefile build unpacks itself before it can answer /health
-    parser.add_argument("--startup-timeout", type=float, default=60.0)
+    # desktop, a onefile build unpacks itself, and both design workers import the pipeline,
+    # one after the other, before it can answer /health
+    parser.add_argument("--startup-timeout", type=float, default=120.0)
     parser.add_argument("--request-timeout", type=float, default=600.0)
     args = parser.parse_args()
 
@@ -183,12 +188,18 @@ def main() -> int:
             str(stages),
             "--shared-root",
             str(shared),
+            "--workers",
+            "2",
             "--quiet",
         ]
     )
     try:
-        if not _wait_for_health(args.port, time.time() + args.startup_timeout):
+        health = _wait_for_health(args.port, time.time() + args.startup_timeout)
+        if health is None:
             print("FAIL: server never came up (no /health response)", file=sys.stderr)
+            return 1
+        if health.get("parallel") != 2:
+            print(f"FAIL: /health should say parallel 2: {health}", file=sys.stderr)
             return 1
         print("OK: /health")
 

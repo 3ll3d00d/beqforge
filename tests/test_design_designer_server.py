@@ -20,6 +20,7 @@ import http.client
 import json
 import logging
 import threading
+import time
 from dataclasses import replace
 
 import numpy as np
@@ -149,7 +150,12 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
 def test_health_check(server) -> None:
     status, body = _request(server, "GET", "/health")
     assert status == 200
-    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": False}
+    assert body == {
+        "status": "ok",
+        "contract_version": "1.2",
+        "shared_root": False,
+        "parallel": 1,
+    }
 
 
 def test_unknown_get_path_is_404(server) -> None:
@@ -250,7 +256,7 @@ def test_health_answers_while_a_design_runs(server) -> None:
 def test_a_dead_worker_is_a_500_and_the_next_request_gets_a_new_one() -> None:
     httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None)
     try:
-        for process in list(httpd.worker._pool._processes.values()):
+        for process in list(httpd.workers[0]._pool._processes.values()):
             process.kill()
             process.join(timeout=10)
         status, body = _request(
@@ -267,8 +273,52 @@ def test_a_dead_worker_is_a_500_and_the_next_request_gets_a_new_one() -> None:
         _stop(httpd, thread)
 
 
-def _serve(params: PipelineParams, cache, shared_root=None):
-    """A server of its own, with its own settings and its own worker process."""
+def test_a_second_worker_designs_while_the_first_is_busy() -> None:
+    """With two workers a quick request is answered while a slow one is still designing;
+    with one it would queue behind it. `/health` says how many it takes at once."""
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None, workers=2)
+    try:
+        assert _request(httpd.server_address, "GET", "/health")[1]["parallel"] == 2
+        slow = []
+        designing = threading.Thread(
+            target=lambda: slow.append(
+                _request(
+                    httpd.server_address,
+                    "POST",
+                    DESIGN_PATH,
+                    body=_known_filter_request(),
+                    timeout=DESIGN_TIMEOUT_S,
+                )
+            )
+        )
+        designing.start()
+        try:
+            time.sleep(0.5)  # let the slow request take a worker first
+            status, body = _request(
+                httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
+            )
+            assert status == 200
+            assert body["decline_reason"] == "channel_evidence_unavailable"
+            assert designing.is_alive()
+        finally:
+            designing.join(timeout=DESIGN_TIMEOUT_S)
+        assert slow[0][0] == 200
+    finally:
+        _stop(httpd, thread)
+
+
+def test_a_worker_count_outside_the_callers_range_is_refused() -> None:
+    for workers in (0, 9):
+        with pytest.raises(ValueError, match="workers must be 1-8"):
+            DesignServer(
+                ("127.0.0.1", 0),
+                DesignSettings(PipelineParams(strategies=("flatten",))),
+                workers=workers,
+            )
+
+
+def _serve(params: PipelineParams, cache, shared_root=None, workers: int = 1):
+    """A server of its own, with its own settings and its own worker processes."""
     # These tests exercise transport and cache identity/reuse, not section-budget
     # escalation. Still run the real pipeline with a bounded numerical search;
     # test_accepts_a_real_injected_rolloff_over_http retains the full budget.
@@ -277,6 +327,7 @@ def _serve(params: PipelineParams, cache, shared_root=None):
         DesignSettings(
             replace(params, max_sections=1), cache=cache, shared_root=shared_root
         ),
+        workers=workers,
     )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -436,7 +487,12 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
     finally:
         _stop(httpd, thread)
     assert status == 200
-    assert body == {"status": "ok", "contract_version": "1.2", "shared_root": True}
+    assert body == {
+        "status": "ok",
+        "contract_version": "1.2",
+        "shared_root": True,
+        "parallel": 1,
+    }
 
 
 def test_a_request_by_reference_answers_as_the_same_request_inline(tmp_path) -> None:

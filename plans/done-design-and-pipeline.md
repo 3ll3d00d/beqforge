@@ -748,6 +748,37 @@ beside the answer or the decline (probe unchanged; no decision touched).
     caller's; `beqforge_revision` is already in every response for it.
 
 
+## Several designs at once, advertised on `/health` (18 October 2026)
+
+A Windows machine that could design two titles at once was added beside the container as a
+second endpoint, and the only way to use it was two servers on two ports: one server had a
+single design worker. Saying how many each endpoint takes in beqdesigner's profile also put a
+fact about the designer's host in the caller's configuration.
+
+`serve-designer --workers N` (`BEQFORGE_WORKERS`, 1-8, the range beqdesigner accepts for an
+endpoint's `parallel`) now runs N `_DesignWorker`s, each still one spawned, single-threaded
+process. A request takes the next idle worker and waits for one when none is, so arrival order
+is kept and a worker that dies fails only its own request. `/health` gains `"parallel": N` for
+a caller to size its sends from; beqdesigner was sent the caller-side proposal. With N > 1 each
+worker's fit pool is `filters.FIT_WORKERS // N` (`fit_share`), so N designs do not each claim
+the whole machine; an explicit `BEQ_FIT_WORKERS` is left as each design's own. `_run_fits`
+returns results in submission order from fixed seeds, so pool size moves timing and never an
+answer. Nothing under `beqforge/` changed, so the decision regression probe does not apply.
+
+* **Checks.** New tests: with two workers a quick request is answered while a real design is
+  still running on the other (the same test fails with one worker, so it distinguishes them),
+  `/health` reports `parallel`, a count outside 1-8 is refused by the server and the CLI, the
+  option comes from the environment, and the fit share. Server, startup, image and parallel-fit
+  tests: 61 passed. `tools/smoke_test_exe.py` now starts the executable with `--workers 2` and
+  requires `parallel: 2`. Its three requests alternate between the workers, so both design for
+  real inside the frozen build and the cache hit is one worker reusing the other's entries. A
+  Linux PyInstaller build passed it, with no process left after shutdown. Windows and macOS
+  are covered by the release workflow's smoke test, not run here.
+* **Windows packaging.** `packaging/designer/beqforge-designer.cmd` starts the release's
+  Windows executable with the container's defaults and is attached to each release; the README
+  gains "Running the designer on Windows".
+
+
 ## The designer server answers `/health` during a design (17 October 2026)
 
 A deployed image went unhealthy while it designed correctly. `serve-designer` was a plain
