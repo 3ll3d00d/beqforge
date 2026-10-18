@@ -60,7 +60,8 @@ or fixed ports), with coverage (`--cov`, configured in `pyproject.toml`, `multip
 children included) uploaded to Codecov by each test job using the `CODECOV_TOKEN` secret;
 release runs inherit it. Feature branch pushes test on Linux only and a newer push cancels the branch's
 previous run; `main`, tags and manual runs test Linux, macOS and Windows and are never cancelled. `.github/workflows/build-executable.yml` builds release executables and distributions;
-tag pushes publish to PyPI after validation and successful executable builds. Tags must match
+tag pushes publish to PyPI after validation and successful executable builds, and the designer
+image to GHCR after validation. Tags must match
 the shared version exactly (`vX.Y.Z`). Manual runs build artifacts without publishing.
 PyPI uses the `pypi` environment and Trusted Publishing; setup details are in the README.
 Device-check preview executable packaging has its own workflow, not a separate Python release;

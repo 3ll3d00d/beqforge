@@ -1,15 +1,16 @@
 name: Designer image
 
 # The designer as a container, beside a beqdesigner pipeline service (README, "Running the
-# designer in a container"). Every change to what goes into it is built and smoke-tested;
-# a vX.Y.Z tag also publishes linux/amd64 and linux/arm64 to GHCR as ghcr.io/<owner>/beqforge-designer.
+# designer in a container"). Every change to what goes into it is built and smoke-tested.
+# A release publishes linux/amd64 and linux/arm64 to GHCR as ghcr.io/<owner>/beqforge-designer:
+# build-executable.yml calls this for a vX.Y.Z tag once the release tests have passed, as it
+# does for the executables and PyPI, so an image never ships ahead of its tests.
 # A manual run with `publish` publishes the image of an existing release from a later commit,
 # only if the designer's runtime code is identical to that release's tag (as when the image
 # recipe arrived after the release).
 on:
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'packaging/designer/**'
       - '.dockerignore'
@@ -30,6 +31,8 @@ on:
         description: Publish the image as beq_common.__version__ (its vX.Y.Z tag must exist, with identical designer code)
         type: boolean
         default: false
+  # the release: build-executable.yml, from a tag, after its test gate
+  workflow_call:
 
 permissions:
   contents: read

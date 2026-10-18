@@ -233,8 +233,11 @@ pure `design(request) -> response` adapter, independently testable without a soc
 
 `ghcr.io/3ll3d00d/beqforge-designer:<version>` runs `beqforge serve-designer` for a beqdesigner
 pipeline service beside it (beqdesigner's `docker/compose.example.yaml` runs both). It is
-published for linux/amd64 and linux/arm64 by `.github/workflows/build-designer-image.yml` on
+published for linux/amd64 and linux/arm64 by `.github/workflows/build-designer-image.yml` for
 each `vX.Y.Z` tag, from the same commit as that release; `latest` follows the newest release.
+The release workflow (`build-executable.yml`) calls it only once the release tests have passed,
+as it does for the executables and PyPI; pushes to `main` and pull requests build and
+smoke-test the image without publishing it.
 A manual run of that workflow with `publish` set publishes the current version's image from a
 later commit, and refuses unless the designer's code is identical to that version's tag (0.2.0's
 image was published this way, the recipe having arrived after the release).
