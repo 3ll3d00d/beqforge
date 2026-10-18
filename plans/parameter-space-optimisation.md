@@ -1,6 +1,6 @@
 # Optimising a filter's parameters for several device profiles at once
 
-**Status: implemented (`beqoptimiser.optimise_parameters`, 18 October 2026); released with the next tag. See [Outcome](#outcome-18-october-2026).** Originally: A request from beqdesigner (October 2026), for a feature in its main window: a filter
+**Status: implemented (`beqoptimiser.optimise_parameters`, 18 October 2026); released in 0.2.5. See [Outcome](#outcome-18-october-2026).** Originally: A request from beqdesigner (October 2026), for a feature in its main window: a filter
 designer picks one or more device profiles, sees what each does to the filter, and asks for the filter to be optimised
 before it is published. The person who owns both projects decided that the search belongs here, in `beqoptimiser`, and
 beqdesigner only provides the interface. Parameter search is already listed as a follow-up in
