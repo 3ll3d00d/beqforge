@@ -294,8 +294,10 @@ beqforge-windows-x86_64.exe serve-designer --host 0.0.0.0 --port 8420 ^
 ```
 
 The launcher sets the image's defaults through the environment variables above, each only if
-not already set: `BEQFORGE_HOST=0.0.0.0`, `BEQFORGE_PORT=8420` and
-`BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache`. Arguments pass through to `serve-designer`.
+not already set: `BEQFORGE_HOST=0.0.0.0`, `BEQFORGE_PORT=8420`,
+`BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache` and
+`BEQFORGE_RECORD_DIR=%LOCALAPPDATA%\beqforge\records`, so every request's run record is kept.
+Arguments pass through to `serve-designer`.
 
 * **Listen on the network.** The CLI's default host is `127.0.0.1`, which a container cannot
   reach; the launcher uses `0.0.0.0`. Windows Firewall asks the first time: allow private

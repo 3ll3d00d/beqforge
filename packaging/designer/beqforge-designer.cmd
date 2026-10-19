@@ -21,6 +21,8 @@ rem if not defined BEQFORGE_CORES set "BEQFORGE_CORES=8"
 if not defined BEQFORGE_HOST set "BEQFORGE_HOST=0.0.0.0"
 if not defined BEQFORGE_PORT set "BEQFORGE_PORT=8420"
 if not defined BEQFORGE_CACHE_DIR set "BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache"
+rem Keep each request's run record, so a design or a decline can be reviewed and replayed.
+if not defined BEQFORGE_RECORD_DIR set "BEQFORGE_RECORD_DIR=%LOCALAPPDATA%\beqforge\records"
 
 set "EXE=%~dp0beqforge-windows-x86_64.exe"
 if not exist "%EXE%" set "EXE=%~dp0beqforge.exe"
