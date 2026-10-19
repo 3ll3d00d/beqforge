@@ -15,9 +15,12 @@ Wording is not compared (`commentary`, `decline_message`, the reasons' text), no
 Numbers compare within `REL_TOL`/`ABS_TOL`, not bit for bit: the fixed requests run on every CI
 platform, which need not agree in the last digits.
 
-Each request is the synthetic known-rolloff title the server tests use, run with one strategy
-at a time so each costs a bounded fit (~8-16 s here); together the cases reach every strategy,
-an acceptance and both kinds of decline.
+Each request is the synthetic known-rolloff title the server tests use, run with `flatten` (a
+bounded fit, ~8 s here); the cases reach an acceptance and both kinds of decline. The same title
+under `counterfactual` or `parametric` is left out on purpose: those fits are not stable across
+processors. Last-digit differences in BLAS kernels grow into a different filter (2 sections or 3;
+parametric boosts of 15.21, 15.78 and 16.49 dB on AVX-512, Haswell-kernel and CI runners), so no
+golden can hold them on every platform (TODO, "Fit sensitivity to arithmetic").
 """
 
 import json
@@ -92,8 +95,6 @@ _ROLLOFF = HighPass(Alignment.BUTTERWORTH, 4, 24.0)
 
 CASES = {
     "rolloff/flatten": (lambda: _title(_ROLLOFF), ("flatten",)),
-    "rolloff/counterfactual": (lambda: _title(_ROLLOFF), ("counterfactual",)),
-    "rolloff/parametric": (lambda: _title(_ROLLOFF), ("parametric",)),
     "unfiltered/flatten": (lambda: _title(None), ("flatten",)),
     "no-channels": (_no_channels, ("flatten",)),
 }

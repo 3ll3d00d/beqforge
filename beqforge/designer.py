@@ -65,9 +65,12 @@ Not by wording (`commentary`, `decline_message`), speed, packaging, the server o
 and not by a new output that leaves the existing ones as they were. An answer change is one
 beyond `tests/test_design_golden.py`'s tolerance, not a last-digit difference between platforms.
 That test fails on an answer changed without a bump, or a bump without regenerating its golden.
+One version is one algorithm, not one filter on every machine: the `counterfactual` and
+`parametric` fits can land on a different filter on a different processor (TODO, "Fit
+sensitivity to arithmetic"), so a caller compares versions, never figures.
 
 Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
-0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.6, the first to report it, is 4 too.
+0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, is 4 too.
 `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]

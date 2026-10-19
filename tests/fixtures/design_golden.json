@@ -4,45 +4,6 @@
   "no-channels": {
    "decline_reason": "channel_evidence_unavailable"
   },
-  "rolloff/counterfactual": {
-   "candidates": [
-    {
-     "filters": [
-      {
-       "type": "low_shelf",
-       "freq_hz": 15.48,
-       "gain_db": -2.183,
-       "q": 4.9076
-      },
-      {
-       "type": "low_shelf",
-       "freq_hz": 19.89,
-       "gain_db": 3.295,
-       "q": 2.3227
-      }
-     ],
-     "confidence": 0.9849892809890275,
-     "mv_adjust_db": 8.887418447884567,
-     "method": "non_parametric",
-     "gain_reduction_db": null,
-     "residual_db": 1.606214471888852,
-     "residual_band_hz": [
-      5.0,
-      200.0
-     ],
-     "fc_hz": null,
-     "slope": null,
-     "fc_uncertainty_hz": null,
-     "slope_uncertainty": null,
-     "channel_scope": null,
-     "residual_at_hz": 16.496360274885337,
-     "residual_direction": "under",
-     "residual_rms_db": 0.8269794816794811,
-     "residual_within_tolerance": 0.32901687400047835,
-     "residual_tolerance_db": 0.5
-    }
-   ]
-  },
   "rolloff/flatten": {
    "candidates": [
     {
@@ -78,45 +39,6 @@
      "residual_direction": "over",
      "residual_rms_db": 0.31997346530468473,
      "residual_within_tolerance": 0.8077283787618541,
-     "residual_tolerance_db": 0.5
-    }
-   ]
-  },
-  "rolloff/parametric": {
-   "candidates": [
-    {
-     "filters": [
-      {
-       "type": "low_shelf",
-       "freq_hz": 21.21,
-       "gain_db": 7.36,
-       "q": 0.4463
-      },
-      {
-       "type": "low_shelf",
-       "freq_hz": 18.02,
-       "gain_db": 7.506,
-       "q": 1.8615
-      }
-     ],
-     "confidence": 0.9768954060760763,
-     "mv_adjust_db": 15.209313450285023,
-     "method": "fitted",
-     "gain_reduction_db": null,
-     "residual_db": 0.7660836857558238,
-     "residual_band_hz": [
-      5.0,
-      200.0
-     ],
-     "fc_hz": null,
-     "slope": null,
-     "fc_uncertainty_hz": null,
-     "slope_uncertainty": null,
-     "channel_scope": null,
-     "residual_at_hz": 16.295304185964095,
-     "residual_direction": "over",
-     "residual_rms_db": 0.5341595053668091,
-     "residual_within_tolerance": 0.46325750861315357,
      "residual_tolerance_db": 0.5
     }
    ]

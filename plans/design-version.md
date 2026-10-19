@@ -72,8 +72,9 @@ the exe smoke test and the image smoke test reading them from `/health`.
 
 ## Outcome (19 October 2026)
 
-Built as agreed and released in 0.2.6, the first release with the field, at design version 4
-(no answer changed). `CONTRACT_VERSION` is `"1.4"`.
+Built as agreed and released in 0.2.7, the first release with the field, at design version 4
+(no answer changed). `v0.2.6` was tagged first and never published: its release tests failed
+(see [Correction](#correction-after-the-v026-release-tests)). `CONTRACT_VERSION` is `"1.4"`.
 
 * **`beqforge/designer.py`**: `DESIGN_VERSION = 4`, an int, with the past-release table in its
   docstring. `design_settings_detail(params)` returns the eight settings above where they differ
@@ -118,4 +119,25 @@ golden shows this code gives the answers design version 4 names. Full suite (`-n
 skipped. An earlier run failed the 11 startup tests that mock the server, because the startup log
 read the mocked server's identity; it now digests the params itself. The synthetic protocol and corpus weren't run: nothing touches evidence, ceiling,
 acceptance or selection.
+
+### Correction after the v0.2.6 release tests
+
+Every CI platform failed the golden for the synthetic title under `counterfactual` and
+`parametric`; nothing else failed. The answers were materially different, not last-digit:
+
+| Where | counterfactual | parametric boost (`mv_adjust_db`) |
+|---|---|---|
+| This machine (Ryzen 8840HS, AVX-512, OpenBLAS SkylakeX kernels) | 2 sections, 8.89 dB | 15.21 dB |
+| The same, `OPENBLAS_CORETYPE=Haswell` | as above | 15.78 dB |
+| Linux and macOS runners | 3 sections, 9.21 dB | 16.49 dB |
+| Windows runner | 2 sections, as here | 16.49 dB |
+
+On one machine the answer is repeatable: one and three fit workers gave the same filter, and
+there is no default stage cache. So last-digit differences in BLAS kernels grow into a different
+local optimum. `flatten` and both declines matched on every platform. The golden now holds only
+those three cases. The handoff's "one version can differ in the last digits between platforms"
+is wrong for these two strategies: one design version is one algorithm, not one filter on every
+machine. The caller compares versions, never figures, so the contract is unaffected. Whether real
+titles behave the same way is unmeasured, because the probe compares runs on one machine; it's
+a backlog item ("Fit sensitivity to arithmetic"). beqdesigner was told.
 

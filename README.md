@@ -247,11 +247,13 @@ pure `design(request) -> response` adapter, independently testable without a soc
 `GET /health` carry `design_version`, `design_settings` and `designer_build`, whatever
 `contract_version` the request names. `design_version` is an integer bumped only by a change
 that can alter an answer for an unchanged request: the candidates, the rejected designs, a
-decline or a fit figure, beyond last-digit differences between platforms. Wording, speed and
+decline or a fit figure. Wording, speed and
 packaging don't bump it, so the executable and the image of one release report the same
 version and different `designer_build`s (the string also in `beqforge_revision`). Releases
 before it: 0.0.x and 0.1.0 are 0, 0.2.0 is 1, 0.2.1 is 2, 0.2.2 is 3, and 0.2.3 to 0.2.5
-are 4, as is 0.2.6, the first release to report it. `design_settings` is a 12-hex digest of the server-wide settings that can change an
+are 4, as is 0.2.7, the first release to report it. One version is one algorithm, not one
+filter on every machine: the `counterfactual` and `parametric` fits can land on a different
+filter on a different processor, so compare versions, never figures. `design_settings` is a 12-hex digest of the server-wide settings that can change an
 answer (`--strategy`, `--exclude`, `--goal-tolerance`, `--goal-tilt`, `--content-edge`,
 `--device-rate`, `--coefficient-bits`, `--integer-bits`) that differ from their defaults, so a
 server started with none of them always sends the same digest. `/health` also reports those

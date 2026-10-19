@@ -209,7 +209,10 @@ open questions it resolves. An item with no recorded outcome is not done.
   tests/test_design_golden.py`) in the same commit. Callers decide what to redesign from it.
   Wording, speed, packaging and new outputs don't bump it. If the probe shows a moved verdict
   or target, the golden will usually fail too, but it covers only a few synthetic requests:
-  a bump follows from what the change can do, not from whether the golden noticed.
+  a bump follows from what the change can do, not from whether the golden noticed. It leaves
+  out `counterfactual` and `parametric` because their fits differ across processors
+  (TODO, "Fit sensitivity to arithmetic"): regenerating it on one machine doesn't make those
+  hold on CI.
 * RBJ biquad formulae exist twice — `biquad.py`'s class hierarchy and `filters.py`'s
   `_sos_from_parameters`. Fix both or neither; the test asserting they agree is what keeps that
   honest.
