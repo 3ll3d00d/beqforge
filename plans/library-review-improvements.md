@@ -120,7 +120,26 @@ family as 6.
   depends on which endpoint took it. Worth an option that makes the optimisers deterministic across hardware, or
   guidance to pin those strategies to one machine.
 
+## 9. A design fills a mastering hum notch (F11, added after the first assessment)
+
+Found while checking mono titles with their channel sent as FC (beqdesigner F4, now decided: recover content whatever
+the channel count). A narrow notch at mains frequency is noise removed on purpose, not a rolloff; boosting it back
+restores the hum along with the programme left in it.
+
+| Title | Material at the frequency (vs ±2-8 Hz) | Design | Id |
+|---|---|---|---|
+| Bonnie and Clyde (1967), mono | -10.9 dB at 60 Hz, -9.6 dB at 120 Hz | PEQ 62.5 Hz +13.2 Q 5.96; PEQ 121.2 Hz +11.8 Q 3.54 | `jriver-18bd9f7c1e48-1180964` (v0.2.8 with FC; not deployed) |
+| Butch Cassidy and the Sundance Kid (1969) | -8.6 dB at 61 Hz | PEQ 61.2 Hz +20.9 Q 5.85 | in the queue, pending review |
+| The Birds (1963) | -10.2 dB at 120 Hz | PEQ 119.5 Hz +7.9 Q 5.95 | in the queue, pending review |
+| White Heat (1949), mono | -10.3 dB at 100 Hz | low shelf 91.9 Hz +21.8 Q 5.57 beside it (unclear) | `-1818989` (v0.2.8 with FC) |
+
+Measured with Welch, 0.5 Hz bins, on each title's 1 kHz `mono.wav`. Eleven other designs boost within 4 Hz of 50/60 Hz
+or a harmonic without a notch in the material, so the guard must look at the material, not the frequency alone.
+`b126055` already skips mains-hum notches in the ripple measure; the target and the fit do not. Proposal: treat a narrow
+notch at 50/60 Hz or a harmonic as excluded from the target (as `--exclude` does by hand), so nothing is lifted into it.
+
 ## Not here
 
-The mono policy (29 titles, beqdesigner F3/F4) is being analysed on the beqdesigner side and will come separately. The
-steep-filter default stays with TODO 5/6.
+The mono policy is decided on the beqdesigner side: recover content whatever the channel count, so mono titles are sent
+their one channel as FC (beqforge needs no change; it blocks only on a missing decomposition). At v0.2.8, 7 of 28 design
+and 21 decline on content grounds. The steep-filter default stays with TODO 5/6.
