@@ -10,6 +10,7 @@ real pipeline call (`test_design_declines_with_no_channel_decomposition`) exerci
 
 import dataclasses
 import math
+import os
 
 import numpy as np
 import pytest
@@ -18,6 +19,7 @@ from beqforge import BiquadSpec
 from beqforge.accept import AcceptParams, Verdict
 from beqforge.designer import (
     CONTRACT_VERSION,
+    DESIGN_VERSION,
     ContractViolation,
     DesignCandidate,
     DesignRequest,
@@ -29,6 +31,8 @@ from beqforge.designer import (
     _ndarray_to_json,
     _to_design_candidate,
     design,
+    design_settings_detail,
+    design_settings_digest,
     request_from_json,
     response_to_json,
     validate_response,
@@ -954,3 +958,125 @@ def test_rejected_designs_are_exempt_from_the_confidence_order() -> None:
             ],
         )
     )
+
+
+# ---- 1.4: which answer a build gives ----------------------------------------
+
+
+def test_every_answer_says_its_design_version_settings_and_build(monkeypatch) -> None:
+    monkeypatch.setattr("beqforge.record.revision", lambda: "abc123+src:def456")
+    params = PipelineParams(strategies=("flatten",))
+    failing = dataclasses.replace(
+        _candidate(passed=False), verdict=_verdict(False, ["overshoot"])
+    )
+    for report in (_report([_candidate()]), _report([failing])):
+        monkeypatch.setattr("beqforge.designer.run", lambda m, p, r=report, **_: r)
+        # whatever version the request names, as with the 1.1 and 1.3 fields
+        response = design(
+            dataclasses.replace(_small_request(), contract_version="1.0"), params
+        )
+        validate_response(response)
+        body = response_to_json(response)
+        assert body["contract_version"] == "1.0"
+        assert body["design_version"] == DESIGN_VERSION
+        assert body["design_settings"] == design_settings_digest(params)
+        assert body["designer_build"] == "abc123+src:def456"
+
+
+def test_a_response_without_the_1_4_fields_is_unchanged_on_the_wire() -> None:
+    body = response_to_json(
+        DesignResponse(contract_version="1.0", decline_reason="no_rolloff_detected")
+    )
+    assert not {"design_version", "design_settings", "designer_build"} & body.keys()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"design_version": -1}, "design_version"),
+        ({"design_version": "4"}, "design_version"),
+        ({"design_version": True}, "design_version"),
+        ({"design_settings": ""}, "design_settings"),
+        ({"designer_build": 7}, "designer_build"),
+    ],
+)
+def test_validate_response_rejects_a_malformed_design_identity(
+    overrides, match
+) -> None:
+    with pytest.raises(ContractViolation, match=match):
+        validate_response(
+            DesignResponse(
+                contract_version="1.4",
+                decline_reason="no_rolloff_detected",
+                **overrides,
+            )
+        )
+
+
+def test_all_default_settings_are_the_empty_set() -> None:
+    assert design_settings_detail(PipelineParams()) == {}
+    assert design_settings_digest(PipelineParams()) == design_settings_digest(
+        PipelineParams(
+            strategies=("flatten", "counterfactual", "parametric"),
+            realisation=Realisation(fs=96000, coefficient_bits=28, integer_bits=5),
+        )
+    )
+
+
+def test_serve_designer_with_no_flags_sends_the_empty_set(monkeypatch) -> None:
+    """All defaults has to mean the server started with no flags, or the empty set lies;
+    workers, cores, the cache, records and the shared root are no part of it."""
+    from tools.designer_server import build_parser, pipeline_params
+
+    for name in list(os.environ):
+        if name.startswith("BEQFORGE_"):
+            monkeypatch.delenv(name)
+    parser = build_parser()
+    assert design_settings_detail(pipeline_params(parser.parse_args([]), parser)) == {}
+    busy = parser.parse_args(
+        ["--workers", "2", "--cores", "4", "--cache-dir", "c", "--record-dir", "r"]
+        + ["--shared-root", "w"]
+    )
+    assert design_settings_detail(pipeline_params(busy, parser)) == {}
+    tuned = parser.parse_args(["--integer-bits", "4", "--strategy", "flatten"])
+    assert design_settings_detail(pipeline_params(tuned, parser)) == {
+        "integer_bits": 4,
+        "strategies": ["flatten"],
+    }
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        PipelineParams(strategies=("flatten",)),
+        PipelineParams(strategies=("parametric", "counterfactual", "flatten")),
+        PipelineParams(exclude_bands_hz=((30.0, 32.0),)),
+        PipelineParams(accept=AcceptParams(goal_tolerance_db=1.0)),
+        PipelineParams(accept=AcceptParams(target_tilt_db_per_octave=0.25)),
+        PipelineParams(judge_from_content_edge=True),
+        PipelineParams(realisation=Realisation(fs=48000.0)),
+        PipelineParams(realisation=Realisation(coefficient_bits=24)),
+        PipelineParams(realisation=Realisation(integer_bits=4)),
+    ],
+)
+def test_every_setting_that_can_change_an_answer_changes_the_digest(changed) -> None:
+    assert design_settings_digest(changed) != design_settings_digest(PipelineParams())
+    assert len(design_settings_detail(changed)) == 1
+
+
+def test_equal_settings_digest_equally_and_exclusions_in_any_order() -> None:
+    one = PipelineParams(exclude_bands_hz=((30.0, 32.0), (50, 52)))
+    other = PipelineParams(exclude_bands_hz=((50.0, 52.0), (30.0, 32.0)))
+    assert design_settings_digest(one) == design_settings_digest(other)
+    assert design_settings_detail(one) == {
+        "exclude_bands_hz": [[30.0, 32.0], [50.0, 52.0]]
+    }
+    assert len(design_settings_digest(one)) == 12
+
+
+def test_the_per_request_playback_model_is_not_a_setting() -> None:
+    """Bass management comes with each request, so it is the caller's to key on."""
+    params = PipelineParams(strategies=("flatten",))
+    assert design_settings_digest(
+        dataclasses.replace(params, playback=PlaybackParams(crossover_hz=120.0))
+    ) == design_settings_digest(params)

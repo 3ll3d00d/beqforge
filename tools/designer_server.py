@@ -44,8 +44,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from beqforge.designer import (  # noqa: E402
     CONTRACT_VERSION,
+    DESIGN_VERSION,
     ContractViolation,
     design,
+    design_settings_detail,
+    design_settings_digest,
     request_from_json,
     response_to_json,
     validate_response,
@@ -400,6 +403,13 @@ class DesignServer(ThreadingHTTPServer):
         if cores is not None and cores < workers:
             raise ValueError(f"cores must be at least workers ({workers}), not {cores}")
         self.settings = settings
+        # 1.4: which answer this server gives, the same on every response it sends
+        self.identity = {
+            "design_version": DESIGN_VERSION,
+            "design_settings": design_settings_digest(settings.params),
+            "design_settings_detail": design_settings_detail(settings.params),
+            "designer_build": record.revision(),
+        }
         self.workers: list[_DesignWorker] = []
         self._idle: queue.SimpleQueue[_DesignWorker] = queue.SimpleQueue()
         share = fit_share(workers, cores)
@@ -448,6 +458,8 @@ class _Handler(BaseHTTPRequestHandler):
             # server without a shared root shows up at registration, not on its first title.
             # "parallel" is how many designs it runs at once, for a caller to send it that
             # many rather than be told centrally. "status" stays for anything already polling it.
+            # 1.4: the design version, settings and build every response will carry, and the
+            # settings themselves for a person to read when live designers disagree
             self._respond(
                 200,
                 {
@@ -455,6 +467,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "contract_version": CONTRACT_VERSION,
                     "shared_root": self.server.settings.shared_root is not None,
                     "parallel": len(self.server.workers),
+                    **self.server.identity,
                 },
             )
             return
@@ -498,7 +511,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def main() -> int:
+def build_parser() -> _EnvironmentParser:
     parser = _EnvironmentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8420)
@@ -623,13 +636,13 @@ def main() -> int:
         default=False,
         help="only warnings and above",
     )
-    args = parser.parse_args()
+    return parser
 
-    logging.basicConfig(
-        level=logging.WARNING if args.quiet else logging.INFO,
-        format="%(asctime)s %(message)s",
-    )
 
+def pipeline_params(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> PipelineParams:
+    """The server-wide `PipelineParams` the flags ask for; `parser.error` on a bad one."""
     chosen = args.strategy or ["all"]
     if "all" in chosen:
         strategies = tuple(STRATEGIES)
@@ -645,12 +658,7 @@ def main() -> int:
         parser.error("device rate must be finite and positive")
     if not 0 < args.integer_bits < args.coefficient_bits:
         parser.error("device format requires 0 < integer bits < coefficient bits")
-    if not 1 <= args.workers <= MAX_WORKERS:
-        parser.error(f"workers must be 1-{MAX_WORKERS}")
-    if args.cores is not None and args.cores < args.workers:
-        parser.error(f"cores must be at least workers ({args.workers})")
-
-    params = PipelineParams(
+    return PipelineParams(
         realisation=Realisation(
             fs=args.device_rate,
             coefficient_bits=args.coefficient_bits,
@@ -664,6 +672,23 @@ def main() -> int:
             goal_tolerance_db=args.goal_tolerance,
         ),
     )
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(asctime)s %(message)s",
+    )
+
+    params = pipeline_params(args, parser)
+    strategies = params.strategies
+    if not 1 <= args.workers <= MAX_WORKERS:
+        parser.error(f"workers must be 1-{MAX_WORKERS}")
+    if args.cores is not None and args.cores < args.workers:
+        parser.error(f"cores must be at least workers ({args.workers})")
 
     for option, directory in (
         ("--cache-dir", args.cache_dir),
@@ -694,6 +719,7 @@ def main() -> int:
     logger.info(
         f"beqforge designer server: http://{args.host}:{args.port}{DESIGN_PATH} "
         f"(strategies: {', '.join(strategies)}; build {record.revision()}"
+        + f"; design version {DESIGN_VERSION}, settings {design_settings_digest(params)}"
         + f"; {args.workers} design(s) at once"
         + (f", {share} fit worker(s) each" if share is not None else "")
         + (f"; records to {args.record_dir}" if args.record_dir else "")

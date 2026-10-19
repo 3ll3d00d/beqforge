@@ -17,6 +17,13 @@ arrive by reference — a WAV under a root both sides can see, with the SHA-256 
 column — instead of as base64. The data model does not change: `request_from_json` turns a
 reference back into the same array (`beqforge.reference`), or refuses it naming the array.
 
+1.4 says which answer a build gives, apart from which build it is: `design_version`
+(`DESIGN_VERSION`), `design_settings` (a digest of the server-wide settings that can change an
+answer, `design_settings_digest`) and `designer_build` (`record.revision()`), top-level on every
+response whatever version the request names, and on `/health`. Two packagings of one release
+report different builds but the same design version, so a caller can tell which titles a new
+release would answer differently (`plans/design-version.md`).
+
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
 means this", not new analysis. Where there is genuine judgement (declining, `gain_reduction_db`
@@ -28,6 +35,8 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import hashlib
+import json
 import logging
 import math
 from dataclasses import dataclass
@@ -45,8 +54,21 @@ from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.3"
+CONTRACT_VERSION = "1.4"
 """The version this module implements. Responses echo the request's own version instead."""
+
+DESIGN_VERSION = 4
+"""Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
+`rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
+
+Not by wording (`commentary`, `decline_message`), speed, packaging, the server or the transport,
+and not by a new output that leaves the existing ones as they were. An answer change is one
+beyond `tests/test_design_golden.py`'s tolerance, not a last-digit difference between platforms.
+That test fails on an answer changed without a bump, or a bump without regenerating its golden.
+
+Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
+0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.6, the first to report it, is 4 too.
+`plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
@@ -131,6 +153,12 @@ class DesignResponse:
     decline_reason: str | None = None
     decline_message: str | None = None
     rejected: list[DesignCandidate] | None = None
+    design_version: int | None = None
+    """1.4: `DESIGN_VERSION`, on a design and a decline alike."""
+    design_settings: str | None = None
+    """1.4: `design_settings_digest` of the settings this answer was designed with."""
+    designer_build: str | None = None
+    """1.4: `record.revision()`, the same string as the commentary's `beqforge_revision`."""
 
 
 # Substrings `pipeline.run` puts in `Report.evidence_notes` when it returns `candidates=[]`
@@ -231,6 +259,47 @@ def _to_design_candidate(
     )
 
 
+def design_settings_detail(params: PipelineParams) -> dict[str, object]:
+    """The server-wide settings that can change an answer and differ from their default.
+
+    Exactly what `serve-designer` can set: strategies (in order: the order candidates are built
+    in is the order `rejected` and exact ranking ties fall in), exclusions (sorted), the goal's
+    tolerance and tilt, judging from the content edge, and the device's rate and coefficient
+    format. Workers, cores, the cache, records and the shared root change no answer and are not
+    here. A setting at its default is left out, so a flag added later whose default keeps
+    today's behaviour moves no server's digest; changing a default that alters answers is a
+    `DESIGN_VERSION` bump anyway.
+    """
+
+    def settings(p: PipelineParams) -> dict[str, object]:
+        return {
+            "strategies": list(p.strategies),
+            "exclude_bands_hz": sorted(
+                [float(low), float(high)] for low, high in p.exclude_bands_hz
+            ),
+            "goal_tolerance_db": float(p.accept.goal_tolerance_db),
+            "goal_tilt_db_per_octave": float(p.accept.target_tilt_db_per_octave),
+            "content_edge": bool(p.judge_from_content_edge),
+            "device_rate_hz": float(p.realisation.fs),
+            "coefficient_bits": int(p.realisation.coefficient_bits),
+            "integer_bits": int(p.realisation.integer_bits),
+        }
+
+    defaults = settings(PipelineParams())
+    return {k: v for k, v in settings(params).items() if v != defaults[k]}
+
+
+def design_settings_digest(params: PipelineParams) -> str:
+    """`design_settings_detail` in canonical JSON (sorted keys, no spaces, floats as Python's
+    shortest round-trip form), SHA-256, first 12 hex. All defaults digests the empty set."""
+    canonical = json.dumps(
+        design_settings_detail(params), sort_keys=True, separators=(",", ":")
+    )
+    digest = hashlib.sha256(b"design-settings-v1\0")
+    digest.update(canonical.encode("utf-8"))
+    return digest.hexdigest()[:12]
+
+
 def _provenance(
     report: Report,
     params: PipelineParams,
@@ -296,6 +365,7 @@ def design(
     unchanged (IMPROVEMENT_PLAN R2a). Nothing about the answer depends on it.
     """
     params = params or PipelineParams()
+    settings = design_settings_digest(params)
 
     _validate_audio_arrays(request.mono_mix, request.channels)
 
@@ -336,6 +406,9 @@ def design(
             decline_reason=reason,
             decline_message=f"{message} | found: {explain.found(report)} [{stamp}]",
             rejected=rejected,
+            design_version=DESIGN_VERSION,
+            design_settings=settings,
+            designer_build=provenance["beqforge_revision"],
         )
 
     candidate = _to_design_candidate(
@@ -360,6 +433,9 @@ def design(
         contract_version=request.contract_version,
         candidates=[candidate],
         rejected=rejected,
+        design_version=DESIGN_VERSION,
+        design_settings=settings,
+        designer_build=provenance["beqforge_revision"],
     )
 
 
@@ -511,7 +587,8 @@ _FIT_FIELDS = (
 
 
 def response_to_json(response: DesignResponse) -> dict:
-    """designer-interface.md §7.1's response body; `rejected` only when there are any."""
+    """designer-interface.md §7.1's response body; `rejected` only when there are any, and
+    1.4's design version, settings and build only when set."""
     if response.candidates is not None:
         body = {
             "contract_version": response.contract_version,
@@ -525,7 +602,14 @@ def response_to_json(response: DesignResponse) -> dict:
         }
     if response.rejected is not None:
         body["rejected"] = [_candidate_to_json(c) for c in response.rejected]
+    for name in _IDENTITY_FIELDS:
+        if getattr(response, name) is not None:
+            body[name] = getattr(response, name)
     return body
+
+
+_IDENTITY_FIELDS = ("design_version", "design_settings", "designer_build")
+"""1.4's top-level fields, in wire order."""
 
 
 _ALLOWED_BIQUAD_TYPES = {"peaking_eq", "low_shelf", "high_shelf"}
@@ -558,6 +642,7 @@ def validate_response(response: DesignResponse) -> None:
         )
 
     _validate_rejected(response.rejected)
+    _validate_identity(response)
 
     if is_decline:
         if not isinstance(response.decline_reason, str) or not response.decline_reason:
@@ -584,6 +669,21 @@ def validate_response(response: DesignResponse) -> None:
                 f"candidates[{i - 1}]'s ({previous_confidence}) — not ordered best-first"
             )
         previous_confidence = candidate.confidence
+
+
+def _validate_identity(response: DesignResponse) -> None:
+    """1.4: each of design_version, design_settings and designer_build absent or well formed."""
+    version = response.design_version
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, int) or version < 0
+    ):
+        raise ContractViolation(
+            f"design_version must be a non-negative integer, got {version!r}"
+        )
+    for name in ("design_settings", "designer_build"):
+        value = getattr(response, name)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise ContractViolation(f"{name} must be a non-empty string, got {value!r}")
 
 
 def _validate_rejected(rejected: list[DesignCandidate] | None) -> None:

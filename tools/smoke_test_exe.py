@@ -49,6 +49,7 @@ import numpy as np  # noqa: E402
 from scipy import signal  # noqa: E402
 
 from beqforge import Alignment, HighPass  # noqa: E402
+from beqforge.designer import DESIGN_VERSION  # noqa: E402
 from beqforge.harness import apply_high_pass  # noqa: E402
 from beqforge.material import LFE_GAIN  # noqa: E402
 
@@ -201,6 +202,22 @@ def main() -> int:
         if health.get("parallel") != 2:
             print(f"FAIL: /health should say parallel 2: {health}", file=sys.stderr)
             return 1
+        # 1.4: the design version is the source's, whatever the packaging; the build is baked
+        identity = {
+            name: health.get(name)
+            for name in ("design_version", "design_settings", "designer_build")
+        }
+        if (
+            identity["design_version"] != DESIGN_VERSION
+            or not identity["design_settings"]
+            or not str(identity["designer_build"]).endswith("(frozen build)")
+        ):
+            print(
+                f"FAIL: /health should say design version {DESIGN_VERSION}, its settings "
+                f"and a frozen build: {health}",
+                file=sys.stderr,
+            )
+            return 1
         print("OK: /health")
 
         conn = http.client.HTTPConnection(
@@ -215,6 +232,9 @@ def main() -> int:
                 f"FAIL: expected an accepted candidate, got {status} {body}",
                 file=sys.stderr,
             )
+            return 1
+        if any(body.get(name) != value for name, value in identity.items()):
+            print(f"FAIL: the response and /health disagree: {body}", file=sys.stderr)
             return 1
         candidate = body["candidates"][0]
         print(

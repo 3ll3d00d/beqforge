@@ -120,7 +120,7 @@ straight off disk. A stale record is skipped with a warning rather than failing 
 
 `beqforge serve-designer` runs this pipeline as a live, HTTP-bound filter designer for
 [`beqdesigner`](https://github.com/3ll3d00d/beqdesigner), implementing its
-`design/designer-interface.md` v1.2 contract (§7.1's HTTP binding) rather than the file-based
+`design/designer-interface.md` v1.4 contract (§7.1's HTTP binding) rather than the file-based
 `.npz` → `design` → `--beq` export flow above:
 
 ```bash
@@ -157,7 +157,8 @@ An unusable directory causes a startup error naming the option and path.
 relative to that root plus the SHA-256 of its decoded column, instead of inline base64 audio.
 The server resolves, decodes and checks each reference; an unusable reference gets HTTP 422
 naming the array, rather than a design decline. Inline requests remain supported.
-`GET /health` reports `contract_version` and whether `shared_root` is enabled. Each request
+`GET /health` reports `contract_version`, whether `shared_root` is enabled, and 1.4's design
+version, settings and build. Each request
 logs read, parse, decode, design and response timings; `tools/experiments/request_timing.py`
 measures cold and warm requests.
 
@@ -241,6 +242,22 @@ recovered and shaping fractions are kept in the run record, not the response. A 
 the same diagnosis, then the build in brackets. `beqforge/designer.py` is the
 pure `design(request) -> response` adapter, independently testable without a socket;
 `tools/designer_server.py` is the HTTP transport around it.
+
+**Which answer a build gives (contract 1.4).** Every response, design or decline, and
+`GET /health` carry `design_version`, `design_settings` and `designer_build`, whatever
+`contract_version` the request names. `design_version` is an integer bumped only by a change
+that can alter an answer for an unchanged request: the candidates, the rejected designs, a
+decline or a fit figure, beyond last-digit differences between platforms. Wording, speed and
+packaging don't bump it, so the executable and the image of one release report the same
+version and different `designer_build`s (the string also in `beqforge_revision`). Releases
+before it: 0.0.x and 0.1.0 are 0, 0.2.0 is 1, 0.2.1 is 2, 0.2.2 is 3, and 0.2.3 to 0.2.5
+are 4, as is 0.2.6, the first release to report it. `design_settings` is a 12-hex digest of the server-wide settings that can change an
+answer (`--strategy`, `--exclude`, `--goal-tolerance`, `--goal-tilt`, `--content-edge`,
+`--device-rate`, `--coefficient-bits`, `--integer-bits`) that differ from their defaults, so a
+server started with none of them always sends the same digest. `/health` also reports those
+settings as `design_settings_detail`, for reading when two designers disagree. A caller keys
+each title on (`design_version`, `design_settings`) to tell which titles a new release would
+answer differently.
 
 ### Running the designer in a container
 

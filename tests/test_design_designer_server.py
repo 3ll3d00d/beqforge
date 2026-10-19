@@ -27,11 +27,14 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqforge import Alignment, BiquadSpec, HighPass
+from beqforge import Alignment, BiquadSpec, HighPass, record
 from beqforge.designer import (
+    DESIGN_VERSION,
     DesignCandidate,
     DesignResponse,
     _ndarray_to_json,
+    design_settings_detail,
+    design_settings_digest,
     validate_response,
 )
 from beqforge.harness import apply_high_pass
@@ -152,14 +155,25 @@ def _known_filter_request(duration_s: float = 150.0, seed: int = 101) -> dict:
     }
 
 
+def _identity(params: PipelineParams) -> dict:
+    """1.4's fields, as `/health` and every response carry them."""
+    return {
+        "design_version": DESIGN_VERSION,
+        "design_settings": design_settings_digest(params),
+        "design_settings_detail": design_settings_detail(params),
+        "designer_build": record.revision(),
+    }
+
+
 def test_health_check(server) -> None:
     status, body = _request(server, "GET", "/health")
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.3",
+        "contract_version": "1.4",
         "shared_root": False,
         "parallel": 1,
+        **_identity(PipelineParams(strategies=("flatten",))),
     }
 
 
@@ -206,6 +220,10 @@ def test_declines_over_a_real_connection_with_no_channels(server) -> None:
     assert body["contract_version"] == "1.0"
     assert body["decline_reason"] == "channel_evidence_unavailable"
     assert "candidates" not in body
+    # 1.4's fields whatever version the request names, matching /health's
+    _, health = _request(server, "GET", "/health")
+    for name in ("design_version", "design_settings", "designer_build"):
+        assert body[name] == health[name]
 
 
 def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
@@ -224,6 +242,11 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     assert body["contract_version"] == "1.0"
     assert "decline_reason" not in body
     assert len(body["candidates"]) == 1
+    assert body["design_version"] == DESIGN_VERSION
+    assert (
+        body["designer_build"]
+        == body["candidates"][0]["commentary"]["beqforge_revision"]
+    )
 
     candidate = body["candidates"][0]
     assert 0.0 <= candidate["confidence"] <= 1.0
@@ -504,9 +527,10 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.3",
+        "contract_version": "1.4",
         "shared_root": True,
         "parallel": 1,
+        **_identity(PipelineParams(strategies=("flatten",))),
     }
 
 

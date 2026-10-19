@@ -93,8 +93,18 @@ def call(
         return error.code, json.load(error)
 
 
-def assert_response(status: int, body: dict, what: str) -> None:
+IDENTITY = ("design_version", "design_settings", "designer_build")
+"""Contract 1.4: on /health and every response alike."""
+
+
+def assert_response(
+    status: int, body: dict, what: str, health: dict | None = None
+) -> None:
     assert status == 200, f"{what}: HTTP {status}: {body}"
+    if health is not None:
+        assert all(body.get(name) == health[name] for name in IDENTITY), (
+            f"{what}: the response and /health disagree: {body}"
+        )
     assert (body.get("candidates") is None) != (body.get("decline_reason") is None), (
         f"{what}: exactly one of candidates and decline_reason: {body}"
     )
@@ -111,12 +121,21 @@ def check(base: str, work: pathlib.Path) -> None:
         f"/health: {status} {health}"
     )
     assert health.get("contract_version", "").startswith("1."), f"/health: {health}"
+    version = health.get("design_version")
+    assert isinstance(version, int) and not isinstance(version, bool), (
+        f"/health: no design version: {health}"
+    )
+    assert health.get("design_settings") and health.get("designer_build"), (
+        f"/health: no design settings or build: {health}"
+    )
 
     pcm = samples()
-    assert_response(*call(base, "/design", inline_request(pcm)), "inline")
+    assert_response(*call(base, "/design", inline_request(pcm)), "inline", health)
     write_wav(work / "smoke" / "mono.wav", pcm)
     assert_response(
-        *call(base, "/design", reference_request("smoke/mono.wav", pcm)), "by reference"
+        *call(base, "/design", reference_request("smoke/mono.wav", pcm)),
+        "by reference",
+        health,
     )
 
 
