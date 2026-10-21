@@ -389,6 +389,33 @@ def turnover_db_per_octave(
     return slope, material, float(freqs[peak])
 
 
+def overlift_bar_db(
+    correction: Correction, params: AcceptParams
+) -> tuple[np.ndarray, np.ndarray]:
+    """The guarded bins and the most the corrected curve may reach in each: `assess`'s over-lift bar.
+
+    The guard runs from the bottom of the design grid to the top of the judged band, below the
+    judged floor too, because a shelf can still boost that region. In each bin the corrected
+    curve may reach the higher of the requested shape and the material, plus the level
+    tolerance and half the material's own roughness. Depends on the material and the judged
+    band only, never on a filter, so the fitter scores against the same bar before anything is
+    fitted (`overlift_allowance` in `pipeline`).
+    """
+    guard = (correction.freqs >= DESIGN_GRID[0]) & (
+        correction.freqs <= correction.band_hz[1]
+    )
+    slack = spectral_roughness(correction, params.roughness_degree) / 2.0
+    bar = (
+        np.maximum(
+            correction.requested_db(params.target_tilt_db_per_octave)[guard],
+            correction.before_db[guard],
+        )
+        + params.level_tolerance_db
+        + slack
+    )
+    return guard, bar
+
+
 def spectral_roughness(correction: Correction, degree: int = 3) -> float:
     """How far the *input* departs from a smooth trend over the judged band.
 
@@ -582,19 +609,7 @@ def assess(
             "rolloff"
         )
 
-    # Guard below the judged floor too: a shelf can still boost that region.
-    guard = (correction.freqs >= DESIGN_GRID[0]) & (
-        correction.freqs <= correction.band_hz[1]
-    )
-    slack = spectral_roughness(correction, params.roughness_degree) / 2.0
-    bar = (
-        np.maximum(
-            correction.requested_db(params.target_tilt_db_per_octave)[guard],
-            correction.before_db[guard],
-        )
-        + params.level_tolerance_db
-        + slack
-    )
+    guard, bar = overlift_bar_db(correction, params)
     overshoot = correction.after_db[guard] - bar
     worst = int(np.argmax(overshoot))
     if _at(float(overshoot[worst]), quantum) > 0.0:

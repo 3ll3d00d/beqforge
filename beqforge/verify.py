@@ -418,6 +418,7 @@ def verify(
     priced_target_db: np.ndarray | None = None,
     reference_samples: np.ndarray | None = None,
     playback_model: str | None = None,
+    log: bool = True,
 ) -> Correction:
     """Apply the published device response and measure the corrected sub spectrum.
 
@@ -473,9 +474,10 @@ def verify(
         reference_level_db=reference_db,
         band_hz=band_hz,
     )
-    logger.info(f"Applied correction: {correction}")
-    for concern in correction.concerns(accept_params, priced_target_db):
-        logger.warning(f"Correction concern: {concern}")
+    if log:
+        logger.info(f"Applied correction: {correction}")
+        for concern in correction.concerns(accept_params, priced_target_db):
+            logger.warning(f"Correction concern: {concern}")
     return correction
 
 

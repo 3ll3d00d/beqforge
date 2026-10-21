@@ -343,6 +343,9 @@ def correction_band_hz(
 FitTask = tuple
 """Positional arguments for one `_fit_structure` call."""
 
+Ceiling = tuple[np.ndarray, np.ndarray]
+"""Frequencies and, at each, the most dB a cascade may lift it: a one-sided bound on the fit."""
+
 PARALLEL_FITS = True
 """Run independent fits in worker processes. Set False to profile or debug serially."""
 
@@ -506,6 +509,7 @@ def _structure_tasks(
     max_gain_db: float,
     realisation: "Realisation | None",
     seeds: tuple[int, ...],
+    ceiling: Ceiling | None = None,
 ) -> list["FitTask"]:
     """Every shelf/peak split of a section budget, from every seed."""
     return [
@@ -521,6 +525,7 @@ def _structure_tasks(
             max_gain_db,
             realisation,
             seed,
+            ceiling,
         )
         for shelves in range(1, sections + 1)
         for seed in seeds
@@ -539,6 +544,8 @@ class FitRequest:
     target_db: np.ndarray
     placement_band_hz: tuple[float, float] | None = None
     label: str = ""
+    ceiling: "Ceiling | None" = None
+    """The most the realised cascade may lift each guarded bin, one-sided (`_fit_structure`)."""
 
 
 @dataclass(slots=True, eq=False)
@@ -731,6 +738,7 @@ def _escalate(
                     max_gain_db,
                     realisation,
                     seeds,
+                    state.request.ceiling,
                 )
                 tasks.extend(built)
                 owners.extend([(state, sections)] * len(built))
@@ -1073,11 +1081,24 @@ def _fit_structure(
     max_gain_db: float,
     realisation: "Realisation | None",
     seed: int,
+    ceiling: Ceiling | None = None,
 ) -> tuple[list[BiquadSpec], float, float, int]:
     """Optimise one shelf/peak structure against worst target and device error.
 
     Differential evolution searches frequency, Q and gain bounds; bounded
     Nelder-Mead polishes the result. Return the fit and worker-local cost stats.
+
+    With a `ceiling`, the realised cascade must not lift any of its frequencies above it: the
+    judge's over-lift bar (`accept.overlift_bar_db`) guards down to the bottom of the design
+    grid, below the band the residual is scored on, and at a narrow peak in the material it
+    allows only a few dB where the smooth target asks for the boost around it. Unscored, the
+    fit lifted those peaks and the judge rejected the whole design (TODO 29, F9: Crazy Heart,
+    Spirited Away, Amy, Drive, Alien Resurrection). A hard bound, not a term in the error: every
+    cascade under it ranks before every cascade over it, and those over it by how far. Scored
+    as one more error the optimiser balanced the two (1.9 dB off the target and 1.9 dB over the
+    bar on a test target), and the judge rejects any overshoot, so on those five titles it
+    rescued nothing where the bound rescued Crazy Heart's flatten. The residual returned is
+    the larger of the two, so a cascade the bound could not be met for is not reported as fit.
     """
     started = time.perf_counter()
     evaluations = 0
@@ -1096,6 +1117,12 @@ def _fit_structure(
     bounds = [(low, high), (0.1, max_q), (-max_gain_db, max_gain_db)] * sections
 
     def cost(p: np.ndarray) -> float:
+        error, over = score(p)
+        # every cascade under the ceiling ranks before every cascade over it: no fit error
+        # approaches 1e3 dB, so the offset only has to exceed any of them
+        return error if over <= 0.0 else 1e3 + over
+
+    def score(p: np.ndarray) -> tuple[float, float]:
         nonlocal evaluations
         evaluations += 1
         p = _published_parameters(p)
@@ -1115,7 +1142,16 @@ def _fit_structure(
                 - undrifted
             )
             worst = max(worst, float(np.max(np.abs(drift[mask]))))
-        return worst
+        if ceiling is not None:
+            rate = fs if realisation is None else realisation.fs
+            realised = (
+                sos if rate == fs else _sos_from_parameters(p, shelves, peaks, rate)
+            )
+            if realisation is not None:
+                realised = realisation.quantise(realised)
+            lift = magnitude_db(realised, ceiling[0], rate) - ceiling[1]
+            return worst, float(np.max(lift))
+        return worst, -math.inf
 
     coarse = optimize.differential_evolution(
         cost, bounds, seed=seed, maxiter=300, popsize=20, tol=1e-10, polish=True
@@ -1130,7 +1166,7 @@ def _fit_structure(
     )
     best = fine.x if fine.fun < coarse.fun else coarse.x
     specs = _unpack(_published_parameters(best), shelves, peaks)
-    return specs, cost(best), time.perf_counter() - started, evaluations
+    return specs, max(score(best)), time.perf_counter() - started, evaluations
 
 
 def _published_parameters(params: np.ndarray) -> np.ndarray:

@@ -698,6 +698,48 @@ def test_the_fit_reports_the_residual_of_the_filter_it_publishes() -> None:
     assert residual == published
 
 
+def test_a_ceiling_bounds_the_lift_below_the_scored_band() -> None:
+    """The judge's over-lift bar guards below the band the residual is scored on (TODO 29, F9).
+
+    A target held at +10 dB down to the bottom of the grid, scored from 5 Hz, with a narrow
+    peak in the material at 4 Hz that the bar lets rise only 3 dB: unbounded, the shelf
+    carries its boost straight through it; bounded, the realised cascade stays under it, and
+    the residual reported is the fit it could make there, not a penalty.
+    """
+    grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    target = np.where(
+        grid < 20.0, 10.0, np.clip(10.0 - 20.0 * np.log2(grid / 20.0), 0, None)
+    )
+    device = F.Realisation()
+    peak = np.array([3.8, 4.0, 4.2])
+    ceiling = (peak, np.full(3, 3.0))
+
+    def lift(specs) -> float:
+        sos = device.quantise(biquad_sos(specs, device.fs))
+        return float(np.max(magnitude_db(sos, peak, device.fs)))
+
+    free, _, _, _ = F._fit_structure(
+        target, grid, 96000.0, 1, 0, (5.0, 200.0), (5.0, 40.0), 6.0, 26.0, device, 0
+    )
+    bounded, residual, _, _ = F._fit_structure(
+        target,
+        grid,
+        96000.0,
+        2,
+        0,
+        (5.0, 200.0),
+        (5.0, 40.0),
+        6.0,
+        26.0,
+        device,
+        0,
+        ceiling,
+    )
+    assert lift(free) > 8.0
+    assert lift(bounded) <= 3.0
+    assert residual < lift(free) - 3.0
+
+
 def test_the_fitting_loop_builds_the_same_coefficients_as_the_public_route() -> None:
     """`_sos_from_parameters` is a third copy of the RBJ formulae, so pin it to the others.
 

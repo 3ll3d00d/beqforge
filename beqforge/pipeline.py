@@ -45,6 +45,7 @@ from beqforge.accept import (
     AcceptParams,
     Verdict,
     assess,
+    overlift_bar_db,
 )
 from beqforge.design import DesignMethod, DesignParams, design
 from beqforge.diagnose import (
@@ -60,6 +61,7 @@ from beqforge.diagnose import (
 from beqforge.extraction import Envelopes, ExtractionParams, extract
 from beqforge.filters import (
     FIT_STATS,
+    Ceiling,
     FitRequest,
     FitStats,
     Realisation,
@@ -1540,18 +1542,51 @@ def _fit_band_hz(
     )
 
 
+def overlift_allowance(
+    material: Material, params: PipelineParams, judged_band: tuple[float, float]
+) -> Ceiling | None:
+    """The most a cascade may lift each bin the judge's over-lift bar guards, before fitting.
+
+    `accept.overlift_bar_db` on the unfiltered sub feed, less the material there: the bar
+    depends on the material and the judged band, never on a filter, so it can be handed to the
+    fitter as a one-sided bound and the fit and the verdict guard the same region the same way.
+    `None` when there is no sub feed to measure (the judge cannot run either).
+    """
+    sub = bass_managed_sum(material, playback=params.playback)
+    if sub is None or not np.any(sub):
+        return None
+    unfiltered = verify(
+        [],
+        sub,
+        float(material.fs),
+        band_hz=judged_band,
+        diagnose_params=params.diagnose,
+        exclude_bands_hz=params.exclude_bands_hz,
+        accept_params=params.accept,
+        realisation=params.realisation,
+        reference_samples=material.mono_mix,
+        playback_model=params.playback.description(),
+        log=False,
+    )
+    guard, bar = overlift_bar_db(unfiltered, params.accept)
+    return unfiltered.freqs[guard], bar - unfiltered.before_db[guard]
+
+
 def _fit_all(
-    proposals: list[Proposal], params: PipelineParams
+    proposals: list[Proposal],
+    params: PipelineParams,
+    ceiling: Ceiling | None = None,
 ) -> list[tuple[list[BiquadSpec], float]]:
     """Fit all proposed targets under a shared section escalation.
 
     Derive each target's placement span from its active correction, expand the
     scored band to cover those spans, and return the fitted cascades in order.
+    `ceiling` (`overlift_allowance`) bounds every fit's lift from above.
     """
     placements = _placements(proposals, params)
     return fit_minimal_biquads_all(
         [
-            FitRequest(p.target_db, placement, p.label)
+            FitRequest(p.target_db, placement, p.label, ceiling)
             for p, placement in zip(proposals, placements, strict=True)
         ],
         DESIGN_GRID,
@@ -1919,7 +1954,15 @@ def run(
 
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
-        results = _fit_all(needs_fitting, params) if needs_fitting else []
+        results = (
+            _fit_all(
+                needs_fitting,
+                params,
+                overlift_allowance(material, params, analysed.judged_band_hz),
+            )
+            if needs_fitting
+            else []
+        )
     # a proposal that arrives fitted is `parametric`'s, which `design` scored on its own
     # `residual_band_hz` — the same setting, by `parametric_params`
     shared_band = (

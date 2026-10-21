@@ -10,22 +10,22 @@
      "filters": [
       {
        "type": "low_shelf",
-       "freq_hz": 18.94,
-       "gain_db": 4.441,
-       "q": 2.1453
+       "freq_hz": 20.05,
+       "gain_db": 6.926,
+       "q": 0.4707
       },
       {
        "type": "low_shelf",
-       "freq_hz": 22.55,
-       "gain_db": 6.973,
-       "q": 0.56
+       "freq_hz": 19.15,
+       "gain_db": 5.103,
+       "q": 2.0538
       }
      ],
      "confidence": 0.9772255569185038,
-     "mv_adjust_db": 12.468211279234751,
+     "mv_adjust_db": 12.335725743422572,
      "method": "non_parametric",
      "gain_reduction_db": null,
-     "residual_db": 0.6133545805887994,
+     "residual_db": 0.7378993272498349,
      "residual_band_hz": [
       5.0,
       200.0
@@ -35,10 +35,10 @@
      "fc_uncertainty_hz": null,
      "slope_uncertainty": null,
      "channel_scope": null,
-     "residual_at_hz": 17.325699468666283,
+     "residual_at_hz": 17.755875813039534,
      "residual_direction": "over",
-     "residual_rms_db": 0.30450440339077955,
-     "residual_within_tolerance": 0.8257593672191089,
+     "residual_rms_db": 0.25509671792825983,
+     "residual_within_tolerance": 0.940626653877913,
      "residual_tolerance_db": 0.5
     }
    ]

@@ -52,6 +52,7 @@ from beqforge.pipeline import (  # noqa: E402
     _judge,
     analyse,
     contrast_ceiling_db,
+    overlift_allowance,
     propose,
 )
 
@@ -123,7 +124,13 @@ def _snapshot_title(material_path: Path) -> dict:
     fitted = dict(
         zip(
             [p.label for p in needs_fitting],
-            _fit_all(needs_fitting, base.params) if needs_fitting else [],
+            _fit_all(
+                needs_fitting,
+                base.params,
+                overlift_allowance(material, base.params, base.judged_band_hz),
+            )
+            if needs_fitting
+            else [],
             strict=True,
         )
     )

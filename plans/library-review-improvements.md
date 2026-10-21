@@ -224,3 +224,50 @@ Regression against fix 2's commit: probe 11 of 11 unchanged at tol 0; refit prob
 
 Bonnie and Clyde's counterfactual candidates still carry a peak near 61 Hz (+5-6 dB); their targets were unchanged by
 the fill, so it comes from the restored channel's shape below the deficit cap, not from the notch. Not the winner.
+
+### Fix 4: the fitter is bounded by the judge's over-lift bar (item 2, F9)
+
+The judge's over-lift check guards from the bottom of the design grid to the top of the judged band, below the band
+the fit's residual is scored on, and at a narrow peak in the material lets the corrected curve rise only the level
+tolerance plus half the material's roughness above it. The fitter never saw that bar, so a smooth boost lifted the
+peak and the judge rejected the whole design. The bar is now one function, `accept.overlift_bar_db`, used by `assess`
+unchanged and by `pipeline.overlift_allowance`, which measures it once per run on the unfiltered sub feed (it depends
+on the material and the judged band, never on a filter). `_fit_structure` takes the allowance as a hard bound on the
+quantised cascade's lift: every cascade under it ranks before every cascade over it, and the residual returned is the
+larger of fit error and overshoot. `tools/experiments/refit_probe.py` passes it too. Parametric's own fit is not
+bounded (it is fitted inside `design`). Shares the unreleased `DESIGN_VERSION` 5; the golden's flatten answer moved.
+
+The bound's form was decided on the seven library titles the check rejected, from beqdesigner's extracted material,
+at fix 3's commit, with the overshoot scored as one more error term, and as a hard bound:
+
+| Title | Before | Error term | Hard bound |
+|---|---|---|---|
+| Crazy Heart | flatten over by 2.1 dB (counterfactual/25dB won) | over by 1.2 | **flatten passes and wins** |
+| Spirited Away | over by 1.3 | over by 0.7 | not over; fails turnover |
+| Alien Resurrection | over by 5.7 | over by 2.7, and tilt | not over; fails tilt |
+| Amy | over by 3.5 | over by 1.4 | over by 0.4 |
+| Drive | over by 3.6 | over by 3.0 | over by 2.1 |
+| Boyz n the Hood, Christine | design | unchanged | unchanged |
+
+As an error term the optimiser balances fit error against overshoot (1.9 dB each on a test target) and the judge,
+which rejects any overshoot, still rejects it: nothing rescued. The hard bound rescues Crazy Heart's flatten and turns
+two over-lifts into tilt and turnover failures, shapes a smooth cascade cannot make rather than near misses. Drive's
+4.6 Hz peak sits just below a large boost starting at 5 Hz and no smooth cascade separates them. Amy's 0.4 dB is the
+judge measuring a Welch spectrum of the corrected waveform, where the boost beside the narrow peak leaks into its bin,
+while the fit scores the filter's exact response.
+
+Regression against fix 3's commit:
+
+- Probe: 11 of 11 unchanged at tol 0.
+- Refit probe: 53 of 54 move (the bound changes the optimiser's path even where it never binds). Verdict flips: default
+  5 pass->fail, 6 fail->pass; content-edge 12 and 17. Real titles: Caught Stealing's winner flatten -> parametric in
+  both modes, shipping the same filter (flatten had matched parametric exactly and now fits 0.405 against 0.398);
+  Bugonia still declines — its failure is the coverage check below 8.1 Hz, not the over-lift guard, so fix 4 was never
+  going to reach it (corrected from fix 2's note). Injected variants: default designs 20 of 43 both ways, median
+  |shortfall| 0.80 -> 0.50 dB (5 better, 4 worse by 0.2 dB); content-edge 43 of 43 both ways, 0.50 -> 0.50 (10 better,
+  13 worse).
+- Protocol: seed 101 identical but `varying_filtered` recovery 18.05 -> 17.98 dB; seed 947 identical but
+  `natural_bass_light` (a false acceptance before and after) selected parametric rather than counterfactual/35dB.
+- Negative corpus, seeds 1-9: gated negatives 0/45, gate PASS; filtered true positives 6/9 both, median recovery
+  1.16 -> 0.90 dB RMS; `natural_droop` (reported, not gated) 4/9 -> 5/9, seed 7 now accepted (counterfactual/25dB, peak
+  boost 22.5 dB).
