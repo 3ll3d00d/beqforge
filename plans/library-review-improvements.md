@@ -319,3 +319,118 @@ On 34 real titles only Desperately Seeking Susan's FR is reported: a -48 dBFS of
 transient 16.4 dB above the programme there (two of the review's seven times match to within ten seconds; the slow
 level also follows drift between edits, so it finds more). Nothing on the 63 corpus cases. About 0.1-0.4 s a title.
 Probe 11 of 11 unchanged; no protocol or corpus run, since nothing a decision reads has changed.
+
+## Research (after the fixes)
+
+Measured on beqdesigner's extracted material (converted to `.npz`), the 11 baseline titles and the 63 corpus cases. Nothing
+here is built; each ends in what building it would take.
+
+### 1b: a textured passband finds no plateau (FLOW, Before the Devil Knows You're Dead, Blink Twice)
+
+All three have a real bass passband the plateau rule cannot qualify. FLOW sits within 1-6 dB of its 90th-percentile
+level from 30 to 150 Hz, but the +-3 dB band breaks into slivers and its widest (57-72 Hz) slopes 3.5 dB/oct against a
+3 dB/oct limit. Blink Twice's whole 30-60 Hz passband sits about 4 dB under the 90th percentile, which crests set, so
+it falls just outside the +-3 dB window. Before the Devil's only wide region (39-55 Hz) is a hump falling 7.3 dB/oct.
+
+Every variant that qualifies them moves the reference on much else. Measured on 34 real titles and the 63 corpus
+cases:
+
+| Variant | Gains a plateau | Real references moved | Corpus moved |
+|---|---|---|---|
+| discovery median 1/3 octave (23 points) | FLOW, Before the Devil | 18 | 27 |
+| tolerance 4 dB | all three | 30 | 41 |
+| tolerance 5 dB | all three | 34 | 45 |
+| 80th percentile | all three | 31 | 34 |
+| 75th percentile | all three | 35 | 40 |
+
+So there is no contained fix: qualifying a textured passband is a recalibration of plateau qualification for every
+title, to be validated like the texture retune (row 26) against the corpus and a fresh E10 set, not a patch.
+
+### 6 and 7: a reference above the sub band; a plateau at the filter floor
+
+Preferring a qualifying plateau that starts in the band the sub plays (below the 80 Hz sub-feed low-pass) over a wider
+one above it moves the reference on three real titles and nothing else (none of the 11 baseline titles, none of the 63
+corpus cases): A Real Pain 101-200 -> 63.5-81.1 Hz, Fame 80-152 -> 32.9-53.2, Amy 115-200 -> 59.3-95.9. Counterfactual
+(built in a worktree, applied to every mix-reference call):
+
+| Title | HEAD | With the preference |
+|---|---|---|
+| Fame | declines (within ripple) | designs: low shelf 25 Hz +9.8 dB; all four candidates pass |
+| Amy | declines (over-lift) | designs: low shelf 37 Hz +20.6 dB Q 5.2, peaks 41.6 Hz +6.5 and 68.1 Hz +13 |
+| A Real Pain | designs one peak, 87.7 Hz +2.8 dB (a dialogue-band dip, not bass) | declines on tilt |
+| Eastern Promises | declines | unchanged (no qualifying region below 80 Hz) |
+
+One plausible rescue (Fame), one doubtful (Amy is a documentary with no community BEQ; +20 dB on a resonant shelf is
+not obviously a loss restored), and the title that motivated it (A Real Pain, community BEQs +10-21 dB) still gets no
+low-end design. The corpus cannot price it, since no corpus case moves. Not worth building on this evidence.
+
+So I Married an Axe Murderer (item 7) is not a plateau problem: its 36.7-106.8 Hz plateau is used, and it declines
+because "no bins support a positive correction": 2 of 10,494 mix frames clear the 45 dB scene margin. It belongs with
+item 5.
+
+### 5: the absolute 45 dB scene margin (Blade II, Jason Bourne, Sunshine, Do the Right Thing, So I Married an Axe Murderer)
+
+Scene-band (10-60 Hz) frame energy above each title's 10th-percentile floor, mono mix:
+
+| | p99 | max | frames clearing 45 dB |
+|---|---|---|---|
+| Blade II | 22.9 | 26.9 | 0 of 12,769 |
+| Jason Bourne | 34.4 | 42.2 | 0 |
+| Sunshine | 39.0 | 44.1 | 0 |
+| Do the Right Thing | 38.5 | 48.9 | 1 |
+| So I Married an Axe Murderer | 37.2 | 47.6 | 2 |
+| 11 baseline titles, The Smurfs, Crazy Heart | 44.2-58.7 | 57.0-68.9 | 104-1,352 |
+| corpus stationary noise | 3.2-3.9 | 4.0-4.3 | 0 |
+
+The failing titles' loudest frames sit 10-20 dB nearer their floor than any baseline title's (Blade II's continuous LFE
+bed raises the floor). A purely relative rule (the loudest 1-3% of frames, where `scene_margin_db`'s docstring says
+genuine bass events are) always finds frames, even on stationary noise, which is the false positive §3.2 warns of on a
+bass-light title; the contrast-significance test downstream may catch noise, but not a bass-light mix whose loud frames
+are dialogue. A per-title margin is an experiment for the synthetic protocol (`natural_bass_light`), the corpus and E10,
+with variants such as the 45 dB margin falling back to a percentile only when too few frames clear it.
+
+### 4: the texture retune (row 26)
+
+The texture rule's ratio (deepest low-end shortfall over the passband's crest-to-trough ripple about its trend; above 1
+clears it) on seven of the review's texture declines and the corpus, by the two retunes row 26 names that need no fits
+(the trend degree and the band's top edge):
+
+| | cubic to 200 Hz (now) | line to 200 | quadratic to 200 | cubic to 80 Hz | line to 80 |
+|---|---|---|---|---|---|
+| Carrie | 0.85 | 0.82 | 0.86 | **2.57** | **1.33** |
+| Changeling | 0.98 | **1.03** | 0.96 | **1.06** | **1.19** |
+| Mirai | 0.93 | 0.91 | 0.71 | 0.99 | **1.02** |
+| Parasite | 0.59 | 0.41 | 0.47 | **1.52** | **1.08** |
+| Song of the Sea | 0.59 | 0.56 | 0.52 | **1.30** | **1.30** |
+| The Prestige | 0.38 | 0.31 | 0.38 | 0.81 | 0.44 |
+| True Grit | 0.79 | 0.81 | 0.75 | **1.22** | 0.83 |
+| gated corpus negatives past it (of 45) | 9 | 9 | 9 | 14 | 12 |
+| corpus filtered cases past it (of 9) | 9 | 9 | 9 | 6 | 6 |
+
+The degree does nothing. Ending the yardstick at the 80 Hz crossover clears five of the seven, but lets five more gated
+negatives past this rule to the later checks, and three filtered cases lose a measurable passband (fewer than 8 bins
+between the judged top and 80 Hz). All 11 baseline titles stay above 1 under every variant (Dossier has no passband to
+measure). Whether the extra negatives become false acceptances needs a full corpus run of the variant, and row 3 says
+no retune is adopted before E10 is written; this is the measurement it would start from. The boost-weighted gate, row
+26's third option, is a change to how the corpus scores, not to the rule, and is E10's to define.
+
+### Row 28: different answers by machine, after fix 2
+
+Two measurements on this machine (AVX-512, OpenBLAS SkylakeX kernels):
+
+- The refit probe (11 titles, 43 variants, fits only, from cached targets) under `OPENBLAS_CORETYPE=Haswell`: all 225
+  candidates publish identical filters, no verdict or winner moves. The fitter itself does not depend on the BLAS
+  kernel.
+- The 11 baseline titles designed from scratch (`--no-cache`), natively and as an older CPU (`OPENBLAS_CORETYPE=Haswell`
+  and `NPY_DISABLE_CPU_FEATURES` removing NumPy's AVX-512 dispatch): 29 of 30 candidates identical (all 10 flatten, all
+  12 counterfactual, 7 of 8 parametric). The odd one out is 28 Years Later's parametric, which wins in both: a wholly
+  different three-section cascade (27.4/25.3/22.8 Hz against 23.3/31.1/39.3 Hz; fit 0.42 against 0.44 dB). Its target
+  differs by at most 0.001 dB; the fitter turns that last-digit difference into another optimum.
+
+So on these titles the risk is parametric's target, derived from the identified model's inversion through arithmetic
+that NumPy dispatches per CPU, and the fitter's sensitivity to a last-digit change in any target (noted already in
+`smooth_unexcluded`). A cheap remedy to try: round every target to the gain precision publication uses (0.001 dB) before
+fitting, so a last-digit difference disappears unless a value straddles a rounding boundary. That is a fitter change
+(refit probe, protocol, corpus, `DESIGN_VERSION`) and should be measured on the CI platforms that disagreed. The golden's
+original disagreement (counterfactual 2 sections here against 3 on CI) was on a different processor, which this
+emulation does not fully reproduce.
