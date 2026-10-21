@@ -47,6 +47,7 @@ from beqforge.accept import (
     assess,
     overlift_bar_db,
 )
+from beqforge.dc_offset import dc_steps
 from beqforge.design import DesignMethod, DesignParams, design
 from beqforge.diagnose import (
     Diagnosis,
@@ -1731,6 +1732,8 @@ def analyse(
             "preference shaping: reference-to-plateau restoration assumes the desired original spectrum; temporal contrast is not SNR and bootstrap precision does not validate that assumption",
         )
     )
+    with timings.stage("dc_offset"):
+        limitations.extend(steps.note() for steps in dc_steps(material))
     blockers = []
     mix_freqs, mix_response = mean_spectrum(material.mono_mix, material.fs)
     mix_level, region = plateau_reference(

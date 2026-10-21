@@ -304,3 +304,18 @@ filters the sub feed with the device's full transfer, 0 Hz included, so a lifted
 peak. A DC-blocking high-pass would not stop the thumps: at the steps FR's 4-20 Hz transient stands 15-22 dB above FL's
 with no blocker and with a second-order one at 1, 3 or 5 Hz alike, since a step's energy runs far above any blocker's
 corner. What is left is detecting the steps and saying so. Decided with beqforge's user: report-only, no answer change.
+
+Built as `beqforge/dc_offset.py`, report-only. `analyse` adds an evidence note per channel found, so it reaches the
+commentary, a decline message and the run record; no decision reads it and no answer moves. A channel is reported when
+three things hold, with no dB constant: its slow DC level (the median of per-second means over 31 s) is persistently
+large enough that a step in it would produce a 4-20 Hz transient above the 90th percentile of the channel's own
+per-second peak in that band; a change in that level produces such a transient; and, with other channels to compare,
+near the step this channel's band level stands out of every other channel's. Each test answers a false alarm the
+prototype raised: against the median, every sparse channel (an LFE silent most of the time) reported drifts as steps;
+without the persistent offset, every LFE stood out of the other channels, since it alone carries infrasonic content;
+the cross-channel test separates a step in one channel from programme bass arriving in several at once.
+
+On 34 real titles only Desperately Seeking Susan's FR is reported: a -48 dBFS offset stepping 32 times, the largest
+transient 16.4 dB above the programme there (two of the review's seven times match to within ten seconds; the slow
+level also follows drift between edits, so it finds more). Nothing on the 63 corpus cases. About 0.1-0.4 s a title.
+Probe 11 of 11 unchanged; no protocol or corpus run, since nothing a decision reads has changed.
