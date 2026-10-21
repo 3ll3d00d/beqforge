@@ -1,6 +1,6 @@
 # Improvements from the library decline review
 
-**Proposal, not built; for beqforge to assess** (from beqdesigner's full-library run, 19 October 2026; TODO row 29).
+**Proposal, assessed and being built (see [Outcomes](#outcomes))** (from beqdesigner's full-library run, 19 October 2026; TODO row 29).
 
 beqdesigner designed its whole JRiver library (1,287 titles) with beqforge 0.2.3 to 0.2.5. Every one of the 279
 declines was reviewed against the run record (where one exists), the material and the community BEQ catalogue. 217
@@ -143,3 +143,23 @@ notch at 50/60 Hz or a harmonic as excluded from the target (as `--exclude` does
 The mono policy is decided on the beqdesigner side: recover content whatever the channel count, so mono titles are sent
 their one channel as FC (beqforge needs no change; it blocks only on a missing decomposition). At v0.2.8, 7 of 28 design
 and 21 decline on content grounds. The steep-filter default stays with TODO 5/6.
+
+## Outcomes
+
+Assessed with beqdesigner (20 October 2026). Agreed: four fixes (items 1, 9, 2 and the drift scoring behind most of
+item 3), the small items O1 and O2, then research on 1b/6/7, the texture retune (4), the scene margin (5) and row 28.
+Each fix lands as its own commit with its own regression check against the commit before it.
+
+### Fix 1: an unmeasured tracking floor is no longer reported as a measurement (item 1)
+
+`Diagnosis.tracking_measured` is false when the mix has no plateau (or the material is shorter than one Welch
+segment), so `noise_floor_hz` holds only the band-top placeholder. The summary now says where real bass content stops
+was not measured, and the sub-band plateau blocker says tracking below the flat region could not be measured instead
+of "tracking stops at 200.0 Hz". The flag is carried in the stage cache and the run record. Wording only: no decision
+reads it, the decline prefix is unchanged, and `DESIGN_VERSION` stays at 4.
+
+Regression: probe snapshot at HEAD against this change, `--tol 0`, analysis recomputed: 11 of 11 titles unchanged.
+No refit probe or protocol run, since nothing the fit or the judge sees has changed.
+
+Why FLOW has no plateau at all (its 40-150 Hz passband wanders 6-7 dB, so no window qualifies) is research item 1b,
+not part of this fix.

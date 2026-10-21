@@ -182,7 +182,15 @@ class Diagnosis:
     """Legacy name: mix tracking boundary, conditional on absence of stopband leakage.
 
     NaN means all tested bands tracked; unavailable measurements terminate the search.
+    With no mix plateau to track against nothing is measured, and this holds the top of the
+    analysis band as a placeholder; `tracking_measured` says which.
     """
+
+    tracking_measured: bool = True
+    """False when tracking was never measured (no mix plateau, or too little audio):
+    `noise_floor_hz` is then a placeholder, not where content stops, and must not be reported
+    as one (beqdesigner's library run, FLOW and This Happy Breed: "real bass content down to
+    200 Hz" on mixes with no plateau)."""
 
     @property
     def filtered_channels(self) -> list[str]:
@@ -712,6 +720,10 @@ def diagnose(
     strata, spread, filter_floor, noise_floor, _ = _temporal_evidence(
         material.mono_mix, material.fs, params, mix_plateau, freqs
     )
+    # the condition `_temporal_evidence` returns its placeholder on
+    tracking_measured = all(math.isfinite(f) for f in mix_plateau) and (
+        len(material.mono_mix) >= WELCH_NPERSEG
+    )
     return Diagnosis(
         freqs=freqs,
         mix_db=mix_db,
@@ -720,6 +732,7 @@ def diagnose(
         level_spread_db=spread,
         filter_floor_hz=filter_floor,
         noise_floor_hz=noise_floor,
+        tracking_measured=tracking_measured,
     )
 
 

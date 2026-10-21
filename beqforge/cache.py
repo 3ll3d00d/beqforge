@@ -291,6 +291,7 @@ def analysis_to_json(analysis: Analysis) -> dict[str, Any]:
             "level_spread_db": _pack(diagnosis.level_spread_db),
             "filter_floor_hz": _num(diagnosis.filter_floor_hz),
             "noise_floor_hz": _num(diagnosis.noise_floor_hz),
+            "tracking_measured": bool(diagnosis.tracking_measured),
         },
         "envelopes": {
             "freqs": _pack(envelopes.freqs),
@@ -342,6 +343,7 @@ def analysis_from_json(raw: dict[str, Any]) -> Analysis:
         level_spread_db=_unpack(d["level_spread_db"]),
         filter_floor_hz=_back(d["filter_floor_hz"]),
         noise_floor_hz=_back(d["noise_floor_hz"]),
+        tracking_measured=bool(d.get("tracking_measured", True)),
     )
     envelopes = Envelopes(
         freqs=_unpack(e["freqs"]),

@@ -379,3 +379,15 @@ def test_channels_in_parallel_give_the_serial_diagnosis_and_log(
     assert _same(runs[True][0], runs[False][0])
     assert runs[True][1] == runs[False][1]
     assert any(m.startswith("Extracted") for m in runs[True][1])
+
+
+def test_a_mix_with_no_plateau_says_its_tracking_was_never_measured() -> None:
+    """A mix rising across the whole band has no plateau to track against."""
+    samples = int(FS * DURATION_S)
+    rising = high_passed(scened_noise(5, samples), 400.0, order=2)
+    diagnosis = diagnose(material_from({"C": rising}), PARAMS)
+    assert not diagnosis.tracking_measured
+    assert diagnosis.noise_floor_hz == PARAMS.band_hz[1]  # the placeholder, unchanged
+
+    flat = diagnose(material_from({"C": scened_noise(6, samples)}), PARAMS)
+    assert flat.tracking_measured

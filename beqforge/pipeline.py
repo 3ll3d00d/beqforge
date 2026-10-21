@@ -1662,9 +1662,14 @@ def analyse(
             blockers.append(
                 "no usable contiguous mix plateau in the band the sub plays: the mix's only "
                 f"flat region is {region[0]:.1f}-{region[1]:.1f} Hz, above the "
-                f"{sub_edge:g} Hz sub-feed low-pass, and nothing below it tracks the "
-                f"programme (tracking stops at {diagnosis.noise_floor_hz:.1f} Hz), so there "
-                "is no bass passband to restore towards; restoration withheld"
+                f"{sub_edge:g} Hz sub-feed low-pass, and "
+                + (
+                    "nothing below it tracks the programme (tracking stops at "
+                    f"{diagnosis.noise_floor_hz:.1f} Hz)"
+                    if diagnosis.tracking_measured
+                    else "tracking below it could not be measured"
+                )
+                + ", so there is no bass passband to restore towards; restoration withheld"
             )
         texture = passband_ripple_db(
             material,

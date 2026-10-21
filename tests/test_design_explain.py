@@ -9,6 +9,7 @@ import dataclasses
 import numpy as np
 
 from beqforge import explain
+from beqforge.diagnose import Diagnosis
 from beqforge.pipeline import FitStats, PipelineParams, Report, Timings, analyse
 from tests.test_design_designer import _candidate, _report
 from tests.test_design_diagnose import FS, high_passed, material_from
@@ -18,7 +19,9 @@ from tests.test_design_pipeline import scened_noise
 def _analysed_report():
     samples = int(FS * 300.0)
     lfe = high_passed(scened_noise(22, samples), 22.0, order=6)
-    lfe[: int(len(lfe) * 0.6)] = 0.0  # an LFE that is mostly empty, as on real dialogue titles
+    lfe[: int(len(lfe) * 0.6)] = (
+        0.0  # an LFE that is mostly empty, as on real dialogue titles
+    )
     material = material_from(
         {"L": scened_noise(20, samples), "C": scened_noise(21, samples), "LFE": lfe}
     )
@@ -50,6 +53,25 @@ def test_found_names_the_reference_its_carriers_and_silent_channels() -> None:
 def test_found_without_a_plateau_says_there_is_nothing_to_measure_against() -> None:
     report = dataclasses.replace(_report([]), mix_reference_db=float("nan"))
     assert "no usable flat plateau" in explain.found(report)
+
+
+def test_an_unmeasured_tracking_floor_is_not_reported_as_where_content_stops() -> None:
+    """With no plateau, the floor is a placeholder (FLOW: "real bass content down to 200 Hz")."""
+    report = _report([])
+    unmeasured = dataclasses.replace(
+        report,
+        mix_reference_db=float("nan"),
+        diagnosis=Diagnosis(
+            freqs=np.array([5.0, 200.0]),
+            mix_db=np.zeros(2),
+            channels={},
+            noise_floor_hz=200.0,
+            tracking_measured=False,
+        ),
+    )
+    text = explain.found(unmeasured)
+    assert "real bass content down to" not in text
+    assert "where real bass content stops was not measured" in text
 
 
 def test_alternatives_say_why_each_other_candidate_lost() -> None:

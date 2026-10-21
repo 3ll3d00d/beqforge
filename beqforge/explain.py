@@ -50,7 +50,12 @@ def found(report: Report) -> str:
         return "; ".join(parts)
 
     parts.extend(_carriage(report))
-    if math.isnan(d.noise_floor_hz):
+    if not d.tracking_measured:
+        parts.append(
+            "where real bass content stops was not measured: with no plateau there is "
+            "nothing to track the low end against"
+        )
+    elif math.isnan(d.noise_floor_hz):
         parts.append(
             "there is real bass content all the way down: at every frequency the low end "
             "rises and falls with the rest of the soundtrack"

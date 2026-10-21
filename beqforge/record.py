@@ -293,6 +293,7 @@ def _diagnosis(diagnosis) -> dict[str, Any]:
         "level_spread_db": _arr(diagnosis.level_spread_db),
         "filter_floor_hz": _num(diagnosis.filter_floor_hz),
         "noise_floor_hz": _num(diagnosis.noise_floor_hz),
+        "tracking_measured": bool(diagnosis.tracking_measured),
     }
 
 
