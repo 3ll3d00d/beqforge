@@ -777,16 +777,20 @@ def _flat_deficit(material: Material, params: "PipelineParams"):
     """The mix against its own plateau: spectrum, reference, smoothed deficit and its anchor.
 
     Shared by the target (`low_end_deficit_db`) and the judged band (`judged_band_hz`) so
-    both find the knee in the same place. `None` when the mix has no usable plateau.
+    both find the knee in the same place. The reference and the deficit are read with mains-hum
+    notches filled (`fill_hum_notches`), so no strategy is asked to lift a repair back; the
+    spectrum returned is the raw one, for `passband_ripple_db`. `None` when the mix has no
+    usable plateau.
     """
     freqs, response = mean_spectrum(material.mono_mix, material.fs)
+    filled = fill_hum_notches(freqs, response, *params.diagnose.band_hz)
     level, plateau_hz = plateau_reference(
-        response, freqs, params.diagnose, params.exclude_bands_hz
+        filled, freqs, params.diagnose, params.exclude_bands_hz
     )
     if not math.isfinite(level):
         return None
     deficit = smooth_unexcluded(
-        np.maximum(-(response - level), 0.0), freqs, params.exclude_bands_hz, 15
+        np.maximum(-(filled - level), 0.0), freqs, params.exclude_bands_hz, 15
     )
     on_grid = np.interp(DESIGN_GRID, freqs, deficit, left=deficit[0], right=0.0)
     anchor = _deficit_anchor(DESIGN_GRID, on_grid, params, plateau_hz)
@@ -837,8 +841,9 @@ def low_end_deficit_db(
         goal = house_curve_db(
             freqs, _judged_top_hz(anchor, params, noise_floor_hz), tilt
         )
+        filled = fill_hum_notches(freqs, response, *params.diagnose.band_hz)
         deficit = smooth_unexcluded(
-            np.maximum(level + goal - response, 0.0),
+            np.maximum(level + goal - filled, 0.0),
             freqs,
             params.exclude_bands_hz,
             15,
@@ -896,6 +901,77 @@ def mains_hum_notches(
         else:
             return tuple(notched)
     return ()
+
+
+def hum_notches(
+    freqs: np.ndarray, response: np.ndarray, low: float, high: float
+) -> tuple[tuple[float, float], ...]:
+    """Each mains harmonic in `low`-`high` notched on its own, as a band; a comb not required.
+
+    A harmonic is notched when the spectrum's minimum within `HUM_NOTCH_HALF_WIDTH_HZ` of it
+    lies further below its surround's log-frequency trend than the surround swings about that
+    trend: the `mains_hum_notches` test, about a line rather than the surround's raw floor.
+    The raw floor measures the slope too, and hum is often removed where the passband is
+    falling away: Bonnie and Clyde's 16 dB notch at 120 Hz and White Heat's 15 dB one at
+    100 Hz scored 0.57 and 0.61 against it and were missed, and the designs placed narrow
+    peaks of +12.5 and +11 dB in them (TODO 29, F11).
+
+    One harmonic suffices here, where `mains_hum_notches` demands the whole comb, because
+    what is done with the answer is different: `fill_hum_notches` replaces a notch with its
+    surround's trend, so a dip wrongly called a notch is changed by no more than its own
+    depth. Measured on 20 real titles at 50/60 Hz harmonics to 250 Hz: every notch
+    beqdesigner's library review listed qualifies (1.26-2.91), nothing on the 11 baseline
+    titles does (at most 0.80), and Butch Cassidy's 2 dB dips at 180 and 240 Hz do (1.26, 1.00)
+    — filled, they move the spectrum by 2 dB.
+    """
+    notched: list[tuple[float, float]] = []
+    for mains in MAINS_HZ:
+        for centre in np.arange(mains, high + 1e-9, mains):
+            if centre < low:
+                continue
+            offset = np.abs(freqs - centre)
+            inner = offset <= HUM_NOTCH_HALF_WIDTH_HZ
+            surround = (offset <= HUM_SURROUND_HALF_WIDTH_HZ) & ~inner
+            if not inner.any() or surround.sum() < 3:
+                continue
+            octaves = np.log2(freqs[surround])
+            trend = np.polyfit(octaves, response[surround], 1)
+            about = response[surround] - np.polyval(trend, octaves)
+            deepest = np.flatnonzero(inner)[np.argmin(response[inner])]
+            depth = np.polyval(trend, np.log2(freqs[deepest])) - response[deepest]
+            if depth > np.ptp(about):
+                band = (
+                    float(centre - HUM_NOTCH_HALF_WIDTH_HZ),
+                    float(centre + HUM_NOTCH_HALF_WIDTH_HZ),
+                )
+                if band not in notched:
+                    notched.append(band)
+    return tuple(sorted(notched))
+
+
+def fill_hum_notches(
+    freqs: np.ndarray, response: np.ndarray, low: float, high: float
+) -> np.ndarray:
+    """`response` with each `hum_notches` band replaced by its surround's log-frequency trend.
+
+    A notch at mains frequency is noise removed on purpose, not a rolloff: read as a deficit,
+    the target asks to lift it back and the fitter spends a narrow peak restoring the hum with
+    whatever programme was left in it. Filled, the target asks there for what it asks beside
+    it, and the notch stays in the material below the corrected level. Filled rather than
+    excluded (`--exclude`), because an exclusion asks for zero correction — a dip the fitter
+    would then have to dig inside a boost — and one inside the judged band withholds the run.
+    """
+    filled = np.array(response, dtype=np.float64, copy=True)
+    for band_low, band_high in hum_notches(freqs, response, low, high):
+        centre = (band_low + band_high) / 2.0
+        offset = np.abs(freqs - centre)
+        inner = offset <= HUM_NOTCH_HALF_WIDTH_HZ
+        surround = (offset <= HUM_SURROUND_HALF_WIDTH_HZ) & ~inner
+        trend = np.polyfit(np.log2(freqs[surround]), response[surround], 1)
+        filled[inner] = np.maximum(
+            response[inner], np.polyval(trend, np.log2(freqs[inner]))
+        )
+    return filled
 
 
 def passband_ripple_db(

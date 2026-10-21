@@ -197,3 +197,30 @@ Regression, each against HEAD (`6af2b34`, which decides exactly as fix 1's commi
   Quiet Girl reproduces its decline at HEAD (tilt +3.2 against +1.0) and designs with it (flatten, low shelf 14.3 Hz
   +4.29 dB, peak 15.3 Hz +1.71 dB). The Smurfs and Despicable Me 3 already design at HEAD on this machine (their library
   declines came from 0.2.3-0.2.5, partly on the Windows exe; see row 28) and still design with it.
+
+### Fix 3: a mains-hum notch is filled, not restored (item 9, F11)
+
+`hum_notches` tests each 50/60 Hz harmonic on its own, as `mains_hum_notches` tests a comb, but about the surround's
+log-frequency trend rather than its floor: a notch where the passband is falling away (Bonnie and Clyde's 16 dB notch
+at 120 Hz, White Heat's 15 dB one at 100 Hz) scored 0.57 and 0.61 against the floor and was missed. `fill_hum_notches`
+replaces each notch with that trend in the spectrum `_flat_deficit` reads, so the reference, the deficit, the knee and
+the judged band all see the programme beside the notch, and every strategy, capped by that deficit, asks there for what
+it asks beside it. Filled rather than excluded: an exclusion asks for zero correction (a dip inside a boost) and one in
+the judged band withholds the run. `passband_ripple_db` still reads the raw spectrum with its comb rule, unchanged.
+Measured over 20 real titles to 250 Hz: every notch the review listed qualifies (1.26-2.91 of the surround's swing),
+none on the 11 baseline titles does (at most 0.80), and Butch Cassidy's 2 dB dips at 180 and 240 Hz do, which filling
+moves by 2 dB. Shares `DESIGN_VERSION` 5 with fix 2, neither released.
+
+Regression against fix 2's commit: probe 11 of 11 unchanged at tol 0; refit probe 0 of 54 titles moved; protocol seeds
+101 and 947 and the negative corpus identical case for case. On beqdesigner's extracted material, before -> after:
+
+| Title | Before (winner) | After (winner) |
+|---|---|---|
+| Bonnie and Clyde | flatten with peaks at 62.3 Hz +11.4 dB Q 4.8 and 120.1 Hz +12.5 dB Q 5.8 | flatten with no section at a harmonic |
+| The Birds | flatten with a peak at 118.2 Hz +8.6 dB Q 5.7 | flatten, no section at a harmonic |
+| White Heat | flatten with a peak at 101.1 Hz +11.0 dB Q 5.8 | flatten now fails a cliff; counterfactual/45dB (unchanged) wins |
+| A Star Is Born | flatten | counterfactual/45dB; neither places a narrow section at 60 or 120 Hz |
+| Butch Cassidy, Glory | flatten | unchanged |
+
+Bonnie and Clyde's counterfactual candidates still carry a peak near 61 Hz (+5-6 dB); their targets were unchanged by
+the fill, so it comes from the restored channel's shape below the deficit cap, not from the notch. Not the winner.
