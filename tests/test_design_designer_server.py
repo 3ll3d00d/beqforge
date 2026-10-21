@@ -28,6 +28,7 @@ import pytest
 from scipy import signal
 
 from beqforge import Alignment, BiquadSpec, HighPass, record
+from beqforge.adjustments import kinds_for
 from beqforge.designer import (
     DESIGN_VERSION,
     DesignCandidate,
@@ -170,10 +171,11 @@ def test_health_check(server) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.4",
+        "contract_version": "1.5",
         "shared_root": False,
         "parallel": 1,
         **_identity(PipelineParams(strategies=("flatten",))),
+        "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }
 
 
@@ -527,10 +529,11 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.4",
+        "contract_version": "1.5",
         "shared_root": True,
         "parallel": 1,
         **_identity(PipelineParams(strategies=("flatten",))),
+        "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }
 
 

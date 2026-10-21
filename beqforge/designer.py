@@ -24,6 +24,11 @@ response whatever version the request names, and on `/health`. Two packagings of
 report different builds but the same design version, so a caller can tell which titles a new
 release would answer differently (`plans/design-version.md`).
 
+1.5 lets a request carry `adjustments` -- a band to leave alone, a floor, a boost cap, a tilted goal, a note -- and
+answers each in `adjustment_outcomes` (`beqforge.adjustments`, `plans/contract-1.5-adjustments.md`). They are applied to
+this request's parameters only, after the settings digest (which describes the server, not the request); a request
+without them is untouched, so its answer is the 1.4 answer.
+
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
 means this", not new analysis. Where there is genuine judgement (declining, `gain_reduction_db`
@@ -46,6 +51,15 @@ from typing import Literal
 import numpy as np
 
 from beqforge import BiquadSpec, explain, record
+from beqforge.adjustments import (
+    OUTCOMES,
+    AdjustmentOutcome,
+    DesignAdjustment,
+    adjustments_from_json,
+    apply_adjustments,
+    finish_outcomes,
+    outcome_to_json,
+)
 from beqforge.cache import Store
 from beqforge.design import DesignMethod
 from beqforge.material import Material
@@ -54,7 +68,7 @@ from beqforge.pipeline import Candidate, PipelineParams, Report, run
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.4"
+CONTRACT_VERSION = "1.5"
 """The version this module implements. Responses echo the request's own version instead."""
 
 DESIGN_VERSION = 5
@@ -92,6 +106,8 @@ class DesignRequest:
     coverage: Coverage
     channels: dict[str, np.ndarray] | None = None
     bass_management: dict | None = None
+    adjustments: tuple[DesignAdjustment, ...] = ()
+    """1.5: what the caller asks this design to change; () for none."""
 
 
 def _validate_audio_arrays(
@@ -165,6 +181,8 @@ class DesignResponse:
     """1.4: `design_settings_digest` of the settings this answer was designed with."""
     designer_build: str | None = None
     """1.4: `record.revision()`, the same string as the commentary's `beqforge_revision`."""
+    adjustment_outcomes: list[AdjustmentOutcome] | None = None
+    """1.5: one per request adjustment, on a design and a decline alike; None when none were asked."""
 
 
 # Substrings `pipeline.run` puts in `Report.evidence_notes` when it returns `candidates=[]`
@@ -372,6 +390,11 @@ def design(
     """
     params = params or PipelineParams()
     settings = design_settings_digest(params)
+    # 1.5: this request's own changes, after the digest -- which describes the server, not the request
+    asked = tuple(request.adjustments or ())
+    provisional: dict[str, AdjustmentOutcome] = {}
+    if asked:
+        params, provisional = apply_adjustments(params, asked)
 
     _validate_audio_arrays(request.mono_mix, request.channels)
 
@@ -397,6 +420,7 @@ def design(
     provenance = _provenance(report, params, material, record_dir)
 
     rejected = _rejected(report, params, report_gain_reduction)
+    outcomes = finish_outcomes(provisional, asked, report, params) if asked else None
     accepted = report.accepted
     if accepted is None:
         if not report.candidates:
@@ -415,6 +439,7 @@ def design(
             design_version=DESIGN_VERSION,
             design_settings=settings,
             designer_build=provenance["beqforge_revision"],
+            adjustment_outcomes=outcomes,
         )
 
     candidate = _to_design_candidate(
@@ -442,6 +467,7 @@ def design(
         design_version=DESIGN_VERSION,
         design_settings=settings,
         designer_build=provenance["beqforge_revision"],
+        adjustment_outcomes=outcomes,
     )
 
 
@@ -545,6 +571,7 @@ def request_from_json(body: dict, shared_root: Path | None = None) -> DesignRequ
             else None
         ),
         bass_management=body.get("bass_management"),
+        adjustments=adjustments_from_json(body.get("adjustments")),
     )
     _validate_audio_arrays(request.mono_mix, request.channels)
     return request
@@ -611,6 +638,10 @@ def response_to_json(response: DesignResponse) -> dict:
     for name in _IDENTITY_FIELDS:
         if getattr(response, name) is not None:
             body[name] = getattr(response, name)
+    if response.adjustment_outcomes is not None:
+        body["adjustment_outcomes"] = [
+            outcome_to_json(o) for o in response.adjustment_outcomes
+        ]
     return body
 
 
@@ -649,6 +680,7 @@ def validate_response(response: DesignResponse) -> None:
 
     _validate_rejected(response.rejected)
     _validate_identity(response)
+    _validate_outcomes(response.adjustment_outcomes)
 
     if is_decline:
         if not isinstance(response.decline_reason, str) or not response.decline_reason:
@@ -675,6 +707,32 @@ def validate_response(response: DesignResponse) -> None:
                 f"candidates[{i - 1}]'s ({previous_confidence}) — not ordered best-first"
             )
         previous_confidence = candidate.confidence
+
+
+def _validate_outcomes(outcomes: list[AdjustmentOutcome] | None) -> None:
+    """1.5 (§3): each outcome known, each id once; `adapted` says what was applied and why, `declined` and
+    `not_understood` why, and apply nothing. (That each answers an adjustment the request sent is the caller's check:
+    the response alone does not know the request.)"""
+    if outcomes is None:
+        return
+    seen: set[str] = set()
+    for i, o in enumerate(outcomes):
+        name = f"adjustment_outcomes[{i}]"
+        if not o.id or o.id in seen:
+            raise ContractViolation(f"{name} has no id, or one already answered")
+        seen.add(o.id)
+        if o.outcome not in OUTCOMES:
+            raise ContractViolation(
+                f"{name}.outcome {o.outcome!r} is not one of {OUTCOMES}"
+            )
+        if o.outcome != "honoured" and not o.reason:
+            raise ContractViolation(f"{name} is {o.outcome}, so it must say why")
+        if o.outcome == "adapted" and not isinstance(o.applied, dict):
+            raise ContractViolation(
+                f"{name} is adapted, so it must say what was applied"
+            )
+        if o.outcome in ("declined", "not_understood") and o.applied is not None:
+            raise ContractViolation(f"{name} is {o.outcome}, so nothing was applied")
 
 
 def _validate_identity(response: DesignResponse) -> None:

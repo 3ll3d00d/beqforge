@@ -54,6 +54,7 @@ from beqforge.designer import (  # noqa: E402
     validate_response,
 )
 from beqforge import filters, record  # noqa: E402
+from beqforge.adjustments import kinds_for  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.cache import DirStore, Store  # noqa: E402
 from beqforge.reference import UnusableReference  # noqa: E402
@@ -468,6 +469,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "shared_root": self.server.settings.shared_root is not None,
                     "parallel": len(self.server.workers),
                     **self.server.identity,
+                    # 1.5: the adjustments this server takes, their defaults its own settings
+                    "adjustment_kinds": kinds_for(self.server.settings.params),
                 },
             )
             return

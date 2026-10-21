@@ -1,6 +1,6 @@
 # Contract 1.5: design adjustments (beqforge's side)
 
-**Handoff, not built** (from beqdesigner, 21 October 2026; TODO row 30). beqdesigner's side is built and committed
+**Handoff; built 21 October 2026 (see [Outcome](#outcome))** (from beqdesigner, 21 October 2026; TODO row 30). beqdesigner's side is built and committed
 on its `main` (not yet pushed or released); this is what beqforge needs to do for a person to be able to ask it for a different design from the
 browser.
 
@@ -105,3 +105,26 @@ something* enables itself when `/v1/status` reports the kinds (its TODO row WP, 
 (`DesignAdjustment`, `AdjustmentOutcome`), `convert.validate_outcomes`, `http_binding.check_takes_adjustments` and
 `reported_adjustment_kinds`, and `src/test/python/test_pipeline_designer_adjustments.py` (what the caller sends and
 how it checks the answers).
+
+## Outcome
+
+Built on branch `contract-1.5-adjustments` (from `cf331b9`):
+
+* `beqforge/adjustments.py`: the shape check (`adjustments_from_json`; a malformed body is a 400, an unknown kind or a
+  bad parameter is answered), `apply_adjustments` (the mapping above, first by id of a one-value kind, the rest
+  declined), `finish_outcomes` (a cap the realised filters pass by more than the fit's own `residual_target_db` is
+  `adapted` with the peak; an applied adjustment on a declined design says so), `kinds_for` (`/health`, defaults the
+  server's settings) and `MAX_TILT_DB_PER_OCTAVE` = 3.
+* `max_boost` did not bind on `flatten` as first mapped (the restore caps and the parametric cap are other strategies'):
+  it is now also `PipelineParams.max_target_boost_db`, a ceiling `priced_by_evidence` applies to every strategy's
+  target, `None` (no ceiling) unless a request sets it. On the synthetic 24 Hz BW4 title a 6 dB cap takes the peak from
+  about 12 dB to 6.3 dB.
+* `designer.py`: `CONTRACT_VERSION = "1.5"`, the request and response fields, `_validate_outcomes`, applied after
+  `design_settings_digest`; `tools/designer_server.py`: `adjustment_kinds` on `/health`.
+* Not done: the note's text is not written into the run record (the record has the adjusted params).
+* No `DESIGN_VERSION` bump: a request without adjustments is untouched.
+
+Evidence: `tests/test_design_adjustments.py` (31, four real designs for direction: the cap lowers the peak, the tilt
+raises the master-volume figure, the floor keeps every section at or above 15 Hz, excluding 10-18 Hz declines the
+title with the adjustment saying why); `tests/test_design_golden.py` unchanged; the full suite 936 passed, 2 skipped;
+`probe.py snapshot`/`compare --tol 0` over the 11 baseline titles before (`cf331b9`) and after: every title unchanged.

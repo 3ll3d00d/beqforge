@@ -231,6 +231,12 @@ class PipelineParams:
     the acceptance window can hold and a slope it can defend at once — not in how many
     sections are on offer to fit whatever target they hand the optimiser."""
 
+    max_target_boost_db: float | None = None
+    """A ceiling on every strategy's target, applied with the evidence's (`priced_by_evidence`).
+
+    Never set by the server: a request's `max_boost` adjustment (contract 1.5, `beqforge.adjustments`) sets it for that
+    request only. None, the default, is no ceiling beyond the evidence's, so no answer moves without one."""
+
     parametric_max_boost_db: float = 20.0
     """Total parametric correction cap, used to place its protective high-pass.
 
@@ -1124,6 +1130,14 @@ def priced_by_evidence(
             )
         target = np.minimum(target, deficit_db)
     ceiling = contrast_ceiling_db(envelopes, params)
+    if (
+        params.max_target_boost_db is not None
+    ):  # a request's own cap (contract 1.5 `max_boost`)
+        if float(np.max(target)) > params.max_target_boost_db + 0.5:
+            notes.append(
+                f"the requested cap binds: the target is held to {params.max_target_boost_db:g} dB"
+            )
+        ceiling = np.minimum(ceiling, params.max_target_boost_db)
     # which bins failed or lacked evidence is a property of the run, not of this target, and
     # `analyse` already reports it once in the run's limitations
     clipped = target - ceiling
