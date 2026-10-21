@@ -1098,11 +1098,13 @@ def _fit_structure(
     def cost(p: np.ndarray) -> float:
         nonlocal evaluations
         evaluations += 1
+        p = _published_parameters(p)
         sos = _sos_from_parameters(p, shelves, peaks, fs)
         response = magnitude_db(sos, freqs, fs)
         worst = float(np.max(np.abs((response - target_db)[mask])))
         if realisation is not None:
-            # Score exact-coefficient device drift here; publication drift is screened later.
+            # Score the device's coefficient rounding of the published filter here; drift over
+            # jitters about it is screened later.
             if realisation.fs == fs:
                 device, undrifted = sos, response
             else:
@@ -1127,8 +1129,27 @@ def _fit_structure(
         options={"maxiter": 60000, "maxfev": 60000, "xatol": 1e-10, "fatol": 1e-12},
     )
     best = fine.x if fine.fun < coarse.fun else coarse.x
-    specs, residual = _unpack(best, shelves, peaks), cost(best)
-    return specs, residual, time.perf_counter() - started, evaluations
+    specs = _unpack(_published_parameters(best), shelves, peaks)
+    return specs, cost(best), time.perf_counter() - started, evaluations
+
+
+def _published_parameters(params: np.ndarray) -> np.ndarray:
+    """A flat parameter vector rounded as `publication_filters` rounds the published filter.
+
+    The fit has to be scored on the filter that is published, not the optimiser's floats. Scored
+    unrounded, a steep cascade's residual and device drift were the luckiest point in a
+    neighbourhood the published filter never sat at: over 923 library records the published
+    drift exceeded what was scored by more than 1 dB on 253 candidates and by more than 2 dB on
+    90, enough to tip The Smurfs, Despicable Me 3 and The Quiet Girl into tilt declines
+    (TODO 29). Python's `round`, element by element, so the result is exactly the published one.
+    """
+    rows = np.asarray(params, dtype=np.float64).reshape(-1, 3)
+    return np.array(
+        [
+            (round(float(f), 2), round(float(q), 4), round(float(g), 3))
+            for f, q, g in rows
+        ]
+    ).reshape(-1)
 
 
 def _unpack(params: np.ndarray, shelves: int, peaks: int) -> list[BiquadSpec]:

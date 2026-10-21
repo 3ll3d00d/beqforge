@@ -163,3 +163,37 @@ No refit probe or protocol run, since nothing the fit or the judge sees has chan
 
 Why FLOW has no plateau at all (its 40-150 Hz passband wanders 6-7 dB, so no window qualifies) is research item 1b,
 not part of this fix.
+
+### Fix 2: the fit is scored on the published parameters (item 3, and the drift behind it)
+
+`_fit_structure` scored its residual and the device's coefficient rounding on the optimiser's unrounded floats, but
+the filter is published with frequency rounded to 0.01 Hz, gain to 0.001 dB and Q to 0.0001. On a steep cascade the
+device's rounding is very sensitive to those last digits, so what the fit scored was a point the published filter never
+sat at: across 923 library records the published drift exceeded what was scored by more than 0.5 dB on 478 candidates,
+more than 1 dB on 253 and more than 2 dB on 90. The cost now rounds the parameters exactly as `publication_filters`
+does before scoring them, and the cascade returned is the rounded one, so the residual reported is the residual of the
+filter published (`test_the_fit_reports_the_residual_of_the_filter_it_publishes`). `accept.py`'s `max_drift_db`
+docstring no longer claims the published filter's own rounding is 0.006-0.014 dB. `DESIGN_VERSION` 4 -> 5; the golden's
+flatten answer moved (residual 0.631 -> 0.613 dB).
+
+Regression, each against HEAD (`6af2b34`, which decides exactly as fix 1's commit does):
+
+- Probe: 11 of 11 titles unchanged at tol 0 (analysis untouched, as expected).
+- Refit probe (11 titles, 43 injected variants): 53 of 54 move, as any fitter change does. Verdict flips 22 pass->fail
+  and 27 fail->pass. Real titles: **Bugonia loses its design in both modes** (flatten -> none): its one shelf
+  (0.559 dB) never met the 0.5 dB target, so the least-exposed cascade in the budget is taken, and honestly scored that
+  is now a shelf plus a peak (0.509 dB), which the judge rejects for correcting only down to 8.1 Hz while content
+  continues to 6.4 Hz. That is the fit-band/judged-band mismatch fix 4 addresses; recheck Bugonia there. Alto Knights
+  counterfactual/25dB fails a cliff check but the winner is unchanged. Injected variants, scored against truth: default
+  mode designs 21 -> 20 of 43 (Black Bag BW12 @ 30 Hz declines; its old design missed by 9.0 dB median), median
+  |shortfall| 0.7 -> 0.8 dB on the 20 in common; content-edge mode designs 43 of 43 both ways, median |shortfall|
+  0.7 -> 0.5 dB, 16 better and 8 worse by more than 0.2 dB.
+- Protocol seeds 101 and 947: no false acceptance gained or lost (`natural_bass_light` was and stays one on both seeds;
+  on 947 it is now counterfactual/35dB, not parametric); `varying_filtered` recovery 17.77 -> 18.05 and 13.55 -> 13.48 dB.
+- Negative corpus, seeds 1-9, against a run at HEAD (the committed `negative_corpus.json` is 32 designer commits old):
+  gated negatives 0/45 both, gate PASS; `natural_droop` 4/9 both; filtered true positives 7 -> 6, the one lost being
+  filtered/1, whose HEAD pick (parametric) recovered at 15.6 dB RMS; median recovery 1.27 -> 1.16 dB RMS.
+- The library titles that motivated it, run from beqdesigner's extracted material at HEAD and with this change: The
+  Quiet Girl reproduces its decline at HEAD (tilt +3.2 against +1.0) and designs with it (flatten, low shelf 14.3 Hz
+  +4.29 dB, peak 15.3 Hz +1.71 dB). The Smurfs and Despicable Me 3 already design at HEAD on this machine (their library
+  declines came from 0.2.3-0.2.5, partly on the Windows exe; see row 28) and still design with it.

@@ -202,8 +202,10 @@ class AcceptParams:
     Kept because the fitter still screens on it to *prefer* a robust cascade among equals, which
     is a legitimate tiebreak and the reason cancelling cascades rarely reach acceptance at all.
     The p90 is over `drift_samples` jitters of the published parameters — note that this explores
-    coefficient sets near the published one rather than the rounding the published filter itself
-    undergoes, which `verify` measures directly and which comes to 0.006-0.014 dB."""
+    coefficient sets near the published one rather than the device's rounding of the published
+    filter itself, which `verify` measures directly and which the fit now scores on the published
+    parameters too (TODO 29). That rounding is not negligible: on a steep cascade it can run to
+    several dB, which is why the fit has to see it."""
 
 
 @dataclass(frozen=True, slots=True)

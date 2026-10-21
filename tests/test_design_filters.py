@@ -668,6 +668,36 @@ def test_the_polish_cannot_leave_the_box_the_search_was_given() -> None:
     assert math.isfinite(residual)
 
 
+def test_the_fit_reports_the_residual_of_the_filter_it_publishes() -> None:
+    """The residual and device drift are scored on the rounded, published parameters.
+
+    Scored on the optimiser's floats, a steep cascade's device rounding was measured at a point
+    the published filter never sat at: across 923 library records the published drift exceeded
+    what the fit had scored by more than 1 dB on 253 candidates (TODO 29). The filter returned
+    is the published one, and its error is exactly the residual reported.
+    """
+    grid = np.logspace(math.log10(3.0), math.log10(400.0), 400)
+    target = np.clip(14.0 * (1 - 1 / (1 + (25.0 / grid) ** 3)), 0, None)
+    target = np.where(grid > 31.0, 0.0, target)
+    band = (5.0, 20.0)
+    device = F.Realisation()
+
+    specs, residual, _, _ = F._fit_structure(
+        target, grid, 96000.0, 3, 0, band, band, 6.0, 26.0, device, 0
+    )
+
+    assert specs == F.publication_filters(specs)
+    sos = biquad_sos(specs, device.fs)
+    response = magnitude_db(sos, grid, device.fs)
+    drift = magnitude_db(device.quantise(sos), grid, device.fs) - response
+    in_band = (grid >= band[0]) & (grid <= band[1])
+    published = max(
+        float(np.max(np.abs((response - target)[in_band]))),
+        float(np.max(np.abs(drift[in_band]))),
+    )
+    assert residual == published
+
+
 def test_the_fitting_loop_builds_the_same_coefficients_as_the_public_route() -> None:
     """`_sos_from_parameters` is a third copy of the RBJ formulae, so pin it to the others.
 

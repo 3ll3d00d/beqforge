@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "1.4"
 """The version this module implements. Responses echo the request's own version instead."""
 
-DESIGN_VERSION = 4
+DESIGN_VERSION = 5
 """Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
 `rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
 
@@ -71,6 +71,7 @@ sensitivity to arithmetic"), so a caller compares versions, never figures.
 
 Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
 0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, is 4 too.
+5 scores the fit on the published (rounded) parameters (TODO 29).
 `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
