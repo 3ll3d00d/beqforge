@@ -84,8 +84,8 @@ One version is one algorithm, not one filter on every machine: the `counterfactu
 sensitivity to arithmetic"), so a caller compares versions, never figures.
 
 Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
-0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, is 4 too.
-5 scores the fit on the published (rounded) parameters, fills mains-hum notches before
+0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, and 0.2.8 are 4 too.
+0.2.9 is 5: it scores the fit on the published (rounded) parameters, fills mains-hum notches before
 measuring the deficit, bounds the fit by the over-lift bar and refuses an infrasonic plateau as
 the reference (TODO 29, all unreleased so far, so one version).
 `plans/design-version.md` has each one's build."""
