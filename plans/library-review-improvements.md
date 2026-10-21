@@ -271,3 +271,36 @@ Regression against fix 3's commit:
 - Negative corpus, seeds 1-9: gated negatives 0/45, gate PASS; filtered true positives 6/9 both, median recovery
   1.16 -> 0.90 dB RMS; `natural_droop` (reported, not gated) 4/9 -> 5/9, seed 7 now accepted (counterfactual/25dB, peak
   boost 22.5 dB).
+
+### O2: an infrasonic plateau is refused as the reference
+
+A reference is what a correction restores towards, so `analyse` now requires the mix plateau to start at least
+`AcceptParams.min_judge_octaves` above `verify_floor_hz` (one octave above 5 Hz, so 10 Hz). Starting lower, there is
+no low end beneath it to restore, and the run declines up front as "nothing worth correcting below the mix's plateau"
+(`within_goal_tolerance`), without measuring texture or shortfall against it. No new constant and no contract change.
+`lowest_frequency_hz` alone, as proposed, would have caught none of them: every such plateau extends above 5 Hz.
+
+First written as `no_usable_plateau`, which the golden test's unfiltered case showed was wrong: an unfiltered mix,
+flat across the band, also has a plateau starting at 4 Hz, as do many of the corpus's negatives (broadband, rumble and
+varying-source plateaus from 4.0 Hz up to anywhere between 7 and 200 Hz). Neither the infrasonic plateau nor a whole
+flat passband is unusable; what both lack is any low end beneath them to restore, which is the reason now given.
+
+Plateau starts measured on 34 titles at hand: Don't Bother to Knock and Ace in the Hole 4.0, Sunset Boulevard 5.2, The
+Favourite 6.5, Evil Does Not Exist 8.7; then All About Eve 12.2 (kept; it declines on loud events anyway), and every
+other real title 15.0 or above.
+
+Regression against fix 4's commit, run with the first wording (the decision is the same; only the reason text and code
+differ): probe 11 of 11 unchanged, refit probe 0 of 54 moved, protocol seeds 101 and 947 and the negative corpus
+identical case for case. The six titles all decline before and after. Don't Bother to Knock and The Favourite change
+reason from `within_programme_ripple` to `within_goal_tolerance`; Ace in the Hole, Sunset Boulevard and Evil Does Not
+Exist lead with an earlier blocker (loud events, positive correction) and keep their code, now with the plateau stated;
+All About Eve is unchanged. The golden's unfiltered case moves from `within_programme_ripple` to
+`within_goal_tolerance`. A decline reason is an answer, so this shares the unreleased `DESIGN_VERSION` 5.
+
+### O1: a DC offset and its steps (findings; report-only detection to follow)
+
+Measured on Desperately Seeking Susan before building anything. Headroom already counts the offset: `measure_headroom`
+filters the sub feed with the device's full transfer, 0 Hz included, so a lifted static offset is in the measured
+peak. A DC-blocking high-pass would not stop the thumps: at the steps FR's 4-20 Hz transient stands 15-22 dB above FL's
+with no blocker and with a second-order one at 1, 3 or 5 Hz alike, since a step's energy runs far above any blocker's
+corner. What is left is detecting the steps and saying so. Decided with beqforge's user: report-only, no answer change.

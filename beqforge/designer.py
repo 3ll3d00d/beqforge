@@ -71,8 +71,9 @@ sensitivity to arithmetic"), so a caller compares versions, never figures.
 
 Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
 0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, is 4 too.
-5 scores the fit on the published (rounded) parameters and fills mains-hum notches before
-measuring the deficit (TODO 29, both unreleased so far, so one version).
+5 scores the fit on the published (rounded) parameters, fills mains-hum notches before
+measuring the deficit, bounds the fit by the over-lift bar and refuses an infrasonic plateau as
+the reference (TODO 29, all unreleased so far, so one version).
 `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]

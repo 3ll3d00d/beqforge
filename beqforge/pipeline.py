@@ -1782,13 +1782,40 @@ def analyse(
                 )
                 + ", so there is no bass passband to restore towards; restoration withheld"
             )
-        texture = passband_ripple_db(
-            material,
-            params,
-            diagnosis.noise_floor_hz,
-            trend_degree=MIX_TEXTURE_TREND_DEGREE,
+        # A reference is what a correction restores towards, so it has to leave a band below
+        # it that a correction could be judged over: `min_judge_octaves` above the judging
+        # floor. Starting lower, there is no low end beneath it to restore, whether the
+        # plateau is a whole flat passband (an unfiltered mix, flat 4-200 Hz) or rumble at the
+        # very bottom of the spectrum under a programme that sits far higher (Don't Bother to
+        # Knock and Ace in the Hole at 4.0-10.8 Hz, Sunset Boulevard 5.2-13.5, The Favourite
+        # 6.5-8.9, Evil Does Not Exist 8.7-13.1; TODO 29, O2), where a shortfall or ripple
+        # read against it means nothing. Every other real title at hand starts at 12 Hz or
+        # above.
+        lowest_reference = params.verify_floor_hz * 2.0**params.accept.min_judge_octaves
+        bottomed = region[0] < lowest_reference
+        if bottomed:
+            blockers.append(
+                "nothing worth correcting below the mix's plateau: its flat region "
+                f"({region[0]:.1f}-{region[1]:.1f} Hz) starts less than "
+                f"{params.accept.min_judge_octaves:g} octave above the "
+                f"{params.verify_floor_hz:g} Hz judging floor, so there is no low end "
+                "beneath it to restore; restoration withheld"
+            )
+        texture = (
+            None
+            if bottomed
+            else passband_ripple_db(
+                material,
+                params,
+                diagnosis.noise_floor_hz,
+                trend_degree=MIX_TEXTURE_TREND_DEGREE,
+            )
         )
-        low_end = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+        low_end = (
+            None
+            if bottomed
+            else low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+        )
         if texture is not None and low_end is not None:
             ripple, (edge_low, edge_high) = texture
             deepest = float(np.max(low_end))

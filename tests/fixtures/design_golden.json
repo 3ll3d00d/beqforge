@@ -44,7 +44,7 @@
    ]
   },
   "unfiltered/flatten": {
-   "decline_reason": "within_programme_ripple"
+   "decline_reason": "within_goal_tolerance"
   }
  }
 }

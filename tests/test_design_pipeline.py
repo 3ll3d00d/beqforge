@@ -440,6 +440,35 @@ def test_a_reference_above_the_sub_band_still_restores_content_that_tracks() -> 
     assert not any("in the band the sub plays" in b for b in analysed.blockers)
 
 
+def test_an_infrasonic_plateau_is_no_reference(walled) -> None:
+    """Beneath a plateau starting within an octave of the judging floor there is nothing to
+    restore (TODO 29, O2).
+
+    Don't Bother to Knock and Ace in the Hole found their plateau at 4.0-10.8 Hz, rumble under
+    a programme that sits far higher; shortfall and ripple measured against it mean nothing.
+    """
+    from scipy import signal
+
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    rumble = signal.sosfilt(
+        signal.butter(8, 11.0, btype="low", fs=FS, output="sos"),
+        scened_noise(31, samples),
+    )
+    rumbling = material_from(
+        {"C": high_passed(scened_noise(23, samples), 60.0, order=4) + rumble}
+    )
+    params = PipelineParams(strategies=("flatten",))
+    analysed = analyse(rumbling, params)
+    assert analysed.mix_plateau_hz[0] < 10.0, analysed.mix_plateau_hz
+    assert any("no low end beneath it to restore" in b for b in analysed.blockers)
+
+    assert not any(
+        "no low end beneath it to restore" in b for b in analyse(walled, params).blockers
+    )
+
+
 @pytest.fixture(scope="module")
 def steep_into_noise():
     """A 12th-order high-pass at 30 Hz, then a stationary floor 60 dB down — the shape of the
