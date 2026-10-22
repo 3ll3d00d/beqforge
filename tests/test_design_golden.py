@@ -16,11 +16,13 @@ Numbers compare within `REL_TOL`/`ABS_TOL`, not bit for bit: the fixed requests 
 platform, which need not agree in the last digits.
 
 Each request is the synthetic known-rolloff title the server tests use, run with `flatten` (a
-bounded fit, ~8 s here); the cases reach an acceptance and both kinds of decline. The same title
-under `counterfactual` or `parametric` is left out on purpose: those fits are not stable across
-processors. Last-digit differences in BLAS kernels grow into a different filter (2 sections or 3;
-parametric boosts of 15.21, 15.78 and 16.49 dB on AVX-512, Haswell-kernel and CI runners), so no
-golden can hold them on every platform (TODO, "Fit sensitivity to arithmetic").
+bounded fit, ~8 s here) or `counterfactual`; the cases reach an acceptance and both kinds of
+decline. Until design version 6 last-digit differences in BLAS kernels grew into a different
+filter (2 sections or 3; parametric boosts of 15.21, 15.78 and 16.49 dB on AVX-512,
+Haswell-kernel and CI runners). Version 6's quantised fit input (TODO 28) brought
+`counterfactual` back on every CI platform. The same title under `parametric` is still left
+out: Linux and Windows agree with this machine, but macOS on arm64 publishes the same filters
+with figures 0.06 dB apart (`mv_adjust_db` 15.98 against 16.04), beyond the golden's tolerance.
 """
 
 import json
@@ -97,6 +99,7 @@ CASES = {
     "rolloff/flatten": (lambda: _title(_ROLLOFF), ("flatten",)),
     "unfiltered/flatten": (lambda: _title(None), ("flatten",)),
     "no-channels": (_no_channels, ("flatten",)),
+    "rolloff/counterfactual": (lambda: _title(_ROLLOFF), ("counterfactual",)),
 }
 
 

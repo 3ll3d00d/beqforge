@@ -146,3 +146,7 @@ machine. The caller compares versions, never figures, so the contract is unaffec
 titles behave the same way is unmeasured, because the probe compares runs on one machine; it's
 a backlog item ("Fit sensitivity to arithmetic"). beqdesigner was told.
 
+Design version 6 (TODO 28) brought `counterfactual` back into the golden on every platform;
+`parametric` still differs by 0.06 dB on macOS arm64 and stays out
+([verdict](library-review-improvements.md#built-a-reproducible-fit-input-22-october-2026-design_version-6)).
+

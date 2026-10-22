@@ -4,6 +4,45 @@
   "no-channels": {
    "decline_reason": "channel_evidence_unavailable"
   },
+  "rolloff/counterfactual": {
+   "candidates": [
+    {
+     "filters": [
+      {
+       "type": "low_shelf",
+       "freq_hz": 15.5,
+       "gain_db": -2.185,
+       "q": 4.8853
+      },
+      {
+       "type": "low_shelf",
+       "freq_hz": 20.01,
+       "gain_db": 3.299,
+       "q": 2.3087
+      }
+     ],
+     "confidence": 0.9849892809890275,
+     "mv_adjust_db": 8.801940198274066,
+     "method": "non_parametric",
+     "gain_reduction_db": null,
+     "residual_db": 1.683857644735708,
+     "residual_band_hz": [
+      5.0,
+      200.0
+     ],
+     "fc_hz": null,
+     "slope": null,
+     "fc_uncertainty_hz": null,
+     "slope_uncertainty": null,
+     "channel_scope": null,
+     "residual_at_hz": 16.496360274885337,
+     "residual_direction": "under",
+     "residual_rms_db": 0.8527455013531584,
+     "residual_within_tolerance": 0.4494374659096406,
+     "residual_tolerance_db": 0.5
+    }
+   ]
+  },
   "rolloff/flatten": {
    "candidates": [
     {

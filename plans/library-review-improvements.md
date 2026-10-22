@@ -470,7 +470,18 @@ CPU (`OPENBLAS_CORETYPE=Haswell` and NumPy's AVX-512 dispatch disabled): 0 of 11
 where 28 Years Later's parametric moved before. The CI processors that disagreed on the golden
 (v0.2.6) are not reproduced by this emulation: at HEAD the golden's synthetic title already
 agrees between the two settings, so whether `counterfactual` and `parametric` can return to the
-golden needs those cases added on a branch and CI's verdict.
+golden needed those cases added on a branch and CI's verdict.
+
+**CI's verdict (22 October 2026, branch `row28-golden-ci`, run 39849749384).** Both cases
+generated here, then run on all three CI platforms. `counterfactual` matched on Linux, Windows
+and macOS (arm64), so it is back in the golden. `parametric` matched on Linux and Windows, the
+x86 runners whose filters disagreed in 0.2.6 (16.49 dB against 15.21 here), but not on macOS
+arm64: the same four filters to the precision the response publishes, with `mv_adjust_db`
+15.98 against 16.04 and the residual figures 0.04-0.06 dB apart, beyond the golden's 1e-3.
+Before version 6 the x86 platforms differed by 1.3 dB and a section; what remains is a
+sub-rounding difference in the fit on a different instruction set and BLAS, and it stays out of
+the golden. Not reproducible here (no arm64 machine); an arm64 caller can see a parametric
+figure a few hundredths of a dB from an x86 one.
 
 **What it changes.** Every fit sees a different input, so the answers move the way any
 perturbation moves them:
