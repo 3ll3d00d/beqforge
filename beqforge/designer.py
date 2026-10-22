@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "1.5"
 """The version this module implements. Responses echo the request's own version instead."""
 
-DESIGN_VERSION = 5
+DESIGN_VERSION = 6
 """Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
 `rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
 
@@ -79,16 +79,17 @@ Not by wording (`commentary`, `decline_message`), speed, packaging, the server o
 and not by a new output that leaves the existing ones as they were. An answer change is one
 beyond `tests/test_design_golden.py`'s tolerance, not a last-digit difference between platforms.
 That test fails on an answer changed without a bump, or a bump without regenerating its golden.
-One version is one algorithm, not one filter on every machine: the `counterfactual` and
-`parametric` fits can land on a different filter on a different processor (TODO, "Fit
-sensitivity to arithmetic"), so a caller compares versions, never figures.
+One version is one algorithm. From 6 the fit is meant to give one filter on every machine too
+(TODO 28), measured so far only on this machine natively and as an emulated older CPU, so a
+caller still compares versions, never figures.
 
 Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 1, 0.2.1 is 2,
 0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, and 0.2.8 are 4 too.
 0.2.9 is 5: it scores the fit on the published (rounded) parameters, fills mains-hum notches before
 measuring the deficit, bounds the fit by the over-lift bar and refuses an infrasonic plateau as
-the reference (TODO 29, all unreleased so far, so one version).
-`plans/design-version.md` has each one's build."""
+the reference (TODO 29, all unreleased so far, so one version). 6 (unreleased) makes the fit
+reproducible: identification converges to 1e-12 and the fit's target and ceiling are quantised
+to 0.01 dB (TODO 28). `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]

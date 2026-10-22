@@ -233,6 +233,17 @@ def _weighted_lstsq(
     return design @ coefficients
 
 
+_CONVERGENCE = 1e-12
+"""`least_squares`' stopping tolerances for the two-part fit, against scipy's 1e-8 default.
+
+The optimum is often flat (the knee pegged at its bound, a robust loss), so at the default
+the descent stops wherever the processor's arithmetic happens to leave it: on the 11 baseline
+titles the corner and slope differed by 1e-6 to 1e-4 relative between this machine and an
+emulated older CPU, and 28 Years Later's parametric target by up to 0.002 dB, which the
+fitter turned into a different cascade (TODO 28). At 1e-12 the same comparison differs by
+about 1e-8, for about 0.1 s a title."""
+
+
 def _fit_two_part(
     log_f: np.ndarray,
     freqs: np.ndarray,
@@ -285,6 +296,9 @@ def _fit_two_part(
                 ),
                 loss="soft_l1",
                 f_scale=1.0,
+                ftol=_CONVERGENCE,
+                xtol=_CONVERGENCE,
+                gtol=_CONVERGENCE,
             )
             if best is None or found.cost < best.cost:
                 best = found

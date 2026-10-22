@@ -19,7 +19,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from multiprocessing import cpu_count
 
 import numpy as np
@@ -548,6 +548,34 @@ class FitRequest:
     """The most the realised cascade may lift each guarded bin, one-sided (`_fit_structure`)."""
 
 
+FIT_INPUT_STEP_DB = 0.01
+"""What a target and a ceiling are rounded to before they are fitted (TODO 28).
+
+The fitter is deterministic on one machine and independent of the BLAS kernel, but it turns
+any difference in its input, however small, into a possibly different optimum: a target that
+differed by 0.002 dB between two processors gave 28 Years Later another three-section cascade.
+A target derived through arithmetic NumPy dispatches per CPU can differ in its last digits, so
+the fit is handed a quantised copy and a difference smaller than the step vanishes unless a
+value straddles a step boundary. A finer step straddles more often: 0.001 dB still left 119 of
+that target's 400 bins different, 0.01 dB one. 0.01 dB is fifty times below the residual a fit
+must reach and far below anything the judge resolves, so the answer it buys is the same one."""
+
+
+def _reproducible(request: FitRequest) -> FitRequest:
+    """The request with its target and ceiling quantised to `FIT_INPUT_STEP_DB`."""
+    ceiling = request.ceiling
+    if ceiling is not None:
+        ceiling = (ceiling[0], _quantised(ceiling[1]))
+    return replace(request, target_db=_quantised(request.target_db), ceiling=ceiling)
+
+
+def _quantised(values_db: np.ndarray) -> np.ndarray:
+    return (
+        np.round(np.asarray(values_db, dtype=np.float64) / FIT_INPUT_STEP_DB)
+        * FIT_INPUT_STEP_DB
+    )
+
+
 @dataclass(slots=True, eq=False)
 class _Escalation:
     """One target's state while the section budget is escalated across all of them."""
@@ -673,7 +701,7 @@ def fit_minimal_biquads_all(
     stop a target at the first publishable tier within the residual limit.
     Return results in request order for the proposal and verdict stages.
     """
-    states = [_Escalation(request) for request in requests]
+    states = [_Escalation(_reproducible(request)) for request in requests]
     widest = len(requests) * max_sections * len(seeds)
     with _fit_pool(widest) as pool:
         _escalate(

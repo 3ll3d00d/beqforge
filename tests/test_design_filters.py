@@ -512,7 +512,9 @@ def escalation_target() -> tuple[np.ndarray, np.ndarray]:
         None,
     )
     target[freqs > 30.0] = 0.0
-    return freqs, target
+    # on the fit's own quantisation step, so a test that fits it directly fits what the
+    # escalation is handed
+    return freqs, np.round(target / F.FIT_INPUT_STEP_DB) * F.FIT_INPUT_STEP_DB
 
 
 def test_escalating_reaches_what_enumerating_reached() -> None:
@@ -795,3 +797,40 @@ def test_placement_reaches_far_up_and_not_at_all_down() -> None:
     # the evidence floor wins when the correction reaches under it
     deep = np.where(FREQS <= 15.0, 10.0, 0.0)
     assert correction_band_hz(deep, FREQS, 9.0)[0] == 9.0
+
+
+def test_the_fit_is_handed_its_target_and_ceiling_quantised(monkeypatch) -> None:
+    """TODO 28: a last-digit difference in a target must not reach the optimiser."""
+    freqs, target = escalation_target()
+    handed = []
+
+    def fitted(task):
+        handed.append((task[0], task[11]))
+        return [BiquadSpec("low_shelf", 25.0, 6.0, 0.707)], 1.0, 0.0, 0
+
+    monkeypatch.setattr(F, "PARALLEL_FITS", False)
+    monkeypatch.setattr(F, "_fit_task", fitted)
+    ceiling = (freqs, np.full_like(freqs, 1.23456789))
+    F.fit_minimal_biquads_all(
+        [F.FitRequest(target + 1.0e-7, ceiling=ceiling)],
+        freqs,
+        96000.0,
+        1,
+        50.0,
+        band_hz=(5.0, 200.0),
+        seeds=(0,),
+    )
+    for fitted_target, fitted_ceiling in handed:
+        steps = fitted_target / F.FIT_INPUT_STEP_DB
+        np.testing.assert_allclose(steps, np.round(steps), atol=1e-9)
+        np.testing.assert_allclose(fitted_ceiling[1], 1.23, atol=1e-12)
+
+
+def test_a_last_digit_difference_in_the_target_publishes_the_same_cascade() -> None:
+    """The same fit from targets that differ by far less than a quantisation step."""
+    freqs, target = escalation_target()
+    nudge = 1.0e-6 * np.sin(np.arange(len(target)))
+    kwargs = dict(band_hz=(5.0, 200.0), max_gain_db=20.0, seeds=(0,))
+    here = F.fit_minimal_biquads(target, freqs, 96000.0, 2, 0.5, **kwargs)
+    there = F.fit_minimal_biquads(target + nudge, freqs, 96000.0, 2, 0.5, **kwargs)
+    assert here == there

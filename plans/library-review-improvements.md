@@ -437,3 +437,57 @@ fitting, so a last-digit difference disappears unless a value straddles a roundi
 (refit probe, protocol, corpus, `DESIGN_VERSION`) and should be measured on the CI platforms that disagreed. The golden's
 original disagreement (counterfactual 2 sections here against 3 on CI) was on a different processor, which this
 emulation does not fully reproduce.
+
+#### Built: a reproducible fit input (22 October 2026, `DESIGN_VERSION` 6)
+
+The 0.001 dB target difference was not arithmetic alone. Identification's two-part fit
+(`identify._fit_two_part`) stopped at scipy's default tolerances on a flat optimum (the knee
+pegged at its 64 bound), so the corner and slope differed by 1e-6 to 1e-4 relative between the
+two CPU settings, and the parametric inverse carried that into the target. And the fitter is
+more sensitive than the plan assumed: a 1e-6 dB nudge to a target already changes the cascade,
+and rounding to 0.001 dB still left 119 of 28 Years Later's 400 target bins different between
+the two settings (0.01 dB left one). So, two changes:
+
+* identification converges to 1e-12 (`ftol`/`xtol`/`gtol`), which leaves about 1e-8 between the
+  settings, for about 0.1 s a title;
+* the fit is handed its target and ceiling quantised to 0.01 dB (`filters.FIT_INPUT_STEP_DB`),
+  fifty times below the residual a fit must reach.
+
+**Reproducibility.** The refit probe, from the same cached analysis, natively and as the older
+CPU (`OPENBLAS_CORETYPE=Haswell` and NumPy's AVX-512 dispatch disabled): 0 of 11 titles moved,
+where 28 Years Later's parametric moved before. The CI processors that disagreed on the golden
+(v0.2.6) are not reproduced by this emulation: at HEAD the golden's synthetic title already
+agrees between the two settings, so whether `counterfactual` and `parametric` can return to the
+golden needs those cases added on a branch and CI's verdict.
+
+**What it changes.** Every fit sees a different input, so the answers move the way any
+perturbation moves them:
+
+* Probe (tol 0): analysis unchanged on all 11; parametric targets moved by at most 0.0003 dB on
+  28 Years Later, Alto Knights and Ballad of Wallis Island. Real runs of those and of the two
+  titles whose winner moved in the refit: verdicts pass where they passed.
+* Refit probe, 54 titles and variants, against HEAD: 53 moved; 24 winner changes across both
+  modes; |fit error| change 0.32 dB mean, 27 of 225 candidates by more than 0.5 dB.
+* The 11 titles' accepted corrected curves (5-50 Hz) stay within 1.3 dB of HEAD's. Three swap
+  winner between near-tied candidates: 28 Years Later parametric to flatten, Incredible Hulk
+  and Send Help flatten to parametric (Send Help's peak 17.6 to 15.8 dB, same corrected curve
+  within 1.1 dB). The same answer.
+* Injected variants (`score_injected.py` on the refit records, 43): accepted 20 to 22 (Black Bag
+  BW12 30 at 1.2 dB median shortfall, Incredible Hulk BW16 30 n80 at 0.3 dB); Black Bag LR4 35
+  worse (counterfactual/25dB at 9.9 dB shortfall, 13.1 dB peak, to parametric at 15.8 dB, 3.4
+  dB peak, its counterfactual now failing on ripple); median shortfall where both accept 0.2 to
+  0.65 dB. No direction, only reshuffling.
+* Protocol: false acceptances unchanged on both seeds. Seed 101 `varying_filtered` flatten to
+  parametric (recovery 17.98 to 16.76 dB); seed 947 `natural_bass_light` parametric to
+  counterfactual/35dB (reported, not counted); seed 947 `varying_filtered` 13.481 to 13.487.
+* Corpus (seeds 1-9): every negative family 0/9 as before, gated negatives 0/45, gate PASS
+  (upper bound 0.079); `natural_droop` 5/9 both; `filtered` true positives 6/9 to 7/9, median
+  recovery 0.90 to 1.18 dB RMS.
+
+**The finding underneath.** Reproducible is not stable. Changing the fit's input by at most
+0.005 dB changed 24 winners on 54 titles. Usually those candidates are interchangeable, but not
+always (Black Bag LR4 35). The fitter's answer is one of many near-equivalent local optima, and
+which one it finds depends on digits nobody would defend. Seed, start or tie-break changes will
+reshuffle answers the same way. A fix would make the fitter choose among its optima on something
+meaningful, for example best-of-N starts by a coarse criterion. That's a research item for the
+backlog, not part of this row.
