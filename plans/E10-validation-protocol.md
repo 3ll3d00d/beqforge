@@ -1,6 +1,6 @@
-# E10: a fresh validation protocol for the content goal (v1)
+# E10: a fresh validation protocol for the content goal (v2)
 
-**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`); nothing has been run beyond a smoke check** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2; one question is open before any held-out run (the tilted goal's pivot, below)** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -39,9 +39,9 @@ Each scored case lands in one or more of these. They are tallied separately and 
 | --- | --- | --- |
 | **Noise lift** | The corrected noise spectrum rises more than 3 dB above the uncorrected noise anywhere programme sits below the noise in the truth (the truth arrays say where). | safety |
 | **Unnecessary intervention** | Any selected filter on a case whose truth is already within the goal and its tolerance across the truth band. | safety |
-| **Overshoot** | The corrected programme rises more than the goal tolerance above the goal anywhere in the truth band. | safety |
+| **Overshoot** | The corrected programme rises more than the goal tolerance above the goal, or above the uncorrected programme where that already stood over the goal, anywhere in the truth band. | safety |
 | **Missed recovery** | On a case with attenuated programme, abstaining, or a corrected programme still below the goal by more than the goal tolerance over more than a third of an octave of the truth band. | accuracy |
-| **Device failure** | The published response departs from the cascade's designed response by more than `max_drift_db`. | accuracy |
+| **Device failure** | The published cascade cannot be realised (infinite drift: unstable once quantised). A finite drift is already inside every curve the other classes read, and `max_drift_db` is the fitter's preference, not a gate (`AcceptParams`). | accuracy |
 
 "Truth band" is declared per recipe (below), not the scorer's fixed 60 Hz top: the band where
 the recipe put programme and where restoring it is right. "Noise" means the case's own additive
@@ -158,6 +158,11 @@ Welch mean smoothed over a sixth of an octave:
 * The **goal** is the observed programme's median level over 80-160 Hz (where every recipe leaves
   it alone) plus the goal's house curve pivoting at 80 Hz (`verify.house_curve_db`). With no
   programme there (noise only), there is no goal and nothing needs correcting.
+* The **programme** scored is the observed programme's spectrum less its source's (the
+  programme before the recipe shaped it, `E10Case.source`), from the same realisation,
+  normalised to zero on the reference and placed at the goal's level. So it is the recipe's
+  change alone: an unchanged case sits exactly on the flat goal, and a natural droop or a
+  cancellation is measured against the programme before it. (v2; see "First development run".)
 * The **truth band** runs down from 80 Hz, contiguously, while the observed programme stands more
   than 3 dB above the case's own noise. **Noise-only bins** are those below 80 Hz where the noise
   is louder than the programme.
@@ -166,6 +171,8 @@ Welch mean smoothed over a sixth of an octave:
 * Each class is then counted over the cases exposed to it: noise lift over cases with noise-only
   bins, unnecessary intervention over cases that need nothing, overshoot over all, missed
   recovery over those that need a correction, device failure over the selected.
+* Each row keeps the selected filters and their drift, so a revised instrument can rescore a
+  run without designing it again.
 
 **Smoke check (22 October 2026, HEAD `b309000`).** `filtered/1` at the flat goal: the pipeline
 corrects to within 1.4 dB of the goal from 12 to 80 Hz, rises 2.9 dB over it near 10 Hz (an
@@ -219,6 +226,69 @@ protocol version increments. Results from different versions are not pooled.
    with the analysis shared across goals, and writes the protocol version, build, rows and
    summary. `--partition held-out` takes its own seed block and refuses an uncommitted tree.
    Legacy counts are not embedded; a run's write-up states them.
-5. **Not run:** a full development run at HEAD (`--seeds 1-3`, every family, three goals), to
-   check the instrument at scale, recorded here. The held-out half is not run until the first
-   change E10 gates is frozen.
+5. **Run:** the first development run, below. It revised the instrument (v2). The held-out half
+   is not run until the tilted goal's pivot is settled and the first change E10 gates is frozen.
+
+## First development run (22 October 2026)
+
+Seeds 1-3, every family, three goals (36 cases, 108 rows), on the design version 6 stack
+(`9795921`). Scratch evidence, not committed; this records what it showed.
+
+**v1's instrument was wrong in three ways, all fixed in v2 before any held-out run:**
+
+1. *It read the deficit from the observed spectrum alone.* A single realisation's sixth-octave
+   estimate scatters by 2.5-3.5 dB at the bottom of an unchanged case, so `broadband/2` and
+   `sparse_dialogue/1,3`, which nothing touched, "needed correction" at the flat goal (missed
+   22/27, median shortfall 0.64 dB). v2 scores the observed spectrum less its source's from the
+   same realisation (`E10Case.source`, the programme before the recipe shaped it), so the change
+   alone is scored: every unchanged case sits exactly on its goal, and a natural droop or a
+   cancellation is measured against the programme before it.
+2. *Overshoot read one curve.* Against the source alone, filling a chance dip in the actual
+   programme reads as overshoot; against the observed spectrum alone, restoring a chance peak the
+   recipe cut does. v2 counts an overshoot only where both readings rise more than the tolerance
+   over the goal (or over where the programme already stood above it). `filtered/1` at the flat
+   goal, which rose 0.3 dB over at 28 Hz from a 1.1 dB chance dip filled, is no longer one.
+3. *Device failure counted drift over `max_drift_db`,* which the pipeline retired as a gate on
+   purpose: the drift is already in the published response every class reads. v1 flagged
+   `filtered/1` (3.4 dB) and `natural_droop/2` (4.1 dB), both realised curves fine. v2 counts
+   only an unrealisable cascade.
+
+Each row now keeps its selected filters and drift, and `tools/e10_run.py --rescore` scores a run
+again under a revised instrument; the run below was designed once and rescored.
+
+**Results under v2** (k/n over the exposed cases; development, so no claim beyond this set):
+
+| Goal | Noise lift | Unnecessary | Overshoot | Missed | Device | Median shortfall |
+|---|---|---|---|---|---|---|
+| flat | 4/15 | 0/12 | 4/36 | 18/24 | 0/14 | 0.03 dB |
+| gentle | 3/15 | 1/15 | 7/36 | 18/21 | 0/11 | 0.0 dB |
+| tight | 4/15 | 0/12 | 7/36 | 19/24 | 0/14 | 0.03 dB |
+
+* **The negatives hold.** `broadband`, `sparse_dialogue` and `stationary_noise` abstain at every
+  goal; unnecessary intervention is one row (`nonstationary_floor/1`, gentle).
+* **A pumping floor is lifted.** `nonstationary_floor` lifts the floor below the programme's
+  corner by 27-33 dB on all three seeds at every goal, where `coloured_floor` (the same floors,
+  stationary) abstains. A floor that rises with the programme tracks like programme, so the
+  evidence model reads it as programme. This is the protocol's first safety finding against the
+  pipeline (TODO 33). `natural_droop/1` lifts 12.9 dB at 5-5.8 Hz, under the white floor.
+* **Cancellation overshoots by 2-3 dB** on all three seeds (flat or tight): the recipe's
+  inverted fourth-order low band adds back near its 60 Hz corner, leaving a +2-3 dB bump at
+  40-56 Hz in the mix, and the designer levels the band below to it. Under the content principle
+  the bump is programme, so this is a fair reading of the recipe; but the recipe also reaches
+  the 80-160 Hz reference the goal is measured from, so whether to move its corner down is a
+  recipe question for the next revision.
+* **Missed recovery is mostly abstention.** Ten positives abstain at the flat goal: all of
+  `coloured_floor` and `correlated_noise`, `continuous_bass/1,3`, `finite_stopband/3`,
+  `filtered/2`. Where a design is selected, the median shortfall is about 0 dB except
+  `natural_droop/1` (5.2) and `/3` (2.0); the misses sit at the bottom of the truth band, which
+  reaches 5 Hz only because the synthetic white floor is 1e-5.
+* **The gentle goal's overshoots are an open instrument question.** E10 pivots the tilted goal
+  at 80 Hz; the designer pivots it at the top of its judged band (`verify.house_curve_db`, via
+  `Correction.requested_db`), which varies by case. With the judged top at 40 Hz the two goals
+  differ by 1.5 dB everywhere below it, and the gentle-goal overshoots on `finite_stopband/1,2`,
+  `partial_channels/3`, `natural_droop/2` and `filtered/1` appear only there. Whether the goal is
+  "a tilt below 80 Hz" or "a tilt below where the content's deficit begins" is the user's dial's
+  meaning, and the protocol must state it before a held-out run.
+
+Legacy counts at the same build: TODO 28's protocol seeds 101/947 and corpus seeds 1-9
+(`plans/library-review-improvements.md`, row 28's outcome).

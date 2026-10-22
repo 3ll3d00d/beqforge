@@ -4,11 +4,12 @@
 synthetic families. Kept out of the production pipeline, like `harness`, whose corpus it leaves
 untouched: the corpus and the frozen protocol keep running as regression checks.
 
-Each case stores the programme as recorded, the programme as observed (after whatever the
-recipe did to it) and the additive noise, per channel. The scorer reads truth from those arrays
-alone: where the observed programme stands above the noise, where it falls short of the goal,
-and where only noise is left. So whether a case needs a correction is computed per goal, never
-labelled by hand, and every score is taken on the published device response.
+Each case stores its source (the programme before the recipe shaped it), the programme as
+recorded, the programme as observed (after whatever the recipe did to it) and the additive
+noise, per channel. The scorer reads truth from those arrays alone: where the observed programme
+stands above the noise, how far the recipe moved it from its source, and where only noise is
+left. So whether a case needs a correction is computed per goal, never labelled by hand, and
+every score is taken on the published device response.
 """
 
 import math
@@ -19,10 +20,11 @@ import numpy as np
 from scipy import signal
 from scipy.stats import beta
 
-from beqforge import Alignment, HighPass
+from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
-PROTOCOL_VERSION = "e10-v1"
+PROTOCOL_VERSION = "e10-v2"
+"""v1 read the goal deficit from the observed spectrum alone; see `truth`."""
 
 GOALS: dict[str, tuple[float, float]] = {
     "flat": (0.0, 1.5),
@@ -73,6 +75,11 @@ class E10Case:
     name: str
     family: str
     seed: int
+    source: dict[str, np.ndarray]
+    """The programme before the recipe shaped it: what a correction would restore. Differs from
+    `recorded` where the shaping is part of the recording (a natural droop, a cancellation, a
+    programme recorded through a filter)."""
+
     recorded: dict[str, np.ndarray]
     """The programme as recorded, per channel, without noise: the truth a recipe started from."""
 
@@ -157,6 +164,7 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
         return float(np.std(samples)) * 10.0 ** (-db_down / 20.0)
 
     recorded = {"L": programme(), "LFE": programme()}
+    source = recorded
     observed = dict(recorded)
     noise = white()
     change = "none"
@@ -170,9 +178,11 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
             )
             for name in ("L", "LFE")
         }
+        source = recorded
         observed = dict(recorded)
     elif family == "stationary_noise":
         recorded = {name: np.zeros(n) for name in ("L", "LFE")}
+        source = recorded
         observed = dict(recorded)
         colour = str(rng.choice(("pink", "brown", "codec")))
         noise = {name: _shaped_noise(rng, n, colour) * 0.01 for name in ("L", "LFE")}
@@ -243,6 +253,7 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
             )
             for name in ("L", "LFE")
         }
+        source = recorded
         observed = dict(recorded)
         if seed % 2:
             hp = _high_pass(rng, (2, 3, 4))
@@ -255,7 +266,9 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
         observed = {name: apply_high_pass(s, hp, FS) for name, s in recorded.items()}
         change = f"{hp}"
 
-    return E10Case(f"{family}/{seed}", family, seed, recorded, observed, noise, change)
+    return E10Case(
+        f"{family}/{seed}", family, seed, source, recorded, observed, noise, change
+    )
 
 
 def cases(
@@ -301,7 +314,9 @@ class Truth:
 
     freqs: np.ndarray
     programme_db: np.ndarray
-    """The observed programme's mix spectrum, without noise."""
+    """The observed programme as the recipe left it relative to its source, placed at the
+    observed plateau's level: the change alone, without one realisation's chance shape. Where
+    there is no plateau, the observed spectrum as measured."""
 
     noise_db: np.ndarray
     goal_db: np.ndarray
@@ -316,11 +331,21 @@ class Truth:
     """Somewhere in the truth band the programme sits more than the tolerance under the goal,
     over a third of an octave or more."""
 
+    observed_db: np.ndarray | None = None
+    """The observed programme as measured, chance shape and all: what the designer sees."""
+
     extras: dict = field(default_factory=dict)
 
 
 def truth(case: E10Case, goal: str) -> Truth:
-    """Read the case's arrays at `goal`: computed, never labelled (the protocol's goals)."""
+    """Read the case's arrays at `goal`: computed, never labelled (the protocol's goals).
+
+    The deficit is the observed programme's spectrum less its source's, from the same
+    realisation, normalised to zero on the reference. v1 read it from the observed spectrum
+    alone, so a sixth-octave estimate's scatter (2.5-3.5 dB at the bottom of an unchanged
+    broadband case) passed for a deficit or an overshoot (plans/E10-validation-protocol.md,
+    "First development run"). The truth band and the noise-only bins still come from the
+    observed programme against the noise: audibility is about levels, not about the change."""
     from beqforge.diagnose import mean_spectrum
     from beqforge.verify import house_curve_db
 
@@ -353,6 +378,11 @@ def truth(case: E10Case, goal: str) -> Truth:
         if not audible[i]:
             break
         band[i] = True
+    noise_only = below & (noise > programme)
+    observed = programme
+    _, source = mean_spectrum(_mix(case.source), case.fs)
+    deficit = programme - np.interp(freqs, axis, _smoothed(axis, source))
+    programme = level + deficit - float(np.median(deficit[reference]))
     short = band & (programme < goal_db - tolerance)
     return Truth(
         freqs,
@@ -361,8 +391,9 @@ def truth(case: E10Case, goal: str) -> Truth:
         goal_db,
         tolerance,
         band,
-        below & (noise > programme),
+        noise_only,
         _span_octaves(freqs, short) > MIN_SPAN_OCTAVES,
+        observed,
     )
 
 
@@ -376,8 +407,48 @@ def published_response_db(filters, realisation, freqs: np.ndarray) -> np.ndarray
 
 def score(case: E10Case, goal: str, report, params) -> dict:
     """The protocol's failure classes for one case at one goal, on the published response."""
-    known = truth(case, goal)
     selected = report.accepted
+    if selected is None:
+        return score_selection(
+            case, goal, None, None, None, params, list(report.evidence_notes)[:3]
+        )
+    return score_selection(
+        case,
+        goal,
+        selected.label,
+        list(selected.filters),
+        selected.verdict.drift_db,
+        params,
+    )
+
+
+def rescore(row: dict, params, duration_s: float = DURATION_S) -> dict:
+    """A stored row scored again by this instrument, from the filters it kept: no new design."""
+    filters = (
+        None if row["filters"] is None else [BiquadSpec(*f) for f in row["filters"]]
+    )
+    return score_selection(
+        e10_case(row["family"], row["seed"], duration_s),
+        row["goal"],
+        row["selected"],
+        filters,
+        row["drift_db"],
+        params,
+        row["decline_notes"],
+    ) | {"seconds": row.get("seconds")}
+
+
+def score_selection(
+    case: E10Case,
+    goal: str,
+    label: str | None,
+    filters: list[BiquadSpec] | None,
+    drift: float | None,
+    params,
+    decline_notes: list[str] | None = None,
+) -> dict:
+    """`score`'s rows from what was selected (None for an abstention) rather than a report."""
+    known = truth(case, goal)
     row: dict = {
         "name": case.name,
         "family": case.family,
@@ -385,38 +456,41 @@ def score(case: E10Case, goal: str, report, params) -> dict:
         "goal": goal,
         "change": case.change,
         "needs_correction": known.needs_correction,
-        "selected": None if selected is None else selected.label,
-        "sections": None if selected is None else len(selected.filters),
-        "decline_notes": []
-        if selected is not None
-        else list(report.evidence_notes)[:3],
+        "selected": label,
+        "sections": None if filters is None else len(filters),
+        "decline_notes": [] if label is not None else list(decline_notes or []),
     }
     response = (
         np.zeros_like(known.freqs)
-        if selected is None
-        else published_response_db(selected.filters, params.realisation, known.freqs)
+        if filters is None
+        else published_response_db(filters, params.realisation, known.freqs)
     )
     lifted = response[known.noise_only]
     row["noise_exposed"] = bool(known.noise_only.any())
     row["noise_lift_db"] = round(float(lifted.max()), 2) if lifted.size else 0.0
-    row["noise_lift"] = bool(
-        selected is not None and row["noise_lift_db"] > NOISE_LIFT_DB
-    )
-    row["unnecessary"] = bool(selected is not None and not known.needs_correction)
+    row["noise_lift"] = bool(label is not None and row["noise_lift_db"] > NOISE_LIFT_DB)
+    row["unnecessary"] = bool(label is not None and not known.needs_correction)
     corrected = known.programme_db + response
     band = known.truth_band
     if band.any():
-        over = band & (corrected > known.goal_db + known.tolerance_db)
+        # lifted past the goal (or past where the programme already stood over it, as at a
+        # cancellation's bump) in both readings: what the recipe left, and what is actually
+        # there. Either alone mistakes the source's chance shape for an overshoot: filling a
+        # chance dip in the programme rises over the first, restoring a chance peak the recipe
+        # cut rises over the second
+        tolerance = known.tolerance_db
+        left = corrected > np.maximum(known.goal_db, known.programme_db) + tolerance
+        seen = known.observed_db + response
+        there = seen > np.maximum(known.goal_db, known.observed_db) + tolerance
+        over = band & left & there
         gap = np.maximum(known.goal_db - corrected, 0.0)[band]
         short = band & (corrected < known.goal_db - known.tolerance_db)
-        row["overshoot"] = bool(selected is not None and over.any())
+        row["overshoot"] = bool(label is not None and over.any())
         row["shortfall_median_db"] = round(float(np.median(gap)), 2)
         row["shortfall_worst_db"] = round(float(gap.max()), 2)
         row["missed"] = bool(
             known.needs_correction
-            and (
-                selected is None or _span_octaves(known.freqs, short) > MIN_SPAN_OCTAVES
-            )
+            and (label is None or _span_octaves(known.freqs, short) > MIN_SPAN_OCTAVES)
         )
         row["truth_band_hz"] = [
             round(float(known.freqs[band].min()), 1),
@@ -430,11 +504,18 @@ def score(case: E10Case, goal: str, report, params) -> dict:
             missed=False,
             truth_band_hz=None,
         )
-    drift = None if selected is None else selected.verdict.drift_db
+    # enough to rescore the row under a revised instrument without designing it again
+    row["filters"] = (
+        None
+        if filters is None
+        else [[f.type, f.freq_hz, f.gain_db, f.q] for f in filters]
+    )
+    row["drift_db"] = drift
+    # a finite drift is already inside every curve above, which is the published, quantised
+    # response; `max_drift_db` is the fitter's preference, not a gate (`AcceptParams`). What
+    # no curve can show is a cascade the device cannot realise at all
     row["device_failure"] = bool(
-        drift is not None
-        and math.isfinite(drift)
-        and drift > params.accept.max_drift_db
+        label is not None and drift is not None and math.isinf(drift)
     )
     return row
 

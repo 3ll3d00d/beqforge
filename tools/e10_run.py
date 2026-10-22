@@ -11,6 +11,10 @@ scratch evidence, never committed.
 `--partition held-out` takes the first `HELD_OUT_PER_FAMILY` seeds of the held-out block and
 refuses to run on a working tree with uncommitted changes: a held-out run judges a frozen
 change, and its result names the commit it judged.
+
+`--rescore RUN.json` scores a previous run's rows again with this instrument, from the filters
+each row kept, without designing anything: for a revision of the scorer, not of the pipeline.
+The output keeps the run's build and names the instrument's protocol version.
 """
 
 import argparse
@@ -100,10 +104,15 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=e10.DURATION_S, metavar="S")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--rescore", type=Path, metavar="RUN", help="score a previous run's rows again"
+    )
+    parser.add_argument(
         "--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2)
     )
     args = parser.parse_args()
 
+    if args.rescore:
+        return _rescore(args.rescore, args.output)
     families = tuple(args.families.split(",")) if args.families else e10.FAMILIES
     goals = tuple(args.goals.split(","))
     for name in families:
@@ -138,10 +147,33 @@ def main() -> int:
         "build": record.revision(),
         "goals": {g: e10.GOALS[g] for g in goals},
         "seeds": seeds,
+        "duration_s": args.duration,
         "summary": e10.summarise(rows),
         "cases": rows,
     }
     args.output.write_text(json.dumps(document, indent=2) + "\n")
+    _report(document)
+    return 0
+
+
+def _rescore(source: Path, output: Path) -> int:
+    from beqforge.pipeline import PipelineParams
+
+    document = json.loads(source.read_text())
+    duration = document.get("duration_s", e10.DURATION_S)
+    rows = [e10.rescore(row, PipelineParams(), duration) for row in document["cases"]]
+    document |= {
+        "protocol": e10.PROTOCOL_VERSION,
+        "rescored_from": {"file": source.name, "protocol": document["protocol"]},
+        "summary": e10.summarise(rows),
+        "cases": rows,
+    }
+    output.write_text(json.dumps(document, indent=2) + "\n")
+    _report(document)
+    return 0
+
+
+def _report(document: dict) -> None:
     for goal, summary in document["summary"].items():
         pooled = summary["pooled"]
         print(
@@ -155,7 +187,6 @@ def main() -> int:
             flush=True,
         )
     print("E10-DONE", flush=True)
-    return 0
 
 
 if __name__ == "__main__":

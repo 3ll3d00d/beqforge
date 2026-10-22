@@ -1,5 +1,6 @@
 """E10's synthetic cases and scorer: what the arrays say, not what the pipeline does with them."""
 
+import math
 from types import SimpleNamespace
 
 import numpy as np
@@ -48,6 +49,34 @@ def test_a_filtered_case_needs_a_correction_and_noise_alone_does_not():
     assert not noise.truth_band.any() and noise.noise_only.any()
 
 
+@pytest.mark.parametrize("family", ["broadband", "sparse_dialogue"])
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_an_unchanged_case_needs_nothing_whatever_its_chance_shape(family, seed):
+    # v1 read the deficit from the observed spectrum alone, and broadband/2's chance dips
+    # passed for a 1.5 dB deficit; against its own source an unchanged case is on its goal
+    known = e10.truth(e10.e10_case(family, seed, duration_s=60.0), "tight")
+    assert not known.needs_correction
+    np.testing.assert_allclose(
+        known.programme_db[known.truth_band], known.goal_db[known.truth_band], atol=1e-6
+    )
+
+
+def test_a_natural_droop_is_scored_against_the_programme_before_it():
+    case = e10.e10_case("natural_droop", 1, duration_s=60.0)
+    assert case.source is not case.recorded
+    assert e10.truth(case, "flat").needs_correction
+
+
+def test_leaving_a_bump_alone_is_not_an_overshoot_but_lifting_past_the_goal_is():
+    case = e10.e10_case("cancellation", 1, duration_s=60.0)
+    known = e10.truth(case, "flat")
+    assert (known.programme_db - known.goal_db)[known.truth_band].max() > 1.5
+    nudge = BiquadSpec("peaking_eq", 30.0, 0.1, 1.0)
+    assert not e10.score(case, "flat", _report(nudge), PipelineParams())["overshoot"]
+    flat = e10.e10_case("broadband", 1, duration_s=60.0)
+    assert e10.score(flat, "flat", _report(BOOST), PipelineParams())["overshoot"]
+
+
 def test_a_steep_coloured_floor_leaves_noise_only_bins_below_the_corner():
     known = e10.truth(e10.e10_case("coloured_floor", 2), "flat")
     assert known.noise_only.any()
@@ -76,10 +105,23 @@ def test_a_boost_on_noise_alone_is_noise_lift_and_unnecessary():
     assert row["noise_lift_db"] > e10.NOISE_LIFT_DB
 
 
-def test_drift_past_the_judges_limit_is_a_device_failure():
+def test_only_an_unrealisable_cascade_is_a_device_failure():
+    # a finite drift is already in the published curve every class reads; max_drift_db is
+    # the fitter's preference, not a gate
     case = e10.e10_case("filtered", 1)
-    row = e10.score(case, "flat", _report(BOOST, drift_db=9.0), PipelineParams())
-    assert row["device_failure"]
+    drifting = e10.score(case, "flat", _report(BOOST, drift_db=9.0), PipelineParams())
+    assert not drifting["device_failure"]
+    unstable = e10.score(
+        case, "flat", _report(BOOST, drift_db=math.inf), PipelineParams()
+    )
+    assert unstable["device_failure"]
+
+
+def test_a_row_rescores_from_the_filters_it_kept():
+    case = e10.e10_case("filtered", 1, duration_s=60.0)
+    row = e10.score(case, "flat", _report(BOOST), PipelineParams())
+    again = e10.rescore(row, PipelineParams(), duration_s=60.0)
+    assert {k: again[k] for k in row} == row
 
 
 def test_the_summary_counts_each_class_over_the_cases_exposed_to_it():

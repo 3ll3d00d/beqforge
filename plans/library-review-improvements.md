@@ -417,6 +417,18 @@ measure). Whether the extra negatives become false acceptances needs a full corp
 no retune is adopted before E10 is written; this is the measurement it would start from. The boost-weighted gate, row
 26's third option, is a change to how the corpus scores, not to the rule, and is E10's to define.
 
+**The full corpus run (22 October 2026, on `a5c8454`).** The cubic ending at the 80 Hz crossover
+(`passband_ripple_db(..., top_hz=crossover_hz)` in `analyse`), seeds 1-9, against the same
+commit's run: one outcome moves. `broadband/5` goes from abstained to a false acceptance
+(flatten, a 2.5 dB peak, no noise-dominated boost). That is the case the cap was keeping out, so
+gated negatives go from 0/45 to 1/45 and the gate fails (upper bound 0.118 against 0.100). The
+other four extra negatives past this rule are caught by later checks. `filtered` is unchanged
+(6/9, the same cases and recovery): the three cases that lose a measurable passband decline or
+accept as before. `natural_droop` stays 5/9. So the 80 Hz edge costs the corpus exactly the
+one case row 26 named, and the decision is the boost-weighted question: whether a 2.5 dB lift on
+noise bursts counts as much as a 20 dB one. Ending the band at 80 Hz is not adopted on this
+evidence; any retune is still E10's to judge, on the held-out half.
+
 ### Row 28: different answers by machine, after fix 2
 
 Two measurements on this machine (AVX-512, OpenBLAS SkylakeX kernels):
