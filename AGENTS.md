@@ -28,7 +28,9 @@ checks live in `tests/test_package_boundaries.py` and `tools/smoke_test_install.
 
 [TODO.md](TODO.md) is the sole prioritised backlog, including open decision questions and
 validation requirements. Completed implementations and research decisions live under `plans/`;
-these are historical evidence, not additional work queues. Record behavioural changes and
+these are historical evidence, not additional work queues. Code comments and tests cite
+historical item IDs (E2, R2a, T3 and so on, from the retired `IMPROVEMENT_PLAN.md`): each has a
+row in `plans/research-design-decisions.md` and its outcome in `plans/done-design-and-pipeline.md`. Record behavioural changes and
 validation outcomes in the relevant plan, and update any backlog item they resolve.
 
 ## Development and validation

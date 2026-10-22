@@ -115,7 +115,7 @@ def waveform_peak(samples: np.ndarray) -> float:
     device-rate simulations separately exercise multitone/transient peak error. Headroom is
     an output, never an acceptance gate.
 
-    Blocks that provably cannot hold the peak are not interpolated (IMPROVEMENT_PLAN C4).
+    Blocks that provably cannot hold the peak are not interpolated (C4).
     Every interpolated value is a weighted sum of the input samples within the kernel's
     reach, so no block can exceed its largest input sample times the kernel's largest
     polyphase gain. Taking blocks loudest first, a block whose bound is already below the peak

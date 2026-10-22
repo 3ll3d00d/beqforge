@@ -295,7 +295,7 @@ CORPUS_SHAPES = (
     "natural_droop",
     "filtered",
 )
-"""The negative corpus's shapes (IMPROVEMENT_PLAN E2). All but `filtered` are negatives by
+"""The negative corpus's shapes (E2). All but `filtered` are negatives by
 provenance: nothing was removed, so the correct answer is to abstain. `natural_droop` is the
 hard one — a source recorded rolled off is observationally a filtered one — so it is
 reported apart from the gate (E6). `filtered` carries an injected high-pass: the positives

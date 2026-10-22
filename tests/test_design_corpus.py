@@ -1,4 +1,4 @@
-"""The negative corpus (IMPROVEMENT_PLAN E2): its cases and its statistics, not its results.
+"""The negative corpus (E2): its cases and its statistics, not its results.
 
 Running it is a tool (`tools/negative_corpus.py`), minutes not seconds; what can be pinned
 cheaply is that a case is reproducible from its seed, that the truth it carries is what its
@@ -79,7 +79,7 @@ def test_texture_is_left_alone_and_a_filter_is_not() -> None:
 
 
 def test_a_channel_is_restored_for_a_missing_low_end_not_a_steep_slope() -> None:
-    """IMPROVEMENT_PLAN T3: the fixed 14 dB/octave slope decided on noise.
+    """T3: the fixed 14 dB/octave slope decided on noise.
 
     filtered/3's LFE carries an injected filter yet its steepest slope reads 13.5; broadband/4's
     LFE is unfiltered yet reads 22.9. Against each channel's own texture, both come out right.

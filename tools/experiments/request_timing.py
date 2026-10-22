@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Time designer requests cold and warm, and how much of each is the wire (IMPROVEMENT_PLAN R2a/R2b).
+"""Time designer requests cold and warm, and how much of each is the wire (R2a/R2b).
 
     systemd-inhibit --what=sleep:idle --why=timing --mode=block \\
         uv run python tools/experiments/request_timing.py data/Send_Help.npz

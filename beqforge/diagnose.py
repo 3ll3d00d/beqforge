@@ -71,7 +71,7 @@ class DiagnoseParams:
     knee_slope_db_per_octave: float = 14.0
     """Labels a channel "steep" in the diagnosis and record. Descriptive only: it no longer
     decides which channels `counterfactual` restores — `pipeline.channels_missing_low_end` does,
-    because on the corpus this slope could not tell a filter from programme (IMPROVEMENT_PLAN T3)."""
+    because on the corpus this slope could not tell a filter from programme (T3)."""
 
     strata: tuple[tuple[float, float], ...] = (
         (40.0, 80.0),

@@ -179,7 +179,7 @@ class AcceptParams:
     Not the judged band either, which is narrower: it starts at the tracking floor. `flatten`
     holds its boost flat below that floor, so the target asks for shape there and the fitter
     spends sections on it; judged only above the floor, a section doing exactly what the fit
-    asked read as having done nothing (IMPROVEMENT_PLAN F3 — Black Bag's peaking section at
+    asked read as having done nothing (F3 — Black Bag's peaking section at
     13.9 Hz, judged over 25-50 Hz). A caller with no target falls back to the judged band.
 
     The two populations do not overlap in practice: a section that earns nothing in band

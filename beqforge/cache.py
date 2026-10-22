@@ -96,7 +96,7 @@ It over-invalidates — editing `counterfactual_target` drops a parametric propo
 depend on it — and that is the right direction to be wrong in.
 
 `verify.py` is here because the deficit a parametric target is capped at is measured against
-`verify.house_curve_db`, the goal below the knee (IMPROVEMENT_PLAN C3).
+`verify.house_curve_db`, the goal below the knee (C3).
 """
 
 
@@ -140,8 +140,7 @@ def digest_of(modules: tuple[str, ...]) -> str:
     A frozen build ships bytecode, not sources, so it reads the digests `beqforge.spec` baked
     from the tree it was built from — identical to these by construction. Without them it
     raises `CacheUnavailable` rather than keying on nothing: before this the packaged
-    `beqforge design` failed on its default cache with `FileNotFoundError` (IMPROVEMENT_PLAN
-    R2a, step 3).
+    `beqforge design` failed on its default cache with `FileNotFoundError` (R2a, step 3).
     """
     if not getattr(sys, "frozen", False):
         return _digest_sources(modules)
@@ -171,7 +170,7 @@ def material_fingerprint(material: Material) -> str:
 
     The samples, not what they are called. No stage stores anything that depends on the
     material's name, so hashing it only stopped a renamed or moved file hitting — and every
-    designer request is named "designer-request", whatever it carries (IMPROVEMENT_PLAN R2a).
+    designer request is named "designer-request", whatever it carries (R2a).
     """
     digest = hashlib.sha256()
     digest.update(str(material.fs).encode("utf-8"))
@@ -481,7 +480,7 @@ def _replace(temporary: str, path: Path) -> bool:
 def _write_atomic(path: Path, document: Any) -> bool:
     """Write to a temporary name beside `path`, fsync, then rename over it.
 
-    A reader sees the old file or the new one, never a partial one (IMPROVEMENT_PLAN R2a): a
+    A reader sees the old file or the new one, never a partial one (R2a): a
     rename within one directory is atomic, and the fsync makes sure what is renamed is on disk.
     Returns False, having written nothing, when the rename could not be made (`_replace`).
     """

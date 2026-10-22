@@ -15,7 +15,7 @@ re-execs the frozen binary itself) that cannot be verified by only checking `--h
 
 The request is then sent a second time: the server runs with `--cache-dir`, and the second
 answer must be identical and must have come from the stage cache — the proof that a frozen
-build can key the cache at all (IMPROVEMENT_PLAN R2a; before, `digest_of` read sources the
+build can key the cache at all (R2a; before, `digest_of` read sources the
 executable does not ship). The server refuses the cache unless every cached stage's baked
 digest is present, so a hit on the analysis covers them all.
 

@@ -369,7 +369,7 @@ def test_the_fallback_charges_a_fragile_cascade_its_drift_rather_than_vetoing_it
 ):
     """Nothing reached the residual target: keep the least exposed, drift added to error.
 
-    As a veto the drift screen decided on luck (IMPROVEMENT_PLAN F1): on a steep inverse the
+    As a veto the drift screen decided on luck (F1): on a steep inverse the
     lone section happened to publish and a 13.9 dB fit was kept over a 0.5 dB one drifting
     3.8 dB. Residual plus drift bounds how far what plays can sit from the target.
     """
@@ -556,7 +556,7 @@ def test_escalating_reaches_what_enumerating_reached() -> None:
         drift = F._published_drift(specs, freqs, realisation, 3.0)
         ok = F._within_drift(specs, residual, drift, 3.0)
         screened.append((specs, residual, ok, F._exposure_db(residual, drift, ok)))
-    # the first that clears both bars, else the least exposed (IMPROVEMENT_PLAN F1)
+    # the first that clears both bars, else the least exposed (F1)
     enumerated = next(
         ((s, r) for s, r, ok, _ in screened if ok and r <= 0.5),
         min(((s, r, e) for s, r, _, e in screened), key=lambda x: x[2])[:2],

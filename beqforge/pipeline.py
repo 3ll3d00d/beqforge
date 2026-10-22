@@ -326,7 +326,7 @@ class PipelineParams:
     The top of the judged band is not a setting: it is the deficit's first settled end, widened
     to at least `AcceptParams.min_judge_octaves` above the floor (`_judged_top_hz`). It was
     `max(45 Hz, anchor)`, which judged a correction ending at 15 Hz out to 45 Hz and diluted
-    every shape check with an octave and a half of untouched passband (IMPROVEMENT_PLAN T6)."""
+    every shape check with an octave and a half of untouched passband (T6)."""
 
     judge_from_content_edge: bool = False
     """Opt-in: start the judged band at the content edge, not the tracking floor.
@@ -343,7 +343,7 @@ class PipelineParams:
     it recovers 17 of 18 noise-floored steep injections against 2, but where loud scenes stand
     clear of a floor that dominates on average it lifts that floor too — up to 17 dB on
     injected real titles — and the frozen protocol's `steep_leakage` is then accepted where it
-    abstained. IMPROVEMENT_PLAN "Steep filters" has the measurements."""
+    abstained. TODO.md's "Fresh validation protocol and steep-filter policy" has the measurements."""
 
     exclude_bands_hz: tuple[tuple[float, float], ...] = ()
     """Authored intervals omitted from evidence, with zero requested correction.
@@ -537,7 +537,7 @@ def target_fit(
 
 @dataclass(frozen=True, slots=True)
 class EvidenceExcess:
-    """Boost the cascade that will play delivers beyond the evidence ceiling (IMPROVEMENT_PLAN E9).
+    """Boost the cascade that will play delivers beyond the evidence ceiling (E9).
 
     Pricing caps the *target* at the contrast ceiling; the fit only approximates the target,
     so nothing had said whether the filter itself stays under it. Measured on the exact
@@ -836,7 +836,7 @@ def low_end_deficit_db(
     A shortfall *above* that point is not a missing low end. It is the passband's own shape —
     a bass-heavy source whose plateau sits at the bottom of the band reads everything above
     it as "deficit" — and a strategy allowed to fill it reshapes the passband. It did: a
-    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (IMPROVEMENT_PLAN E2).
+    +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (E2).
 
     This is `flatten`'s unpriced target; every strategy's target is capped by it in
     `priced_by_evidence`. `None` when the mix has no usable plateau.
@@ -1009,7 +1009,7 @@ def passband_ripple_db(
 
     Crest to trough, not a one-sided dip, because the reference sits near the 90th percentile
     of the spectrum, on the crests: a shortfall measured from it spans the whole swing. On the
-    negative corpus (IMPROVEMENT_PLAN E2) every unfiltered title's low-end deficit came in
+    negative corpus (E2) every unfiltered title's low-end deficit came in
     under this (at most 0.77x); every real title and injected filter above it (1.08x and up).
     Mains-hum notches (`mains_hum_notches`) are left out of it: a comb cut at every harmonic of
     50 or 60 Hz is a repair, not texture, and on Glory its 12-13 dB troughs read as 15.4 dB of
@@ -1041,7 +1041,7 @@ def channels_missing_low_end(material: Material, params: "PipelineParams") -> li
     Each channel on its own: its deficit against its own plateau (`low_end_deficit_db`, toward
     flat) against the crest-to-trough ripple of its own passband (`passband_ripple_db`) — the
     texture rule applied per channel, the same 1x boundary and no constant. This replaced a
-    fixed 14 dB/octave steepest-slope threshold (IMPROVEMENT_PLAN T3). On the corpus the slope
+    fixed 14 dB/octave steepest-slope threshold (T3). On the corpus the slope
     decided on noise — unfiltered channels measured 8.5-22.9 dB/octave, injected 2nd-order
     filters 13.5-23.3 — while this separated them completely: filtered channels 4.6-19.1x,
     unfiltered 0.15-0.82x. A channel whose deficit or ripple cannot be measured is not restored.
@@ -1071,7 +1071,7 @@ def _held_below_floor(
 
     Below the floor nothing tracks the passband, so there is nothing to recover: the boost is
     held at its value at the floor rather than chasing a curve that describes noise. Temporal
-    contrast alone licenses up to 14 dB more down there on real titles (IMPROVEMENT_PLAN E5),
+    contrast alone licenses up to 14 dB more down there on real titles (E5),
     so this is the only place the tracking evidence reaches a target.
     """
     notes: list[str] = []
@@ -1116,7 +1116,7 @@ def priced_by_evidence(
     Only `flatten` used to get the first two. A model inversion or a channel restoration
     handed straight to the ceiling asked for 10 dB more than `flatten` below the floor of 28
     Years Later, and a parametric target reached 1.54 times the measured deficit on Send Help
-    — the ambition IMPROVEMENT_PLAN E3 found selection rewarding.
+    — the ambition E3 found selection rewarding.
     """
     target, notes = _held_below_floor(target, diagnosis.noise_floor_hz)
     if deficit_db is not None:
@@ -1251,7 +1251,7 @@ class ParametricDerivation:
     inside the goal tolerance, and those read the goal dials, the deficit-anchor and taper
     rules and the verification floor off `PipelineParams`. Keyed on the fitter's settings
     alone, a rerun with a different `--goal-tilt` reused the old goal's proposal
-    (IMPROVEMENT_PLAN C3). Exclusions and the plateau rule reach the key through
+    (C3). Exclusions and the plateau rule reach the key through
     `DiagnoseParams`, which the key already holds.
     """
 

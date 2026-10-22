@@ -184,7 +184,7 @@ def test_chunking_the_bootstrap_cannot_change_what_it_returns() -> None:
 
 
 def test_digital_silence_is_absent_programme_not_a_quiet_scene() -> None:
-    """IMPROVEMENT_PLAN E8: an LFE that is exact zeros two-thirds of the time.
+    """E8: an LFE that is exact zeros two-thirds of the time.
 
     Classed as quiet, the zero frames sat at the 1e-300 floor: past `floor_percentile` of them
     the scene floor itself landed at about -3000 dB, every audible frame read as loud, and the

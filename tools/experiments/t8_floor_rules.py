@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IMPROVEMENT_PLAN T8: the tracking floor under two rules, and how stable each is.
+"""T8: the tracking floor under two rules, and how stable each is.
 
 Measured 2026-09-30 and not adopted — kept so the comparison is not rebuilt. For each title's
 mix, walks the half-octave bands below its plateau as `diagnose._temporal_evidence` does and

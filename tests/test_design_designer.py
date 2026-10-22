@@ -745,7 +745,7 @@ def test_design_declines_with_no_channel_decomposition() -> None:
     assert response.decline_reason == "channel_evidence_unavailable"
 
 
-# ---- provenance (IMPROVEMENT_PLAN R1) --------------------------------------
+# ---- provenance (R1) --------------------------------------
 
 
 def _small_request(mono_mix: np.ndarray | None = None) -> DesignRequest:
@@ -840,7 +840,7 @@ def test_the_response_joins_candidate_and_run_notes_once() -> None:
 
 
 def test_the_judges_own_notes_reach_the_response() -> None:
-    """IMPROVEMENT_PLAN E6: a correction resting below the level-invariance floor says so."""
+    """E6: a correction resting below the level-invariance floor says so."""
     shaping = (
         "13.1 dB of the correction is claimed below 22.7 Hz, where the attenuation stops "
         "being level-invariant; this shaping diagnostic does not identify the cause (R2)"

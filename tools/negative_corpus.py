@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the negative corpus and report false acceptances with an interval (IMPROVEMENT_PLAN E2).
+"""Run the negative corpus and report false acceptances with an interval (E2).
 
     uv run python tools/negative_corpus.py --seeds 1-9 --output negative_corpus.json
 
@@ -67,7 +67,7 @@ def _run_case(job: tuple[str, int, float]) -> dict:
     excess = None if chosen is None else chosen.evidence_excess
     scored.update(
         peak_boost_db=None if chosen is None else round(chosen.mv_adjust_db, 2),
-        # IMPROVEMENT_PLAN E9: how far the selected cascade boosts past the ceiling
+        # E9: how far the selected cascade boosts past the ceiling
         evidence_excess_db=None if excess is None else round(excess.max_db, 2),
         evidence_excess_width_octaves=(
             None if excess is None else round(excess.width_octaves, 3)

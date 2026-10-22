@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IMPROVEMENT_PLAN A1: which acceptance tolerances actually decide anything.
+"""A1: which acceptance tolerances actually decide anything.
 
 Acceptance runs after the fit and changes nothing upstream of it, so a tolerance sweep does not
 need a single refit: collect every candidate once, then re-assess the same candidates under each

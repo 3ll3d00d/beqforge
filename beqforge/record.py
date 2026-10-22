@@ -446,7 +446,7 @@ def write(
         "timings": {
             "total_s": round(report.timings.total_s, 3),
             "stages": [[n, round(s, 3)] for n, s in report.timings.stages],
-            # wall time of the whole run and what no stage covers (IMPROVEMENT_PLAN C5);
+            # wall time of the whole run and what no stage covers (C5);
             # absent in older records
             "elapsed_s": _num(round(report.timings.elapsed_s, 3)),
             "unattributed_s": _num(round(report.timings.unattributed_s, 3)),

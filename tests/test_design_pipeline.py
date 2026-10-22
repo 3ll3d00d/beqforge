@@ -209,7 +209,7 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
 
 
 def test_counterfactual_re_sums_under_the_playback_model(walled) -> None:
-    """IMPROVEMENT_PLAN T1: the restored mix is weighted the way the sub feed is judged.
+    """T1: the restored mix is weighted the way the sub feed is judged.
 
     It used to re-sum with the module constants whatever `--lfe-gain-db`/`--main-gain-db`
     said, while verification and headroom used the playback model. A common gain cancels (the
@@ -371,7 +371,7 @@ def test_the_counterfactual_target_ends_where_its_deficit_does(walled) -> None:
 
 
 def test_proposals_carry_their_own_notes_and_not_the_runs(walled) -> None:
-    """IMPROVEMENT_PLAN C2: a run's limitations are reported once, on the report.
+    """C2: a run's limitations are reported once, on the report.
 
     Every proposal used to carry all of them too, so a candidate's printed notes, its `.beq`
     export and the ledger each repeated the run's limitations once per candidate.
@@ -472,7 +472,7 @@ def test_an_infrasonic_plateau_is_no_reference(walled) -> None:
 @pytest.fixture(scope="module")
 def steep_into_noise():
     """A 12th-order high-pass at 30 Hz, then a stationary floor 60 dB down — the shape of the
-    noise-floored steep injections (IMPROVEMENT_PLAN, steep filters)."""
+    noise-floored steep injections (TODO.md, steep-filter policy)."""
     samples = int(FS * 300.0)
     programme = high_passed(scened_noise(23, samples), 30.0, order=12)
     floor = 1e-3 * np.std(programme) * np.random.default_rng(5).standard_normal(

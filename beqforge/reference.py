@@ -1,7 +1,7 @@
 """Audio sent by reference: a WAV under a shared root, instead of base64 in the request.
 
 beqdesigner's `design/designer-by-reference.md` §3 (contract 1.2, HTTP binding only; tracked
-here as IMPROVEMENT_PLAN R2b). An array may arrive as
+here as R2b). An array may arrive as
 
     {"dtype": "float64", "shape": [N],
      "file": {"path": "t_1234/multichannel.wav", "channel": 3},

@@ -337,7 +337,7 @@ def extract(
     # all-zero frame sits at the 1e-300 floor (-3000 dB): with more than `floor_percentile`
     # of them the floor lands there, every audible frame reads as loud, and the contrast runs
     # to ~2,900 dB — seen on four of nine real titles' LFE and surround channels, where it
-    # left a channel's restoration bounded only by the cap (IMPROVEMENT_PLAN E8).
+    # left a channel's restoration bounded only by the cap (E8).
     silent = ~(power.sum(axis=0) > 0)
     audible = band_energy_db[~silent]
     floor_db = (

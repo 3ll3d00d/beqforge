@@ -17,7 +17,7 @@ has a run record (beside it, or in `--records`):
 * **Noise after correction.** Where that gain lands: the injected floor sits `noise_db` below
   the plateau at every bin, so the corrected noise is `gain - noise_db` relative to it. The
   gain alone is not a listening claim — +17 dB into a floor 80 dB down leaves it 63 dB down,
-  into one 40 dB down leaves it 23 dB down (IMPROVEMENT_PLAN priority 3).
+  into one 40 dB down leaves it 23 dB down (historical priority 3).
 
 Truth never reaches the pipeline; this only reads what it produced.
 """

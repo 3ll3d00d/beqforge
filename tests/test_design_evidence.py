@@ -151,7 +151,7 @@ def test_coverage_and_channel_policies_apply_even_with_measured_mix_support(
 
 
 def test_every_target_is_held_below_the_floor_and_capped_at_the_deficit():
-    """IMPROVEMENT_PLAN E3: one evidence rule for every strategy, not only `flatten`.
+    """E3: one evidence rule for every strategy, not only `flatten`.
 
     A model inversion that keeps climbing below the tracking floor used to reach the fitter
     unheld: on 28 Years Later the parametric and counterfactual targets asked for 16.4 and

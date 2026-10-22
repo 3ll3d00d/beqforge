@@ -344,7 +344,7 @@ def main() -> int:
         help=(
             "opt-in: judge from the content edge, not the tracking floor — recovers steep "
             "filters partway down to where the programme meets the noise, but can lift that "
-            "noise where loud scenes stand clear of it (IMPROVEMENT_PLAN, steep filters)"
+            "noise where loud scenes stand clear of it (TODO.md, steep-filter policy)"
         ),
     )
     parser.add_argument(

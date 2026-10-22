@@ -862,7 +862,7 @@ def _published_drift(
     Jittered about the *published* parameters, as `accept` does, not the optimiser's raw
     floats. The two differed by up to 0.8 dB on a steep cascade (Hulk's three-section
     `flatten`: 3.84 against 3.08), so the screen could call a cascade fragile that the
-    verdict then reported inside the limit, or the reverse (IMPROVEMENT_PLAN F1 follow-up).
+    verdict then reported inside the limit, or the reverse (F1 follow-up).
     """
     if unstable_sections(specs, realisation or Realisation()):
         return math.inf

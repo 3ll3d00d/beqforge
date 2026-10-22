@@ -495,7 +495,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._respond(status, payload)
         if timing:
             # the wire's share of a request, apart from the design itself: what decides
-            # whether requests by reference are worth having (IMPROVEMENT_PLAN R2a/R2b).
+            # whether requests by reference are worth having (R2a/R2b).
             # "queued" is the wait behind other requests plus the trip to the worker.
             logger.info(
                 f"request timing: body {length / 1e6:.1f} MB, read {read - started:.2f} s, "
@@ -569,7 +569,7 @@ def build_parser() -> _EnvironmentParser:
         help=(
             "opt-in: judge from the content edge, not the tracking floor — recovers steep "
             "filters partway down to where the programme meets the noise, but can lift that "
-            "noise where loud scenes stand clear of it (IMPROVEMENT_PLAN, steep filters)"
+            "noise where loud scenes stand clear of it (TODO.md, steep-filter policy)"
         ),
     )
     parser.add_argument(

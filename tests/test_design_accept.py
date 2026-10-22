@@ -523,7 +523,7 @@ def test_a_section_must_earn_its_slot_inside_the_judged_band() -> None:
 
 
 def test_a_section_is_credited_across_the_band_it_was_placed_in() -> None:
-    """IMPROVEMENT_PLAN F3: the fitter and the judge must agree on where a section works.
+    """F3: the fitter and the judge must agree on where a section works.
 
     `flatten` holds its boost flat below the tracking floor, so its target asks for shape
     there and the fitter spends a section on it. Judged only over the judged band, which
