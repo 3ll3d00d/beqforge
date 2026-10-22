@@ -84,11 +84,27 @@ def test_a_steep_coloured_floor_leaves_noise_only_bins_below_the_corner():
     assert known.freqs[known.noise_only].max() < known.freqs[known.truth_band].min()
 
 
-def test_a_gentle_goal_asks_for_less_than_a_flat_one():
+def test_a_gentle_goal_asks_for_less_than_a_flat_one_below_the_deficit():
     case = e10.e10_case("natural_droop", 5)
     flat, gentle = e10.truth(case, "flat"), e10.truth(case, "gentle")
-    below = flat.freqs < e10.REFERENCE_HZ[0]
+    below = flat.freqs < gentle.pivot_hz
+    assert below.any()
     assert np.all(gentle.goal_db[below] < flat.goal_db[below])
+    np.testing.assert_array_equal(gentle.goal_db[~below], flat.goal_db[~below])
+
+
+def test_a_tilted_goal_pivots_where_the_deficit_begins_not_at_the_reference():
+    # the recovery is tilted, not the track: a 24 Hz rolloff leaves 40-80 Hz alone
+    case = e10.e10_case("filtered", 1, duration_s=60.0)
+    known = e10.truth(case, "gentle")
+    assert known.pivot_hz < e10.REFERENCE_HZ[0]
+    above = known.truth_band & (known.freqs >= known.pivot_hz)
+    assert np.all(known.programme_db[above] - known.goal_db[above] > -e10.PIVOT_DB)
+
+
+def test_with_no_deficit_the_pivot_is_the_bottom_of_the_band():
+    known = e10.truth(e10.e10_case("broadband", 1, duration_s=60.0), "gentle")
+    assert known.pivot_hz == known.freqs[known.truth_band].min()
 
 
 def test_abstaining_on_a_case_that_needs_correction_is_a_missed_recovery():

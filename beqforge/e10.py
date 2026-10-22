@@ -23,8 +23,9 @@ from scipy.stats import beta
 from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
-PROTOCOL_VERSION = "e10-v2"
-"""v1 read the goal deficit from the observed spectrum alone; see `truth`."""
+PROTOCOL_VERSION = "e10-v3"
+"""v1 read the goal deficit from the observed spectrum alone; v2 pivoted a tilted goal at the
+reference's bottom, not where the deficit begins; see `truth`."""
 
 GOALS: dict[str, tuple[float, float]] = {
     "flat": (0.0, 1.5),
@@ -57,8 +58,11 @@ FAMILIES = (
 FS = 1000
 DURATION_S = 240.0
 REFERENCE_HZ = (80.0, 160.0)
-"""Where every recipe leaves the programme alone: the plateau the goal is measured from. Its
-bottom is the goal's pivot, as the top of the judged band is the pipeline's."""
+"""Where every recipe leaves the programme alone: the plateau the goal is measured from."""
+
+PIVOT_DB = 0.5
+"""How far under the plateau the programme must sit to be part of the deficit a tilted goal
+pivots on: `filters.correction_band_hz`'s threshold for a target's active span."""
 
 FLOOR_HZ = 5.0
 """The lowest frequency scored: the pipeline's verification floor."""
@@ -334,6 +338,9 @@ class Truth:
     observed_db: np.ndarray | None = None
     """The observed programme as measured, chance shape and all: what the designer sees."""
 
+    pivot_hz: float = REFERENCE_HZ[0]
+    """Where the goal's tilt begins: the top of the deficit (`deficit_top_hz`)."""
+
     extras: dict = field(default_factory=dict)
 
 
@@ -372,7 +379,6 @@ def truth(case: E10Case, goal: str) -> Truth:
             False,
         )
     level = float(np.median(programme[reference]))
-    goal_db = level + house_curve_db(freqs, REFERENCE_HZ[0], tilt)
     band = np.zeros_like(freqs, dtype=bool)
     for i in range(int(np.flatnonzero(reference)[0]) - 1, -1, -1):
         if not audible[i]:
@@ -383,6 +389,8 @@ def truth(case: E10Case, goal: str) -> Truth:
     _, source = mean_spectrum(_mix(case.source), case.fs)
     deficit = programme - np.interp(freqs, axis, _smoothed(axis, source))
     programme = level + deficit - float(np.median(deficit[reference]))
+    pivot = deficit_top_hz(freqs, programme - level, band)
+    goal_db = level + house_curve_db(freqs, pivot, tilt)
     short = band & (programme < goal_db - tolerance)
     return Truth(
         freqs,
@@ -394,7 +402,28 @@ def truth(case: E10Case, goal: str) -> Truth:
         noise_only,
         _span_octaves(freqs, short) > MIN_SPAN_OCTAVES,
         observed,
+        pivot,
     )
+
+
+def deficit_top_hz(freqs: np.ndarray, change_db: np.ndarray, band: np.ndarray) -> float:
+    """Where the content's deficit ends, reading up from the bottom of the truth band.
+
+    A tilted goal is about the recovery, not the track: it tilts below where the deficit
+    begins and leaves the programme above it as it is, as the designer's goal does (it pivots
+    at its judged band's top, `pipeline._judged_top_hz`). v2 pivoted at the reference's bottom,
+    so a title missing bass below 40 Hz was held 1.5 dB under its own level there at the
+    gentle goal, and the designer's answer read as overshoot. The pivot is read from the
+    case's change, never from the design. With no deficit at the bottom it is the band's
+    bottom: no tilt over the band, so nothing to restore."""
+    inside = np.flatnonzero(band)
+    if not inside.size:
+        return REFERENCE_HZ[0]
+    short = change_db[inside] < -PIVOT_DB
+    if not short[0]:
+        return float(freqs[inside[0]])
+    settled = np.flatnonzero(~short)
+    return float(freqs[inside[settled[0]]]) if settled.size else REFERENCE_HZ[0]
 
 
 def published_response_db(filters, realisation, freqs: np.ndarray) -> np.ndarray:

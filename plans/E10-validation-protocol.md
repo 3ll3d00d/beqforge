@@ -1,6 +1,6 @@
-# E10: a fresh validation protocol for the content goal (v2)
+# E10: a fresh validation protocol for the content goal (v3)
 
-**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2; one question is open before any held-out run (the tilted goal's pivot, below)** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, and the tilted goal's pivot was settled in v3 (below)** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -156,8 +156,12 @@ As built (`e10.truth`, `e10.score`), on a log axis from 5 to 160 Hz, each spectr
 Welch mean smoothed over a sixth of an octave:
 
 * The **goal** is the observed programme's median level over 80-160 Hz (where every recipe leaves
-  it alone) plus the goal's house curve pivoting at 80 Hz (`verify.house_curve_db`). With no
-  programme there (noise only), there is no goal and nothing needs correcting.
+  it alone) plus the goal's house curve (`verify.house_curve_db`) pivoting where the content's
+  deficit ends (`e10.deficit_top_hz`): reading up from the bottom of the truth band, the first
+  bin where the scored programme is back within 0.5 dB of its level, or the band's bottom when
+  nothing is missing there. A tilted goal is about the recovery, not the track (v3; see "The
+  tilted goal's pivot"). With no programme there (noise only), there is no goal and nothing
+  needs correcting.
 * The **programme** scored is the observed programme's spectrum less its source's (the
   programme before the recipe shaped it, `E10Case.source`), from the same realisation,
   normalised to zero on the reference and placed at the goal's level. So it is the recipe's
@@ -226,8 +230,8 @@ protocol version increments. Results from different versions are not pooled.
    with the analysis shared across goals, and writes the protocol version, build, rows and
    summary. `--partition held-out` takes its own seed block and refuses an uncommitted tree.
    Legacy counts are not embedded; a run's write-up states them.
-5. **Run:** the first development run, below. It revised the instrument (v2). The held-out half
-   is not run until the tilted goal's pivot is settled and the first change E10 gates is frozen.
+5. **Run:** the first development run, below. It revised the instrument (v2), and the pivot was
+   then settled (v3). The held-out half is not run until the first change E10 gates is frozen.
 
 ## First development run (22 October 2026)
 
@@ -292,3 +296,32 @@ again under a revised instrument; the run below was designed once and rescored.
 
 Legacy counts at the same build: TODO 28's protocol seeds 101/947 and corpus seeds 1-9
 (`plans/library-review-improvements.md`, row 28's outcome).
+
+## The tilted goal's pivot (v3, 22 October 2026)
+
+Settled by the user: **a gentle rolloff is about the content's recovery, not the entire
+track.** The goal tilts below where the deficit begins and leaves the programme above it as it
+is. That is the designer's reading already (it pivots at its judged band's top), so the
+instrument changed, not the pipeline. v3 reads the pivot from the case's own change, never from
+the design (`e10.deficit_top_hz`, threshold 0.5 dB as `filters.correction_band_hz`'s). Pivots on
+seeds 1-3 run from 16.6 Hz (`nonstationary_floor/1`) to 80 Hz where the deficit reaches the
+reference (`filtered/3`, `natural_droop/3`); an unchanged case pivots at its band's bottom, so
+its goal is flat.
+
+The development run rescored under v3 (flat and tight unchanged, since a zero tilt has no
+pivot):
+
+| Goal | Noise lift | Unnecessary | Overshoot | Missed | Device | Median shortfall |
+|---|---|---|---|---|---|---|
+| gentle, v2 | 3/15 | 1/15 | 7/36 | 18/21 | 0/11 | 0.0 dB |
+| gentle, v3 | 3/15 | 0/12 | 1/36 | 21/24 | 0/11 | 0.28 dB |
+
+* Six of the seven gentle overshoots were the pivot mismatch and are gone: `finite_stopband/1`,
+  `partial_channels/3`, `natural_droop/2`, `filtered/1`, `cancellation/3` and
+  `nonstationary_floor/1`. `finite_stopband/2` (pivot 32.6 Hz) still overshoots.
+* A higher goal below the pivot asks for more: `cancellation/1,2` and `nonstationary_floor/1`
+  now need a correction at the gentle goal. The two cancellations abstain (missed);
+  `nonstationary_floor/1`'s selection, unnecessary under v2, now meets a real deficit, though
+  its 27-33 dB lift of the pumping floor below it is still noise lift (row 33).
+  `natural_droop/2` turns from an overshoot into a miss (median shortfall 0.84 dB), and the
+  gentle goal's median shortfall rises from 0.0 to 0.28 dB.
