@@ -278,7 +278,7 @@ def main() -> int:
         type=float,
         default=80.0,
         metavar="HZ",
-        help="LR4 mains low-pass; the sub bus follows by default (80 Hz)",
+        help="bass-management crossover; both low-passes follow it by default (80 Hz)",
     )
     parser.add_argument(
         "--main-gain-db",
@@ -320,6 +320,15 @@ def main() -> int:
         default="crossover",
         metavar="HZ|off|crossover",
         help="LR4 sub-bus low-pass: follow crossover (default), separate corner, or off",
+    )
+    parser.add_argument(
+        "--mains-lowpass",
+        default="crossover",
+        metavar="HZ|off|crossover",
+        help=(
+            "LR4 low-pass on each main before summing: follow crossover (default), separate "
+            "corner, or off (a chain with one LR4 on every channel or on the sum)"
+        ),
     )
     parser.add_argument(
         "--exclude",
@@ -401,19 +410,20 @@ def main() -> int:
         strategies = tuple(chosen)
     from beqforge.material import PlaybackParams
 
-    try:
-        lowpass = (
+    def corner(value: str) -> float | str | None:
+        return (
             None
-            if args.sub_lowpass == "off"
-            else (
-                "crossover"
-                if args.sub_lowpass == "crossover"
-                else float(args.sub_lowpass)
-            )
+            if value == "off"
+            else "crossover"
+            if value == "crossover"
+            else float(value)
         )
+
+    try:
         playback = PlaybackParams(
             crossover_hz=args.crossover,
-            sub_lowpass_hz=lowpass,
+            mains_lowpass_hz=corner(args.mains_lowpass),
+            sub_lowpass_hz=corner(args.sub_lowpass),
             main_gain_db=args.main_gain_db,
             lfe_gain_db=args.lfe_gain_db,
             sub_gain_db=args.sub_gain_db,

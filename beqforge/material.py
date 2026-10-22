@@ -57,7 +57,7 @@ class Material:
 
 
 BM_CROSSOVER_HZ = 80.0
-"""Bass-management crossover the sub feed is modelled at — beqdesigner's own LR4, at 80 Hz."""
+"""Bass-management crossover the sub feed is modelled at, 80 Hz, as beqdesigner's default."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,14 @@ class PlaybackParams:
     """Declared sub-feed model, not a claim about an arbitrary receiver or room."""
 
     crossover_hz: float = BM_CROSSOVER_HZ
-    """LR4 mains low-pass before summing; a playback setting, not a target/reference band."""
+    """Where bass management splits the sub from the mains: the band below it is the band the
+    sub plays. A playback setting, not a target/reference band. The low-passes follow it unless
+    told otherwise."""
+
+    mains_lowpass_hz: float | Literal["crossover"] | None = "crossover"
+    """LR4 on each main before summing: follow the crossover, use a separate corner, or None to
+    omit. A caller's chain that low-passes only once (beqdesigner's "Before" or "After" applies
+    one LR4 to every channel, or to their sum) omits it, with the bus low-pass doing the job."""
 
     sub_lowpass_hz: float | Literal["crossover"] | None = "crossover"
     """LR4 on the summed bus: follow the crossover, use a separate corner, or None to omit."""
@@ -80,16 +87,27 @@ class PlaybackParams:
     def __post_init__(self) -> None:
         if not np.isfinite(self.crossover_hz) or self.crossover_hz <= 0:
             raise ValueError("playback crossover must be finite and positive")
-        lowpass = self.bus_lowpass_hz
-        if lowpass is not None and (not np.isfinite(lowpass) or lowpass <= 0):
-            raise ValueError(
-                "sub low-pass must be finite and positive, crossover, or None"
-            )
+        for name, lowpass in (
+            ("mains", self.mains_lowpass_corner_hz),
+            ("sub", self.bus_lowpass_hz),
+        ):
+            if lowpass is not None and (not np.isfinite(lowpass) or lowpass <= 0):
+                raise ValueError(
+                    f"{name} low-pass must be finite and positive, crossover, or None"
+                )
         if not all(
             np.isfinite(g)
             for g in (self.main_gain_db, self.lfe_gain_db, self.sub_gain_db)
         ):
             raise ValueError("playback gains must be finite")
+
+    @property
+    def mains_lowpass_corner_hz(self) -> float | None:
+        return (
+            self.crossover_hz
+            if self.mains_lowpass_hz == "crossover"
+            else self.mains_lowpass_hz
+        )
 
     @property
     def bus_lowpass_hz(self) -> float | None:
@@ -105,8 +123,14 @@ class PlaybackParams:
             if self.bus_lowpass_hz is None
             else f"LR4 {self.bus_lowpass_hz:g} Hz"
         )
+        corner = self.mains_lowpass_corner_hz
+        mains = (
+            f"mains not low-passed (crossover {self.crossover_hz:g} Hz)"
+            if corner is None
+            else f"mains LR4 low-pass {corner:g} Hz"
+        )
         return (
-            f"assumed sub output: mains LR4 low-pass {self.crossover_hz:g} Hz; "
+            f"assumed sub output: {mains}; "
             f"sub-bus low-pass {bus}; gains mains {self.main_gain_db:+g} dB, "
             f"LFE {self.lfe_gain_db:+g} dB, sub {self.sub_gain_db:+g} dB; "
             "no room/speaker response"
@@ -121,7 +145,7 @@ def bass_managed_sum(
 ) -> np.ndarray | None:
     """Model the post bass-management sub feed used for playback checks.
 
-    Low-pass and weight the mains, add the weighted LFE, then apply the bus
+    Low-pass (unless the model omits it) and weight the mains, add the weighted LFE, then apply the bus
     low-pass and gain. This waveform is the basis for corrected-spectrum and
     clipping measurements; absent channel signals leave it unavailable.
     """
@@ -138,13 +162,13 @@ def bass_managed_sum(
         return _signal.sosfilt(np.vstack([section, section]), samples)
 
     total = np.zeros_like(material.mono_mix)
+    mains_corner = model.mains_lowpass_corner_hz
     for name, samples in material.channels.items():
         if name == "LFE":
             total = total + samples * 10.0 ** (model.lfe_gain_db / 20.0)
         else:
-            total = total + lowpass(samples, model.crossover_hz) * 10.0 ** (
-                model.main_gain_db / 20.0
-            )
+            main = samples if mains_corner is None else lowpass(samples, mains_corner)
+            total = total + main * 10.0 ** (model.main_gain_db / 20.0)
     if model.bus_lowpass_hz is not None:
         total = lowpass(total, model.bus_lowpass_hz)
     return total * 10.0 ** (model.sub_gain_db / 20.0)

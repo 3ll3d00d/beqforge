@@ -44,6 +44,7 @@ import hashlib
 import json
 import logging
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -62,9 +63,9 @@ from beqforge.adjustments import (
 )
 from beqforge.cache import Store
 from beqforge.design import DesignMethod
-from beqforge.material import Material
-from beqforge.reference import array_from_reference
+from beqforge.material import Material, PlaybackParams
 from beqforge.pipeline import Candidate, PipelineParams, Report, run
+from beqforge.reference import array_from_reference
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 
 measuring the deficit, bounds the fit by the over-lift bar and refuses an infrasonic plateau as
 the reference (TODO 29, all unreleased so far, so one version). 6 (unreleased) makes the fit
 reproducible: identification converges to 1e-12 and the fit's target and ceiling are quantised
-to 0.01 dB (TODO 28). `plans/design-version.md` has each one's build."""
+to 0.01 dB (TODO 28), and builds the sub feed from the request's `bass_management` instead of
+reading only its crossover, which moves `gain_reduction_db` (TODO 1). `plans/design-version.md`
+has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
@@ -109,6 +112,66 @@ class DesignRequest:
     bass_management: dict | None = None
     adjustments: tuple[DesignAdjustment, ...] = ()
     """1.5: what the caller asks this design to change; () for none."""
+
+
+_LPF_POSITIONS = ("Before", "After", "Off")
+
+
+def playback_from_bass_management(
+    bass_management: dict, channel_names: Iterable[str], base: PlaybackParams
+) -> PlaybackParams:
+    """§2's `bass_management` as the sub feed it describes.
+
+    `lpf_fs` is the crossover. "Before" puts one LR4 on every channel, LFE included, and
+    "After" one on their sum: the same linear feed, so both are the bus low-pass with no
+    separate mains low-pass (`base`'s default low-passes the mains twice, at the crossover and
+    on the bus). "Off" low-passes nothing; the crossover still names the band the sub plays.
+    `headroom_type` sets the gains: "WCS" attenuates the mains by the coherent sum of every
+    channel but the LFE plus the LFE at +10 dB, a number by its magnitude plus 10 dB, and the
+    LFE by 10 dB less either way. `clip_before`/`clip_after` simulate a chain that clips; they
+    are not modelled (`gain_reduction_db` is the reduction that keeps the feed from clipping at
+    all), and the clipping commentary says so. A malformed field is a `ValueError`.
+    """
+    try:
+        crossover = float(bass_management["lpf_fs"])
+    except (KeyError, TypeError, ValueError) as bad:
+        raise ValueError(f"bass_management.lpf_fs must be a number: {bad}") from bad
+    position = bass_management.get("lpf_position", "Before")
+    if position not in _LPF_POSITIONS:
+        raise ValueError(
+            f"bass_management.lpf_position must be one of {_LPF_POSITIONS}, got {position!r}"
+        )
+    headroom_type = bass_management.get("headroom_type", "WCS")
+    if headroom_type == "WCS":
+        mains = sum(1 for name in channel_names if name != "LFE")
+        headroom_db = 20.0 * math.log10(mains + 10.0 ** (10.0 / 20.0))
+    else:
+        try:
+            headroom_db = abs(float(headroom_type)) + 10.0
+        except (TypeError, ValueError) as bad:
+            raise ValueError(
+                f"bass_management.headroom_type must be 'WCS' or a number in dB, "
+                f"got {headroom_type!r}"
+            ) from bad
+        if not math.isfinite(headroom_db):
+            raise ValueError("bass_management.headroom_type must be finite")
+    return dataclasses.replace(
+        base,
+        crossover_hz=crossover,
+        mains_lowpass_hz=None,
+        sub_lowpass_hz=None if position == "Off" else "crossover",
+        main_gain_db=-headroom_db,
+        lfe_gain_db=10.0 - headroom_db,
+    )
+
+
+def unmodelled_bass_management(bass_management: dict | None) -> tuple[str, ...]:
+    """The fields of §2's `bass_management` that ask for something the feed does not model."""
+    return tuple(
+        field
+        for field in ("clip_before", "clip_after")
+        if bass_management and bass_management.get(field)
+    )
 
 
 def _validate_audio_arrays(
@@ -376,10 +439,11 @@ def design(
     `gain_reduction_db` on (§2: "meaningful only together with `channels`" — and only when the
     caller told us the model, never approximated from `mono_mix` alone).
 
-    Only `lpf_fs` of `bass_management` is honoured — `headroom_type` is a formula for callers
-    without real per-channel audio to build the actual sub feed from, which this repo always
-    has when `channels` is supplied; `lpf_position`/`clip_before`/`clip_after` have no
-    equivalent in `PlaybackParams`' always-on mains+bus LR4 model. Not modelled, not guessed.
+    The sub feed is built as `bass_management` describes it (`playback_from_bass_management`):
+    the crossover, where the low-pass sits and the gains `headroom_type` names. That feed is
+    what verification, counterfactual summation and the clipping figure read, so the caller's
+    chain can change the answer. Clipping simulation (`clip_before`/`clip_after`) is not
+    modelled, and the clipping commentary says so rather than claiming it.
 
     Every response says which build produced it (`beqforge_revision` in the accepted
     candidate's commentary, or a trailing bracket on a decline message); with `record_dir`,
@@ -412,15 +476,16 @@ def design(
 
     report_gain_reduction = request.bass_management is not None
     if report_gain_reduction:
-        playback = dataclasses.replace(
-            params.playback, crossover_hz=float(request.bass_management["lpf_fs"])
+        playback = playback_from_bass_management(
+            request.bass_management, material.channels, params.playback
         )
         params = dataclasses.replace(params, playback=playback)
 
     report = run(material, params, cache_path=cache)
     provenance = _provenance(report, params, material, record_dir)
 
-    rejected = _rejected(report, params, report_gain_reduction)
+    unmodelled = unmodelled_bass_management(request.bass_management)
+    rejected = _rejected(report, params, report_gain_reduction, unmodelled)
     outcomes = finish_outcomes(provisional, asked, report, params) if asked else None
     accepted = report.accepted
     if accepted is None:
@@ -454,7 +519,11 @@ def design(
     account = {
         "found": explain.found(report),
         "correction": explain.correction(accepted, report),
-        "clipping": explain.clipping(accepted, from_request=report_gain_reduction),
+        "clipping": explain.clipping(
+            accepted,
+            from_request=report_gain_reduction,
+            unmodelled=unmodelled,
+        ),
         "fit": explain.fit(accepted),
         "alternatives": explain.alternatives(report, accepted),
     }
@@ -473,7 +542,10 @@ def design(
 
 
 def _rejected(
-    report: Report, params: PipelineParams, report_gain_reduction: bool
+    report: Report,
+    params: PipelineParams,
+    report_gain_reduction: bool,
+    unmodelled: tuple[str, ...] = (),
 ) -> list[DesignCandidate] | None:
     """Every candidate the judge failed, nearest to acceptable first (fewest failures).
 
@@ -497,7 +569,11 @@ def _rejected(
             ),
             commentary={
                 "correction": explain.correction(c, report),
-                "clipping": explain.clipping(c, from_request=report_gain_reduction),
+                "clipping": explain.clipping(
+                    c,
+                    from_request=report_gain_reduction,
+                    unmodelled=unmodelled,
+                ),
                 "fit": explain.fit(c),
                 **(mapped.commentary or {}),
             },
@@ -575,6 +651,12 @@ def request_from_json(body: dict, shared_root: Path | None = None) -> DesignRequ
         adjustments=adjustments_from_json(body.get("adjustments")),
     )
     _validate_audio_arrays(request.mono_mix, request.channels)
+    if request.bass_management is not None:
+        if not isinstance(request.bass_management, dict):
+            raise ValueError("bass_management must be an object or null")
+        playback_from_bass_management(
+            request.bass_management, request.channels or {}, PlaybackParams()
+        )
     return request
 
 

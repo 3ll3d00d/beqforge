@@ -148,3 +148,27 @@ def test_silent_sub_feed_cannot_supply_verification():
             1000,
             reference_samples=subject.mono_mix,
         )
+
+
+def test_one_lowpass_on_every_channel_is_the_bus_lowpass_alone():
+    """beqdesigner's "Before": an LR4 on each channel, LFE included, then the sum (TODO 1)."""
+    subject = material()
+    model = PlaybackParams(
+        mains_lowpass_hz=None, main_gain_db=-18.24, lfe_gain_db=-8.24
+    )
+    section = signal.butter(2, 80, fs=1000, btype="low", output="sos")
+    lp = np.concatenate([section, section])
+    before = signal.sosfilt(lp, subject.channels["L"]) * 10 ** (-18.24 / 20)
+    before += signal.sosfilt(lp, subject.channels["LFE"]) * 10 ** (-8.24 / 20)
+    np.testing.assert_allclose(
+        bass_managed_sum(subject, playback=model), before, atol=1e-12
+    )
+
+
+def test_no_lowpass_at_all_is_the_weighted_sum():
+    subject = material()
+    model = PlaybackParams(mains_lowpass_hz=None, sub_lowpass_hz=None)
+    expected = subject.channels["L"] * 10 ** (-20.2 / 20) + subject.channels[
+        "LFE"
+    ] * 10 ** (-10.2 / 20)
+    np.testing.assert_allclose(bass_managed_sum(subject, playback=model), expected)

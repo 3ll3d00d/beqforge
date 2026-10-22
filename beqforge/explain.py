@@ -209,7 +209,9 @@ def fit(candidate: Candidate) -> str:
     )
 
 
-def clipping(candidate: Candidate, from_request: bool) -> str:
+def clipping(
+    candidate: Candidate, from_request: bool, unmodelled: tuple[str, ...] = ()
+) -> str:
     """Whether the filtered sub feed clips, in one sentence a reviewer can act on.
 
     The peak is measured on the bass-managed sub feed with the published filter applied over
@@ -217,7 +219,8 @@ def clipping(candidate: Candidate, from_request: bool) -> str:
     nothing and a modest one on loud content can cost several dB. Reported, never used to
     reject: clipping here is fixed by turning the sub channel down by the stated amount.
     `from_request` says whether the bass management is the caller's own or the assumed
-    default, since the answer depends on it.
+    default, since the answer depends on it; `unmodelled` names the caller's settings the feed
+    does not simulate, so the sentence never claims them.
     """
     headroom = candidate.headroom
     if headroom is None:
@@ -225,11 +228,21 @@ def clipping(candidate: Candidate, from_request: bool) -> str:
     if headroom.unavailable_reason is not None:
         return f"clipping: not measured ({headroom.unavailable_reason})"
     playback = headroom.playback
+    mains, bus = playback.mains_lowpass_corner_hz, playback.bus_lowpass_hz
+    if mains is None and bus is None:
+        lowpass = f"crossover {playback.crossover_hz:g} Hz, no low-pass"
+    elif mains is None:
+        lowpass = f"LR4 low-pass at {bus:g} Hz"
+    elif bus is None:
+        lowpass = f"LR4 mains low-pass at {mains:g} Hz"
+    else:
+        lowpass = f"LR4 mains low-pass at {mains:g} Hz and on the sub bus at {bus:g} Hz"
     model = (
-        f"{'your' if from_request else 'the assumed'} bass management (LR4 crossover at "
-        f"{playback.crossover_hz:g} Hz, mains {playback.main_gain_db:+g} dB, LFE "
-        f"{playback.lfe_gain_db:+g} dB)"
+        f"{'your' if from_request else 'the assumed'} bass management ({lowpass}, mains "
+        f"{playback.main_gain_db:+.1f} dB, LFE {playback.lfe_gain_db:+.1f} dB)"
     )
+    if unmodelled:
+        model += f"; {' and '.join(unmodelled)} not simulated"
     peak = headroom.peak or 0.0
     level = (
         f"the filtered sub feed peaks at {20 * math.log10(peak):+.1f} dBFS"

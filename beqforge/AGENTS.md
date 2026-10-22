@@ -457,7 +457,11 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
   post bass management on the sub channel only, so a large boost usually costs the listener
   nothing. `PlaybackParams` declares the assumed model (default: historical LR4 mains crossover
   + LR4 sub-bus low-pass, both at `crossover_hz`, mains −20.2 dB / LFE −10.2 dB — CLI
-  `--crossover`, `--sub-lowpass`, `--main-gain-db`, `--lfe-gain-db`, `--sub-gain-db`); judge
+  `--crossover`, `--mains-lowpass`, `--sub-lowpass`, `--main-gain-db`, `--lfe-gain-db`,
+  `--sub-gain-db`). A designer request's `bass_management` replaces it
+  (`designer.playback_from_bass_management`): beqdesigner's one LR4 ("Before" or "After"; the
+  same linear feed) is the bus low-pass alone, "Off" none, and the gains follow `headroom_type`
+  (WCS over the request's mains); `clip_before`/`clip_after` are named, not simulated. Judge
   headroom with `required_offset_db` on `material.bass_managed_sum` under that model, never by
   the cascade's peak magnitude — measured against the real quantity, peak magnitude is close to
   *inverted* (a +45.7 dB filter needing 0.00 dB of reduction; an +18.2 dB one needing 4.4).

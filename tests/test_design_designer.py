@@ -33,6 +33,7 @@ from beqforge.designer import (
     design,
     design_settings_detail,
     design_settings_digest,
+    playback_from_bass_management,
     request_from_json,
     response_to_json,
     validate_response,
@@ -629,7 +630,84 @@ def test_design_turns_on_gain_reduction_only_with_bass_management(monkeypatch) -
     )
     response = design(request)
     assert response.candidates[0].gain_reduction_db == pytest.approx(-2.0)
-    assert seen_params["playback"].crossover_hz == pytest.approx(100.0)
+    playback = seen_params["playback"]
+    assert playback.crossover_hz == pytest.approx(100.0)
+    # one LR4, on every channel: the bus low-pass, with no second one on the mains
+    assert playback.mains_lowpass_corner_hz is None
+    assert playback.bus_lowpass_hz == pytest.approx(100.0)
+
+
+FIVE_ONE = ("L", "R", "C", "LFE", "Ls", "Rs")
+SEVEN_ONE = (*FIVE_ONE, "Lb", "Rb")
+
+
+@pytest.mark.parametrize(
+    ("names", "mains_db"),
+    [
+        (FIVE_ONE, -18.24),  # 20·log10(5 + 10^(10/20))
+        (SEVEN_ONE, -20.14),
+        (
+            ("L", "R"),
+            -14.26,
+        ),  # the contract counts every key but "LFE", so no LFE is fine
+    ],
+)
+def test_wcs_headroom_is_the_coherent_sum_of_the_channels_sent(names, mains_db) -> None:
+    bm = {"lpf_fs": 80.0, "lpf_position": "Before", "headroom_type": "WCS"}
+    playback = playback_from_bass_management(bm, names, PlaybackParams())
+    assert playback.main_gain_db == pytest.approx(mains_db, abs=0.01)
+    assert playback.lfe_gain_db == pytest.approx(mains_db + 10.0, abs=0.01)
+
+
+def test_a_numeric_headroom_is_its_magnitude_plus_ten_db() -> None:
+    bm = {"lpf_fs": 80.0, "lpf_position": "After", "headroom_type": "-5"}
+    playback = playback_from_bass_management(bm, FIVE_ONE, PlaybackParams())
+    assert (playback.main_gain_db, playback.lfe_gain_db) == (-15.0, -5.0)
+
+
+def test_lpf_off_low_passes_nothing_but_keeps_the_crossover() -> None:
+    bm = {"lpf_fs": 90.0, "lpf_position": "Off", "headroom_type": "WCS"}
+    playback = playback_from_bass_management(bm, FIVE_ONE, PlaybackParams())
+    assert playback.mains_lowpass_corner_hz is None
+    assert playback.bus_lowpass_hz is None
+    assert playback.crossover_hz == 90.0
+
+
+@pytest.mark.parametrize(
+    "bm",
+    [
+        {"lpf_position": "Before"},
+        {"lpf_fs": "eighty"},
+        {"lpf_fs": 80.0, "lpf_position": "Sideways"},
+        {"lpf_fs": 80.0, "headroom_type": "loud"},
+    ],
+)
+def test_a_malformed_bass_management_is_refused(bm) -> None:
+    with pytest.raises(ValueError, match="bass_management"):
+        playback_from_bass_management(bm, FIVE_ONE, PlaybackParams())
+
+
+def test_clipping_simulation_is_named_as_not_simulated(monkeypatch) -> None:
+    accepted = _candidate(offset_db=-2.0)
+    monkeypatch.setattr(
+        "beqforge.designer.run", lambda material, params, **_: _report([accepted])
+    )
+    request = DesignRequest(
+        contract_version=CONTRACT_VERSION,
+        fs=1000,
+        mono_mix=np.zeros(10),
+        coverage="complete_programme",
+        bass_management={
+            "lpf_fs": 80.0,
+            "lpf_position": "Before",
+            "headroom_type": "WCS",
+            "clip_before": False,
+            "clip_after": True,
+        },
+    )
+    clipping = design(request).candidates[0].commentary["clipping"]
+    assert "clip_after not simulated" in clipping
+    assert "clip_before" not in clipping
 
 
 def test_design_echoes_the_request_contract_version(monkeypatch) -> None:
@@ -797,7 +875,10 @@ def test_the_clipping_line_says_whether_to_turn_the_sub_down() -> None:
     loud = dc.replace(_candidate(), headroom=clips)
 
     text = explain.clipping(quiet, from_request=False)
-    assert "the assumed bass management (LR4 crossover at 80 Hz" in text
+    assert (
+        "the assumed bass management (LR4 mains low-pass at 80 Hz and on the sub bus at "
+        "80 Hz, mains -20.2 dB, LFE -10.2 dB)" in text
+    )
     assert "42% of full scale" in text and "does not clip" in text
 
     text = explain.clipping(loud, from_request=True)
