@@ -1,6 +1,9 @@
 # Keep run records and the server log by default
 
-**Handoff, not built** (from the beqdesigner library run, 19 October 2026; TODO row 27).
+**Handoff, partly built** (from the beqdesigner library run, 19 October 2026; TODO row 27). `9ab5941` makes
+`beqforge-designer.cmd` default `BEQFORGE_RECORD_DIR` to `%LOCALAPPDATA%\beqforge\records`, and the Windows library
+machine now writes its records there. The rest of the change below (the default in `serve-designer` itself, the image,
+the log file, `/health`) is not built.
 
 ## What went wrong
 

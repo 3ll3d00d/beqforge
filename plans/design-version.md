@@ -120,6 +120,10 @@ skipped. An earlier run failed the 11 startup tests that mock the server, becaus
 read the mocked server's identity; it now digests the params itself. The synthetic protocol and corpus weren't run: nothing touches evidence, ceiling,
 acceptance or selection.
 
+Later versions (the table in `DESIGN_VERSION`'s docstring is the authority): 0.2.8 is still 4; 0.2.9 is 5, built by
+the library review's fixes 2-4 and O2 ([outcomes](library-review-improvements.md#outcomes)). Contract 1.5's
+adjustments (0.2.9) did not bump it: a request without adjustments gets the same answer.
+
 ### Correction after the v0.2.6 release tests
 
 Every CI platform failed the golden for the synthetic title under `counterfactual` and

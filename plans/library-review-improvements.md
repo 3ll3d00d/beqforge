@@ -1,6 +1,6 @@
 # Improvements from the library decline review
 
-**Proposal, assessed and being built (see [Outcomes](#outcomes))** (from beqdesigner's full-library run, 19 October 2026; TODO row 29).
+**Proposal, assessed; the agreed fixes are built and released in 0.2.9 as design version 5 (see [Outcomes](#outcomes)); the research items are measured and none is built (see [Research](#research-after-the-fixes))** (from beqdesigner's full-library run, 19 October 2026; TODO row 29).
 
 beqdesigner designed its whole JRiver library (1,287 titles) with beqforge 0.2.3 to 0.2.5. Every one of the 279
 declines was reviewed against the run record (where one exists), the material and the community BEQ catalogue. 217
@@ -149,6 +149,9 @@ and 21 decline on content grounds. The steep-filter default stays with TODO 5/6.
 Assessed with beqdesigner (20 October 2026). Agreed: four fixes (items 1, 9, 2 and the drift scoring behind most of
 item 3), the small items O1 and O2, then research on 1b/6/7, the texture retune (4), the scene margin (5) and row 28.
 Each fix lands as its own commit with its own regression check against the commit before it.
+All six (fixes 1-4, O2, O1) were released together in 0.2.9 (design version 5). Item 3's tilt band was not
+measured on its own: fix 2 rescued The Quiet Girl, and The Smurfs and Despicable Me 3 already design on this machine,
+but Blood Simple and Synecdoche, New York have not been rerun (TODO row 31).
 
 ### Fix 1: an unmeasured tracking floor is no longer reported as a measurement (item 1)
 
@@ -297,7 +300,7 @@ Exist lead with an earlier blocker (loud events, positive correction) and keep t
 All About Eve is unchanged. The golden's unfiltered case moves from `within_programme_ripple` to
 `within_goal_tolerance`. A decline reason is an answer, so this shares the unreleased `DESIGN_VERSION` 5.
 
-### O1: a DC offset and its steps (findings; report-only detection to follow)
+### O1: a DC offset and its steps (report-only)
 
 Measured on Desperately Seeking Susan before building anything. Headroom already counts the offset: `measure_headroom`
 filters the sub feed with the device's full transfer, 0 Hz included, so a lifted static offset is in the measured

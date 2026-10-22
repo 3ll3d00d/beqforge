@@ -1,6 +1,6 @@
 # Contract 1.5: design adjustments (beqforge's side)
 
-**Handoff; built 21 October 2026 (see [Outcome](#outcome))** (from beqdesigner, 21 October 2026; TODO row 30). beqdesigner's side is built and committed
+**Handoff; built 21 October 2026, released in 0.2.9 (see [Outcome](#outcome))** (from beqdesigner, 21 October 2026; TODO row 30). beqdesigner's side is built and committed
 on its `main` (not yet pushed or released); this is what beqforge needs to do for a person to be able to ask it for a different design from the
 browser.
 
@@ -108,7 +108,7 @@ how it checks the answers).
 
 ## Outcome
 
-Built on branch `contract-1.5-adjustments` (from `cf331b9`):
+Built on branch `contract-1.5-adjustments` (from `cf331b9`), landed on `main` as `4bd3d3e` and released in 0.2.9:
 
 * `beqforge/adjustments.py`: the shape check (`adjustments_from_json`; a malformed body is a 400, an unknown kind or a
   bad parameter is answered), `apply_adjustments` (the mapping above, first by id of a one-value kind, the rest
@@ -121,7 +121,8 @@ Built on branch `contract-1.5-adjustments` (from `cf331b9`):
   about 12 dB to 6.3 dB.
 * `designer.py`: `CONTRACT_VERSION = "1.5"`, the request and response fields, `_validate_outcomes`, applied after
   `design_settings_digest`; `tools/designer_server.py`: `adjustment_kinds` on `/health`.
-* Not done: the note's text is not written into the run record (the record has the adjusted params).
+* Not done: the note's text is not written into the run record (the record has the adjusted params). Parked in TODO
+  row 30.
 * No `DESIGN_VERSION` bump: a request without adjustments is untouched.
 
 Evidence: `tests/test_design_adjustments.py` (31, four real designs for direction: the cap lowers the peak, the tilt
