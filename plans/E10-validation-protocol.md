@@ -1,6 +1,6 @@
 # E10: a fresh validation protocol for the content goal (v1)
 
-**Protocol written 22 October 2026; its synthetic half is built (`beqforge/e10.py`, `tools/e10_run.py`), the real-texture half is not, and nothing has been run beyond a smoke check** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`); nothing has been run beyond a smoke check** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -206,10 +206,15 @@ protocol version increments. Results from different versions are not pooled.
 2. **Built:** the scorer (`e10.truth`, `e10.score`, `e10.summarise`), on the published response,
    with noise taken from the stored noise arrays rather than a white-floor formula: row 5's
    coloured-floor scoring, for the synthetic families.
-3. **Not built:** `tools/e10_cases.py`, the development/held-out title lists and the
-   real-texture recipes, writing each case's recipe (seed, transform, parameters), never its
-   audio. A real-texture case is scored against the same title's as-is run, so each held-out
-   title costs four runs (as-is, `injected_rolloff`, `noise_replaced`, `excerpt`).
+3. **Built:** `tools/e10_cases.py`. `freeze` wrote `plans/e10-titles-v1.json` (names only): of
+   1,287 library titles with a multichannel extraction, 332 are development (named in `plans/`,
+   `TODO.md`, the triage ledger, findings or status, or the baseline set, matched on the name
+   without its year) and 60 are held out, drawn with seed 10 from the 955 others. `run` designs
+   each title as it is and with each recipe, all drawn from the title's place in the list, and
+   scores a recipe against the as-is design: `injected_rolloff` by what the design adds against
+   the filter's inverse, where the as-is run tracked programme and the filter leaves it within
+   40 dB; `noise_replaced` by any boost over 3 dB half an octave under its corner; each excerpt
+   (20% and 50%) by whether anything is selected. A title costs five designs a goal.
 4. **Built:** `tools/e10_run.py` runs a partition at the goals asked for, one process per case
    with the analysis shared across goals, and writes the protocol version, build, rows and
    summary. `--partition held-out` takes its own seed block and refuses an uncommitted tree.

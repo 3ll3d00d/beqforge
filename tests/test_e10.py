@@ -97,3 +97,66 @@ def test_the_summary_counts_each_class_over_the_cases_exposed_to_it():
 def test_the_interval_matches_the_protocols_sample_sizes():
     assert e10.clopper_pearson(0, 72)[1] == pytest.approx(0.050, abs=0.001)
     assert e10.clopper_pearson(0, 36)[1] == pytest.approx(0.097, abs=0.001)
+
+
+# ---- the real-texture half, on a synthetic stand-in for a library title ---------------
+
+
+def _title():
+    from beqforge.material import Material
+
+    case = e10.e10_case("broadband", 1, duration_s=60.0)
+    channels = {n: case.observed[n] + case.noise[n] for n in case.observed}
+    return Material(
+        "stand-in", e10.FS, case.material().mono_mix, channels, "complete_programme"
+    )
+
+
+def test_each_title_gets_the_three_recipes_and_two_excerpts():
+    from tools import e10_cases
+
+    built = e10_cases.recipes(_title(), 0)
+    assert [name for name, _, _ in built] == [
+        "injected_rolloff",
+        "noise_replaced",
+        "excerpt_20",
+        "excerpt_50",
+    ]
+    assert all(
+        m.coverage == "excerpt" for name, m, _ in built if name.startswith("excerpt")
+    )
+    again = e10_cases.recipes(_title(), 0)
+    assert built[0][2]["injected"] == again[0][2]["injected"]
+
+
+def test_a_boost_where_only_the_added_floor_is_left_is_noise_lift():
+    from tools import e10_cases
+
+    detail = {"corner_hz": 40.0}
+    row = e10_cases.score(
+        "noise_replaced", detail, _report(BOOST), _report(), PipelineParams(), 1.5
+    )
+    assert row["noise_lift"] and row["noise_lift_db"] > e10.NOISE_LIFT_DB
+
+
+def test_any_selection_on_an_excerpt_is_unnecessary():
+    from tools import e10_cases
+
+    row = e10_cases.score(
+        "excerpt_20", {}, _report(BOOST), _report(), PipelineParams(), 1.5
+    )
+    assert row["unnecessary"]
+
+
+def test_an_injected_rolloff_is_judged_by_what_the_design_adds():
+    from beqforge import Alignment, HighPass
+    from tools import e10_cases
+
+    asis = _report()
+    asis.diagnosis = SimpleNamespace(noise_floor_hz=8.0)
+    detail = {"hp": HighPass(Alignment.BUTTERWORTH, 4, 30.0)}
+    missed = e10_cases.score(
+        "injected_rolloff", detail, _report(), asis, PipelineParams(), 1.5
+    )
+    assert missed["needs_correction"] and missed["missed"]
+    assert missed["shortfall_median_db"] > 3.0
