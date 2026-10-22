@@ -5,7 +5,8 @@
 #
 # Configuration is the server's own environment variables (README, "beqdesigner integration").
 # The defaults here listen on every interface, take audio by reference under /work (mount the
-# pipeline's work directory there) and keep the stage cache in /cache (mount a volume).
+# pipeline's work directory there), keep the stage cache in /cache and every request's run record
+# in /records (mount a volume on each). The log goes to the console only: `docker logs` keeps it.
 FROM python:3.13-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.9.18 /uv /usr/local/bin/uv
 WORKDIR /src
@@ -33,10 +34,11 @@ RUN groupadd -g "${PGID}" beqforge && useradd -m -u "${PUID}" -g beqforge beqfor
     && chown beqforge:beqforge /work /cache /records
 COPY --from=build /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib \
-    BEQFORGE_HOST=0.0.0.0 BEQFORGE_PORT=8420 BEQFORGE_SHARED_ROOT=/work BEQFORGE_CACHE_DIR=/cache
+    BEQFORGE_HOST=0.0.0.0 BEQFORGE_PORT=8420 BEQFORGE_SHARED_ROOT=/work BEQFORGE_CACHE_DIR=/cache \
+    BEQFORGE_RECORD_DIR=/records BEQFORGE_LOG_FILE=false
 USER beqforge
 EXPOSE 8420
-VOLUME ["/cache"]
+VOLUME ["/cache", "/records"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"BEQFORGE_PORT\"]}/health', timeout=3).close()" || exit 1
 ENTRYPOINT ["beqforge", "serve-designer"]

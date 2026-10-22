@@ -184,6 +184,17 @@ def smoke(image: str) -> None:
             base = f"http://127.0.0.1:{port}"
             _wait_for(base)
             check(base, work)
+            records = call(base, "/health")[1].get("record_dir")
+            assert records == "/records", f"/health: records kept in {records!r}"
+            listed = subprocess.run(
+                ["docker", "exec", name, "ls", "/records"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.split()
+            assert any(n.endswith(".run.json.gz") for n in listed), (
+                f"no run record in /records: {listed}"
+            )
             health = subprocess.run(
                 ["docker", "inspect", "--format", "{{.State.Health.Status}}", name],
                 capture_output=True,

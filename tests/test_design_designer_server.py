@@ -174,6 +174,8 @@ def test_health_check(server) -> None:
         "contract_version": "1.5",
         "shared_root": False,
         "parallel": 1,
+        "record_dir": None,
+        "log_file": None,
         **_identity(PipelineParams(strategies=("flatten",))),
         "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }
@@ -532,6 +534,8 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
         "contract_version": "1.5",
         "shared_root": True,
         "parallel": 1,
+        "record_dir": None,
+        "log_file": None,
         **_identity(PipelineParams(strategies=("flatten",))),
         "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }

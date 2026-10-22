@@ -113,8 +113,12 @@ class _EnvironmentParser(argparse.ArgumentParser):
                 lowered = value.strip().lower()
                 if lowered not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
                     self.error(f"{name} must be true/false, yes/no, on/off or 1/0")
-                if lowered in ("1", "true", "yes", "on"):
-                    defaults.append(option)
+                # the --no- form too, so a false setting turns off a flag that defaults on
+                defaults.append(
+                    option
+                    if lowered in ("1", "true", "yes", "on")
+                    else action.option_strings[1]
+                )
             elif repeatable:
                 try:
                     items = json.loads(value)
@@ -136,6 +140,28 @@ class _EnvironmentParser(argparse.ArgumentParser):
         return super().parse_args([*defaults, *arguments], namespace)
 
 
+LOG_FILE = "designer.log"
+LOG_BYTES = 10_000_000
+LOG_BACKUPS = 5
+"""The log file rotates at 10 MB and keeps five old ones: about 60 MB at most."""
+
+
+def data_dir() -> Path:
+    """Where a server keeps what it writes unless told otherwise: the platform's per-user place.
+
+    `%LOCALAPPDATA%\\beqforge` on Windows (where `beqforge-designer.cmd` already keeps the cache),
+    `~/Library/Application Support/beqforge` on macOS, `$XDG_STATE_HOME/beqforge` (else
+    `~/.local/state/beqforge`) elsewhere.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = str(Path.home() / "Library" / "Application Support")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "beqforge"
+
+
 def _prepare_directory(path: Path) -> None:
     """Create the directory and exercise an actual write before accepting requests."""
     path.mkdir(parents=True, exist_ok=True)
@@ -152,6 +178,8 @@ class DesignSettings:
     record_dir: Path | None = None
     cache: Store | None = None
     shared_root: Path | None = None
+    log_file: Path | None = None
+    """Where the server's log is also written, for `/health`; the parent process writes it."""
 
 
 # The worker process's own state, set once by `_start_worker`.
@@ -447,6 +475,10 @@ class DesignServer(ThreadingHTTPServer):
         self._close_workers()
 
 
+def _path_or_none(path: Path | None) -> str | None:
+    return None if path is None else str(path)
+
+
 class _Handler(BaseHTTPRequestHandler):
     server: DesignServer
 
@@ -468,6 +500,10 @@ class _Handler(BaseHTTPRequestHandler):
                     "contract_version": CONTRACT_VERSION,
                     "shared_root": self.server.settings.shared_root is not None,
                     "parallel": len(self.server.workers),
+                    # where this server keeps what a review needs, so a caller can tell one
+                    # that keeps nothing (null)
+                    "record_dir": _path_or_none(self.server.settings.record_dir),
+                    "log_file": _path_or_none(self.server.settings.log_file),
                     **self.server.identity,
                     # 1.5: the adjustments this server takes, their defaults its own settings
                     "adjustment_kinds": kinds_for(self.server.settings.params),
@@ -587,8 +623,30 @@ def build_parser() -> _EnvironmentParser:
         metavar="DIR",
         help=(
             "write each request's run record here (designer-<digest>.run.json.gz), "
-            "replayable with `beqforge replay`; responses name the file"
+            "replayable with `beqforge replay`; responses name the file. Default: records "
+            "in the per-user data directory. Created and checked for writes at startup"
         ),
+    )
+    parser.add_argument(
+        "--record",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="keep a run record for every request (default on; --no-record keeps none)",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            f"also write the log to {LOG_FILE} here, rotating at {LOG_BYTES // 1_000_000} MB "
+            f"with {LOG_BACKUPS} kept. Default: logs in the per-user data directory"
+        ),
+    )
+    parser.add_argument(
+        "--log-file",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="write the log file as well as the console (default on)",
     )
     parser.add_argument(
         "--cache-dir",
@@ -687,15 +745,18 @@ def main() -> int:
     )
 
     params = pipeline_params(args, parser)
-    strategies = params.strategies
     if not 1 <= args.workers <= MAX_WORKERS:
         parser.error(f"workers must be 1-{MAX_WORKERS}")
     if args.cores is not None and args.cores < args.workers:
         parser.error(f"cores must be at least workers ({args.workers})")
 
+    record_dir = (args.record_dir or data_dir() / "records") if args.record else None
+    log_dir = (args.log_dir or data_dir() / "logs") if args.log_file else None
     for option, directory in (
         ("--cache-dir", args.cache_dir),
         ("--shared-root", args.shared_root),
+        ("--record-dir", record_dir),
+        ("--log-dir", log_dir),
     ):
         if directory is not None:
             try:
@@ -705,11 +766,35 @@ def main() -> int:
                     f"{option} {directory}: cannot create or write directory: {error}"
                 )
 
+    log_file = None if log_dir is None else log_dir / LOG_FILE
+    file_log = None
+    if log_file is not None:
+        file_log = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=LOG_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"
+        )
+        file_log.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        logging.getLogger().addHandler(file_log)
+    try:
+        return _serve(args, params, record_dir, log_file)
+    finally:
+        if file_log is not None:
+            logging.getLogger().removeHandler(file_log)
+            file_log.close()
+
+
+def _serve(
+    args: argparse.Namespace,
+    params: PipelineParams,
+    record_dir: Path | None,
+    log_file: Path | None,
+) -> int:
+    strategies = params.strategies
     settings = DesignSettings(
         params=params,
-        record_dir=args.record_dir,
+        record_dir=record_dir,
         cache=DirStore(args.cache_dir) if args.cache_dir else None,
         shared_root=args.shared_root.resolve() if args.shared_root else None,
+        log_file=log_file,
     )
     server = DesignServer(
         (args.host, args.port),
@@ -725,7 +810,8 @@ def main() -> int:
         + f"; design version {DESIGN_VERSION}, settings {design_settings_digest(params)}"
         + f"; {args.workers} design(s) at once"
         + (f", {share} fit worker(s) each" if share is not None else "")
-        + (f"; records to {args.record_dir}" if args.record_dir else "")
+        + (f"; records to {record_dir}" if record_dir else "; no run records")
+        + (f"; log also to {log_file}" if log_file else "")
         + (f"; stage cache in {args.cache_dir}" if args.cache_dir else "")
         + (f"; audio by reference under {args.shared_root}" if args.shared_root else "")
         + ")"

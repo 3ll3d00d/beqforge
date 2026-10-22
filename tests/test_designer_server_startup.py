@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -11,10 +12,12 @@ from tools import designer_server
 
 
 @pytest.fixture
-def startup(monkeypatch):
+def startup(monkeypatch, tmp_path):
     for name in os.environ:
         if name.startswith("BEQFORGE_"):
             monkeypatch.delenv(name)
+    # records and the log default to the per-user data directory: never the real one here
+    monkeypatch.setattr(designer_server, "data_dir", lambda: tmp_path / "data")
     server = Mock()
     constructor = Mock(return_value=server)
     monkeypatch.setattr(designer_server, "DesignServer", constructor)
@@ -26,7 +29,10 @@ def startup(monkeypatch):
     return run, constructor, server
 
 
-@pytest.mark.parametrize("option", ["--cache-dir", "--shared-root"])
+DIRECTORIES = ["--cache-dir", "--shared-root", "--record-dir", "--log-dir"]
+
+
+@pytest.mark.parametrize("option", DIRECTORIES)
 @pytest.mark.parametrize("existing", [False, True])
 def test_directory_is_ready_before_listening(startup, tmp_path, option, existing):
     directory = tmp_path / "parent" / "directory"
@@ -37,9 +43,10 @@ def test_directory_is_ready_before_listening(startup, tmp_path, option, existing
 
     def bind(*_, **__):
         assert directory.is_dir()
-        assert sorted(p.name for p in directory.iterdir()) == (
-            ["existing"] if existing else []
-        )
+        expected = ["existing"] if existing else []
+        if option == "--log-dir":
+            expected.append(designer_server.LOG_FILE)  # opened before the server binds
+        assert sorted(p.name for p in directory.iterdir()) == sorted(expected)
         return server
 
     constructor.side_effect = bind
@@ -48,7 +55,7 @@ def test_directory_is_ready_before_listening(startup, tmp_path, option, existing
     server.server_close.assert_called_once()
 
 
-@pytest.mark.parametrize("option", ["--cache-dir", "--shared-root"])
+@pytest.mark.parametrize("option", DIRECTORIES)
 @pytest.mark.parametrize("parent_is_file", [False, True])
 def test_file_in_directory_path_fails_before_listening(
     startup, tmp_path, capsys, option, parent_is_file
@@ -67,7 +74,7 @@ def test_file_in_directory_path_fails_before_listening(
     assert obstruction.read_text() == "keep me"
 
 
-@pytest.mark.parametrize("option", ["--cache-dir", "--shared-root"])
+@pytest.mark.parametrize("option", DIRECTORIES)
 def test_failed_write_fails_before_listening(
     startup, monkeypatch, tmp_path, capsys, option
 ):
@@ -83,7 +90,8 @@ def test_failed_write_fails_before_listening(
     directory = tmp_path / "directory"
     run, constructor, _ = startup
     with pytest.raises(SystemExit) as refused:
-        run(option, str(directory))
+        # with records on, their default directory would fail before the log's
+        run(option, str(directory), *(["--no-record"] if option == "--log-dir" else []))
     assert refused.value.code == 2
     assert "write denied" in capsys.readouterr().err
     constructor.assert_not_called()
@@ -93,9 +101,62 @@ def test_failed_write_fails_before_listening(
 def test_unconfigured_directories_do_not_probe_filesystem(startup, monkeypatch):
     prepare = Mock(side_effect=AssertionError("unexpected directory check"))
     monkeypatch.setattr(designer_server, "_prepare_directory", prepare)
-    run, _, _ = startup
-    assert run() == 0
+    run, constructor, _ = startup
+    assert run("--no-record", "--no-log-file") == 0
     prepare.assert_not_called()
+    (_, settings), _ = constructor.call_args
+    assert settings.record_dir is None and settings.log_file is None
+
+
+def test_records_and_the_log_are_kept_by_default(startup, tmp_path, caplog):
+    """TODO 27: a server started with no flags keeps what a review needs."""
+    caplog.set_level(logging.INFO)  # as `main`'s basicConfig sets it outside pytest
+    run, constructor, _ = startup
+    root = logging.getLogger()
+    handlers = list(root.handlers)
+    assert run() == 0
+    (_, settings), _ = constructor.call_args
+    assert settings.record_dir == tmp_path / "data" / "records"
+    assert settings.record_dir.is_dir()
+    assert settings.log_file == tmp_path / "data" / "logs" / designer_server.LOG_FILE
+    assert "beqforge designer server" in settings.log_file.read_text(encoding="utf-8")
+    assert root.handlers == handlers  # the file handler goes when the server does
+
+
+@pytest.mark.parametrize("value", ["0", "false", "off"])
+def test_records_can_be_turned_off_from_the_environment(startup, monkeypatch, value):
+    """A false setting turns off a flag that defaults on, not only one that defaults off."""
+    monkeypatch.setenv("BEQFORGE_RECORD", value)
+    monkeypatch.setenv("BEQFORGE_LOG_FILE", value)
+    run, constructor, _ = startup
+    assert run() == 0
+    (_, settings), _ = constructor.call_args
+    assert settings.record_dir is None and settings.log_file is None
+
+
+@pytest.mark.parametrize(
+    ("platform", "environment", "expected"),
+    [
+        (
+            "win32",
+            {"LOCALAPPDATA": "C:/Users/u/AppData/Local"},
+            "C:/Users/u/AppData/Local",
+        ),
+        ("linux", {"XDG_STATE_HOME": "/state"}, "/state"),
+        ("linux", {}, "~/.local/state"),
+        ("darwin", {}, "~/Library/Application Support"),
+    ],
+)
+def test_the_data_directory_is_the_platforms_per_user_place(
+    monkeypatch, platform, environment, expected
+):
+    for name in ("LOCALAPPDATA", "XDG_STATE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(designer_server.sys, "platform", platform)
+    expected_root = Path(expected).expanduser() / "beqforge"
+    assert designer_server.data_dir() == expected_root
 
 
 def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp_path):
@@ -111,6 +172,9 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
         "CONTENT_EDGE": "yes",
         "STRATEGY": '["flatten", "counterfactual"]',
         "RECORD_DIR": str(tmp_path / "records"),
+        "RECORD": "yes",
+        "LOG_DIR": str(tmp_path / "logs"),
+        "LOG_FILE": "true",
         "CACHE_DIR": str(tmp_path / "cache"),
         "SHARED_ROOT": str(tmp_path / "shared"),
         "WORKERS": "2",
@@ -147,6 +211,7 @@ def test_every_server_option_can_come_from_environment(startup, monkeypatch, tmp
     assert params.judge_from_content_edge is True
     assert params.strategies == ("flatten", "counterfactual")
     assert settings.record_dir == tmp_path / "records"
+    assert settings.log_file == tmp_path / "logs" / designer_server.LOG_FILE
     assert settings.cache.root == tmp_path / "cache"
     assert settings.shared_root == (tmp_path / "shared").resolve()
     assert (tmp_path / "cache").is_dir()
@@ -248,6 +313,9 @@ def test_help_lists_every_environment_option_even_with_invalid_environment(
         "CONTENT_EDGE",
         "STRATEGY",
         "RECORD_DIR",
+        "RECORD",
+        "LOG_DIR",
+        "LOG_FILE",
         "CACHE_DIR",
         "SHARED_ROOT",
         "WORKERS",

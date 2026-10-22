@@ -138,9 +138,14 @@ register_designer('beqforge.v1', http_designer('http://host:8420/design'))
 Device realisation, which strategies run, authored exclusions, the goal (`--goal-tilt`,
 `--goal-tolerance`, as for `design`) and the opt-in `--content-edge` are server-wide flags (see `--help`); everything
 per-title — the audio itself, its coverage, an optional per-channel decomposition and
-bass-management model — arrives in the request. `--record-dir DIR` also writes each request's
-full run record into `DIR` (`designer-<digest>.run.json.gz`, named by a digest of the request's
-audio), which `beqforge replay` can redraw and export.
+bass-management model — arrives in the request. The server keeps each request's full run record
+(`designer-<digest>.run.json.gz`, named by a digest of the request's audio), which `beqforge replay`
+can redraw and export, and writes its log to `designer.log` (10 MB, five kept) as well as the
+console. Both go to the per-user data directory unless moved with `--record-dir DIR` and
+`--log-dir DIR`: `%LOCALAPPDATA%\beqforge` on Windows, `~/Library/Application Support/beqforge` on
+macOS, `$XDG_STATE_HOME/beqforge` (else `~/.local/state/beqforge`) elsewhere, under `records` and
+`logs`. `--no-record` and `--no-log-file` turn them off. `/health` reports both locations
+(`record_dir`, `log_file`), `null` when off.
 
 **Stage cache.** `--cache-dir DIR` enables the server's persistent stage cache (off by
 default). Repeat requests reuse analysis and unchanged parametric proposals; changed effective
@@ -189,6 +194,9 @@ their existing CLI configuration.
 | `--content-edge` | `BEQFORGE_CONTENT_EDGE` | boolean |
 | `--strategy` | `BEQFORGE_STRATEGY` | JSON array of names, e.g. `["flatten","counterfactual"]` |
 | `--record-dir` | `BEQFORGE_RECORD_DIR` | path |
+| `--record` | `BEQFORGE_RECORD` | boolean, default on |
+| `--log-dir` | `BEQFORGE_LOG_DIR` | path |
+| `--log-file` | `BEQFORGE_LOG_FILE` | boolean, default on |
 | `--cache-dir` | `BEQFORGE_CACHE_DIR` | path |
 | `--shared-root` | `BEQFORGE_SHARED_ROOT` | path |
 | `--workers` | `BEQFORGE_WORKERS` | integer, 1-8 |
@@ -196,7 +204,8 @@ their existing CLI configuration.
 | `--quiet` | `BEQFORGE_QUIET` | boolean |
 
 Booleans accept `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`, ignoring case.
-`--no-content-edge` and `--no-quiet` disable settings enabled through the environment.
+`--no-content-edge` and `--no-quiet` disable settings enabled through the environment, and a
+false value in the environment turns off a setting that defaults on (`BEQFORGE_RECORD=false`).
 Environment values undergo the same argument validation as CLI values.
 
 ```bash
@@ -282,10 +291,11 @@ The image's defaults, all overridable with the environment variables above:
 | `BEQFORGE_HOST`, `BEQFORGE_PORT` | `0.0.0.0`, `8420` | |
 | `BEQFORGE_SHARED_ROOT` | `/work` | the pipeline's work directory, so audio is sent by reference |
 | `BEQFORGE_CACHE_DIR` | `/cache` | a volume, so a restart keeps the stage cache |
-| `BEQFORGE_RECORD_DIR` | unset | set it (for example to `/records`, and mount that) to keep run records |
+| `BEQFORGE_RECORD_DIR` | `/records` | a volume, so run records outlive the container |
+| `BEQFORGE_LOG_FILE` | `false` | none: `docker logs` keeps the console log |
 
 It runs as uid/gid 1000 (`--build-arg PUID=… PGID=…` to change), which must be able to write
-the shared root and the cache: the server checks both with a write at startup. Its
+the shared root, the cache and the records: the server checks each with a write at startup. Its
 `HEALTHCHECK` asks `/health`, which answers while a design runs: designs run in separate
 worker processes, `BEQFORGE_WORKERS` (default 1) at a time, so a caller sending more at once
 queues them; size the caller's timeout for that. `docker stop` stops a design in progress.
@@ -297,7 +307,8 @@ docker build -f packaging/designer/Dockerfile -t beqforge-designer .
 python3 packaging/designer/smoke.py beqforge-designer
 ```
 
-The smoke script checks `/health` and one design inline and one by reference;
+The smoke script checks `/health`, one design inline and one by reference, and that their run
+records reached `/records`;
 `tests/test_designer_image.py` runs the same check against an in-process server.
 
 ### Running the designer on Windows
@@ -315,7 +326,9 @@ beqforge-windows-x86_64.exe serve-designer --host 0.0.0.0 --port 8420 ^
 The launcher sets the image's defaults through the environment variables above, each only if
 not already set: `BEQFORGE_HOST=0.0.0.0`, `BEQFORGE_PORT=8420`,
 `BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache` and
-`BEQFORGE_RECORD_DIR=%LOCALAPPDATA%\beqforge\records`, so every request's run record is kept.
+`BEQFORGE_RECORD_DIR=%LOCALAPPDATA%\beqforge\records`, so every request's run record is kept even
+by releases before 0.2.10, which keep none unless told to. The log goes to
+`%LOCALAPPDATA%\beqforge\logs\designer.log` as well as the window, so it outlives the window.
 Arguments pass through to `serve-designer`.
 
 * **Listen on the network.** The CLI's default host is `127.0.0.1`, which a container cannot

@@ -1,9 +1,6 @@
 # Keep run records and the server log by default
 
-**Handoff, partly built** (from the beqdesigner library run, 19 October 2026; TODO row 27). `9ab5941` makes
-`beqforge-designer.cmd` default `BEQFORGE_RECORD_DIR` to `%LOCALAPPDATA%\beqforge\records`, and the Windows library
-machine now writes its records there. The rest of the change below (the default in `serve-designer` itself, the image,
-the log file, `/health`) is not built.
+**Handoff, built 22 October 2026 (see [Outcome](#outcome))** (from the beqdesigner library run, 19 October 2026; TODO row 27).
 
 ## What went wrong
 
@@ -47,3 +44,33 @@ Default location per platform (monkeypatched environment), `--no-record`, an unw
 failing startup, `/health` reporting the directory, the image smoke test (`packaging/designer/smoke.py`)
 checking a record lands in `/records`, and the exe smoke test (`tools/smoke_test_exe.py`) run with no
 `--record-dir` finding a record in the default location.
+
+## Outcome
+
+Built as proposed, except that the image keeps no log file (`docker logs` keeps its console)
+and retention (item 5) is not built: a library's records are a few hundred MB, and nothing yet
+asks for a cap.
+
+* `tools/designer_server.py`: `data_dir()` is the platform's per-user place (`%LOCALAPPDATA%`,
+  `~/Library/Application Support`, `$XDG_STATE_HOME` or `~/.local/state`, each `/beqforge`).
+  Records default to its `records` and the log to `logs/designer.log`, rotating at 10 MB with five
+  kept, as well as the console. `--record`/`--no-record` and `--log-file`/`--no-log-file`
+  (`BEQFORGE_RECORD`, `BEQFORGE_LOG_FILE`) turn them off; `--record-dir`, `--log-dir` move them.
+  Both are created and write-checked at startup, as `--cache-dir` is, so an unwritable one is a
+  startup error. The startup line names both, or says no records are kept. `/health` adds
+  `record_dir` and `log_file`, `null` when off: optional fields a caller may ignore, so no
+  contract version.
+* The environment parser turned on a boolean when its variable was true and otherwise left the
+  default, so a false variable could not turn off a flag that defaults on. It now passes the
+  `--no-` form.
+* The image sets `BEQFORGE_RECORD_DIR=/records`, declares `VOLUME ["/cache", "/records"]` and sets
+  `BEQFORGE_LOG_FILE=false`, since `docker logs` already keeps the console. Its smoke script checks
+  that `/health` names `/records` and that the two designs left their records there.
+* `beqforge-designer.cmd` keeps setting `BEQFORGE_RECORD_DIR` (`9ab5941`), for releases before
+  this one; the comment says why.
+
+Tests: `tests/test_designer_server_startup.py` (records and the log by default, under a redirected
+`data_dir`; every new option from the environment; false values turning them off; the platform
+directories; the four directory options' startup checks), `/health` in
+`tests/test_design_designer_server.py`, and the recipe in `tests/test_designer_image.py`. No
+pipeline change, so no probe: nothing a design reads moved.

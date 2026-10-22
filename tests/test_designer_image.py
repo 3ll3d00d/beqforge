@@ -39,8 +39,11 @@ def test_the_image_serves_the_designer_with_references_and_a_cache_by_default():
         "BEQFORGE_PORT=8420",
         "BEQFORGE_SHARED_ROOT=/work",
         "BEQFORGE_CACHE_DIR=/cache",
+        "BEQFORGE_RECORD_DIR=/records",
+        "BEQFORGE_LOG_FILE=false",
     ):
         assert setting in recipe
+    assert 'VOLUME ["/cache", "/records"]' in recipe
     assert "USER beqforge" in recipe and "HEALTHCHECK" in recipe
 
 

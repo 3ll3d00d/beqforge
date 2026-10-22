@@ -21,7 +21,9 @@ rem if not defined BEQFORGE_CORES set "BEQFORGE_CORES=8"
 if not defined BEQFORGE_HOST set "BEQFORGE_HOST=0.0.0.0"
 if not defined BEQFORGE_PORT set "BEQFORGE_PORT=8420"
 if not defined BEQFORGE_CACHE_DIR set "BEQFORGE_CACHE_DIR=%LOCALAPPDATA%\beqforge\cache"
-rem Keep each request's run record, so a design or a decline can be reviewed and replayed.
+rem Every request's run record and the server log are kept by default (0.2.10 on), in
+rem %LOCALAPPDATA%\beqforge\records and ...\logs; set BEQFORGE_RECORD_DIR or BEQFORGE_LOG_DIR to move them.
+rem Older releases keep records only when told to, so name the folder for them here.
 if not defined BEQFORGE_RECORD_DIR set "BEQFORGE_RECORD_DIR=%LOCALAPPDATA%\beqforge\records"
 
 set "EXE=%~dp0beqforge-windows-x86_64.exe"
