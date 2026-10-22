@@ -1,6 +1,6 @@
 # E10: a fresh validation protocol for the content goal (v1)
 
-**Protocol written 22 October 2026; nothing in it is built or run yet** (TODO row 3). This is the
+**Protocol written 22 October 2026; its synthetic half is built (`beqforge/e10.py`, `tools/e10_run.py`), the real-texture half is not, and nothing has been run beyond a smoke check** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -80,10 +80,12 @@ Two sources of cases, each with a development part and a held-out part.
 
 ### Synthetic families
 
-Extending `harness.corpus_case`. Each family is a recipe drawing every parameter from its seed;
-the recipe states its truth band and whether each goal makes it a positive or a negative.
+Built beside `harness.corpus_case`, which stays untouched, in `beqforge/e10.py`. Each family is a
+recipe drawing every parameter from its seed. Whether a case needs a correction is not
+labelled: the scorer computes it per goal from the stored arrays (see "Scoring" below), so the
+last column is what the recipe is built to provoke, not a label.
 
-| Family | Construction | Negative or positive |
+| Family | Construction | Built to provoke |
 | --- | --- | --- |
 | `broadband` | As the corpus's: flat programme, no filter. | negative (within the goal) |
 | `sparse_dialogue` | Programme events rare and quiet, mid-band only. | negative |
@@ -93,7 +95,7 @@ the recipe states its truth band and whether each goal makes it a positive or a 
 | `correlated_noise` | The same noise in every channel (a mastering hiss or hum bed), so it tracks across channels like programme. | negative below the programme's own corner |
 | `finite_stopband` | Programme high-passed with a stopband floor of -40 or -60 dB (a filter, not a cut-off), no added noise. | positive down to where the stopband meets the floor |
 | `partial_channels` | The high-pass on the LFE only, or on the mains only. | positive; the restored channel must carry it |
-| `cancellation` | Mains and LFE partly out of phase below 60 Hz. | negative for the cancelled band (nothing to restore) |
+| `cancellation` | Mains and LFE partly out of phase below 60 Hz. | the mix's low band reduced by cancellation: under the content principle still programme, so computed like a droop |
 | `natural_droop` | Programme synthesised with a rolled-off spectrum, no filter. | positive under flat, per-goal otherwise |
 | `continuous_bass` | Bass that never goes quiet (a concert film), filtered or not. | both, by seed parity |
 | `filtered` | As the corpus's: a 2-4 order Butterworth or Linkwitz-Riley at 15-40 Hz. | positive |
@@ -148,6 +150,32 @@ At the corpus's 15-20 minutes for 63 cases, the synthetic held-out half is rough
 one goal and six at three; the real half, at real-title speeds (40-80 s), about three hours a
 goal. A held-out run is therefore a deliberate event, not a regression check.
 
+## Scoring
+
+As built (`e10.truth`, `e10.score`), on a log axis from 5 to 160 Hz, each spectrum the mix-weighted
+Welch mean smoothed over a sixth of an octave:
+
+* The **goal** is the observed programme's median level over 80-160 Hz (where every recipe leaves
+  it alone) plus the goal's house curve pivoting at 80 Hz (`verify.house_curve_db`). With no
+  programme there (noise only), there is no goal and nothing needs correcting.
+* The **truth band** runs down from 80 Hz, contiguously, while the observed programme stands more
+  than 3 dB above the case's own noise. **Noise-only bins** are those below 80 Hz where the noise
+  is louder than the programme.
+* A case **needs a correction** at a goal when the programme sits more than that goal's tolerance
+  under it over a third of an octave or more of the truth band.
+* Each class is then counted over the cases exposed to it: noise lift over cases with noise-only
+  bins, unnecessary intervention over cases that need nothing, overshoot over all, missed
+  recovery over those that need a correction, device failure over the selected.
+
+**Smoke check (22 October 2026, HEAD `b309000`).** `filtered/1` at the flat goal: the pipeline
+corrects to within 1.4 dB of the goal from 12 to 80 Hz, rises 2.9 dB over it near 10 Hz (an
+overshoot by this definition, which allows none of the judge's roughness allowance) and stops near
+7 Hz, where the programme still stands 20 dB over the case's 1e-5 white noise, so recovery is
+missed below it. With noise that low the truth band reaches the 5 Hz floor on most filtered cases,
+so missed recovery will be common and the shortfall the more telling figure; the noisier families
+(`coloured_floor`, `nonstationary_floor`) are where the truth band stops short of the floor.
+`stationary_noise/1` abstains.
+
 ## Decision rule
 
 A change E10 gates (a retune, a new rule, a default change) is adopted when, on the held-out
@@ -173,15 +201,19 @@ protocol version increments. Results from different versions are not pooled.
 
 ## What building it takes
 
-Nothing above is built. In order:
-
-1. `harness` recipes for the new synthetic families, each with its truth band, goal table and
-   stored programme and noise arrays; the existing shapes unchanged.
-2. A scorer for the failure classes on the published response, with corrected noise computed
-   from the stored noise (row 5's scoring work).
-3. `tools/e10_cases.py`: the development/held-out title lists and the real-texture recipes,
-   writing each case's recipe (seed, transform, parameters), never its audio.
-4. `tools/e10_run.py`: run a partition at the three goals, write one JSON per run with the
-   protocol version, commit and legacy counts.
-5. A first development run at HEAD, to check the instrument, recorded here. The held-out half is
-   not run until the first change E10 gates is frozen.
+1. **Built:** the synthetic families (`beqforge/e10.py`, `e10_case`), each storing the recorded
+   programme, the observed programme and the noise per channel; the corpus's shapes unchanged.
+2. **Built:** the scorer (`e10.truth`, `e10.score`, `e10.summarise`), on the published response,
+   with noise taken from the stored noise arrays rather than a white-floor formula: row 5's
+   coloured-floor scoring, for the synthetic families.
+3. **Not built:** `tools/e10_cases.py`, the development/held-out title lists and the
+   real-texture recipes, writing each case's recipe (seed, transform, parameters), never its
+   audio. A real-texture case is scored against the same title's as-is run, so each held-out
+   title costs four runs (as-is, `injected_rolloff`, `noise_replaced`, `excerpt`).
+4. **Built:** `tools/e10_run.py` runs a partition at the goals asked for, one process per case
+   with the analysis shared across goals, and writes the protocol version, build, rows and
+   summary. `--partition held-out` takes its own seed block and refuses an uncommitted tree.
+   Legacy counts are not embedded; a run's write-up states them.
+5. **Not run:** a full development run at HEAD (`--seeds 1-3`, every family, three goals), to
+   check the instrument at scale, recorded here. The held-out half is not run until the first
+   change E10 gates is frozen.
