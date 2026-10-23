@@ -88,10 +88,11 @@ Releases before this field: 0.0.x and 0.1.0 are 0 (before versioning), 0.2.0 is 
 0.2.2 is 3, and 0.2.3 to 0.2.5 are 4; 0.2.7, the first to report it, and 0.2.8 are 4 too.
 0.2.9 is 5: it scores the fit on the published (rounded) parameters, fills mains-hum notches before
 measuring the deficit, bounds the fit by the over-lift bar and refuses an infrasonic plateau as
-the reference (TODO 29, released together, so one version). 6 (unreleased) makes the fit
+the reference (TODO 29, released together, so one version). 0.2.10 is 6: it makes the fit
 reproducible: identification converges to 1e-12 and the fit's target and ceiling are quantised
-to 0.01 dB (TODO 28), and builds the sub feed from the request's `bass_management` instead of
-reading only its crossover, which moves `gain_reduction_db` (TODO 1). `plans/design-version.md`
+to 0.01 dB (TODO 28), builds the sub feed from the request's `bass_management` instead of
+reading only its crossover, which moves `gain_reduction_db` (TODO 1), and keeps a passband whose
+knee lands under 10 Hz as the reference (TODO 31). `plans/design-version.md`
 has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
