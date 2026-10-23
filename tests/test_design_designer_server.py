@@ -20,7 +20,6 @@ import http.client
 import json
 import logging
 import threading
-import time
 from dataclasses import replace
 
 import numpy as np
@@ -306,35 +305,28 @@ def test_a_dead_worker_is_a_500_and_the_next_request_gets_a_new_one() -> None:
 
 
 def test_a_second_worker_designs_while_the_first_is_busy() -> None:
-    """With two workers a quick request is answered while a slow one is still designing;
-    with one it would queue behind it. `/health` says how many it takes at once."""
+    """With two workers a request is answered while the other worker is busy; with one it
+    would queue behind it. `/health` says how many it takes at once.
+
+    Busy is held here as `DesignServer.design` holds it, by taking the worker off the idle
+    queue. A real slow design raced the quick request: on a fast runner the design finished
+    first and the test failed with both workers working."""
     httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None, workers=2)
     try:
         assert _request(httpd.server_address, "GET", "/health")[1]["parallel"] == 2
-        slow = []
-        designing = threading.Thread(
-            target=lambda: slow.append(
-                _request(
-                    httpd.server_address,
-                    "POST",
-                    DESIGN_PATH,
-                    body=_known_filter_request(),
-                    timeout=DESIGN_TIMEOUT_S,
-                )
-            )
-        )
-        designing.start()
+        busy = httpd._idle.get()
         try:
-            time.sleep(0.5)  # let the slow request take a worker first
             status, body = _request(
                 httpd.server_address, "POST", DESIGN_PATH, _no_evidence_request()
             )
             assert status == 200
             assert body["decline_reason"] == "channel_evidence_unavailable"
-            assert designing.is_alive()
+            assert httpd._idle.qsize() == 1
+            other = httpd._idle.get_nowait()
+            httpd._idle.put(other)
+            assert other is not busy
         finally:
-            designing.join(timeout=DESIGN_TIMEOUT_S)
-        assert slow[0][0] == 200
+            httpd._idle.put(busy)
     finally:
         _stop(httpd, thread)
 
