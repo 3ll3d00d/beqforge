@@ -469,6 +469,23 @@ def test_an_infrasonic_plateau_is_no_reference(walled) -> None:
     )
 
 
+def test_a_passband_whose_knee_lands_under_the_line_is_a_reference() -> None:
+    """A plateau starting just under 10 Hz that runs on up the band, over a real rolloff, is
+    the bass passband and the rolloff is what to restore (TODO 31).
+
+    A Quiet Place: Day One (9.9-44.2 Hz), Elysium (9.3-54.8) and Pan (10.0-43.8) all have
+    catalogue BEQs restoring the band beneath, and O2 refused them.
+    """
+    from beqforge.pipeline import analyse
+
+    samples = int(FS * 300.0)
+    kneed = material_from({"C": high_passed(scened_noise(23, samples), 9.0, order=12)})
+    analysed = analyse(kneed, PipelineParams(strategies=("flatten",)))
+    low, high = analysed.mix_plateau_hz
+    assert low < 10.0 and high >= 20.0, analysed.mix_plateau_hz
+    assert not analysed.blockers, analysed.blockers
+
+
 @pytest.fixture(scope="module")
 def steep_into_noise():
     """A 12th-order high-pass at 30 Hz, then a stationary floor 60 dB down — the shape of the

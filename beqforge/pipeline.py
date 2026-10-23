@@ -1808,16 +1808,19 @@ def analyse(
         # 6.5-8.9, Evil Does Not Exist 8.7-13.1; TODO 29, O2), where a shortfall or ripple
         # read against it means nothing. Every other real title at hand starts at 12 Hz or
         # above.
+        # The exception is a bass passband whose knee lands just under that line: the plateau
+        # reaches another `min_judge_octaves` above it, and the band beneath it falls short by
+        # more than the passband's own ripple (A Quiet Place: Day One 9.9-44.2 Hz, 15.9 dB
+        # short against 3.4 dB of ripple; Elysium 9.3-54.8, 6.8 against 5.1; Pan 10.0-43.8,
+        # 7.0 against 3.1; TODO 31). Every rumble plateau above ends by 15 Hz, and The
+        # Traitor (6.5-15.0), We Own the Night (7.3-10.4) and Synecdoche, New York
+        # (8.3-11.9) fall short by more than their ripple, so the extent is what separates
+        # them; Battle: Los Angeles (7.5-72.1) reaches but is 1.3 dB short of 4.8.
         lowest_reference = params.verify_floor_hz * 2.0**params.accept.min_judge_octaves
-        bottomed = region[0] < lowest_reference
-        if bottomed:
-            blockers.append(
-                "nothing worth correcting below the mix's plateau: its flat region "
-                f"({region[0]:.1f}-{region[1]:.1f} Hz) starts less than "
-                f"{params.accept.min_judge_octaves:g} octave above the "
-                f"{params.verify_floor_hz:g} Hz judging floor, so there is no low end "
-                "beneath it to restore; restoration withheld"
-            )
+        infrasonic = region[0] < lowest_reference
+        bottomed = infrasonic and (
+            region[1] < lowest_reference * 2.0**params.accept.min_judge_octaves
+        )
         texture = (
             None
             if bottomed
@@ -1833,7 +1836,21 @@ def analyse(
             if bottomed
             else low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
         )
-        if texture is not None and low_end is not None:
+        if infrasonic and not bottomed:
+            bottomed = (
+                texture is None
+                or low_end is None
+                or float(np.max(low_end)) <= texture[0]
+            )
+        if bottomed:
+            blockers.append(
+                "nothing worth correcting below the mix's plateau: its flat region "
+                f"({region[0]:.1f}-{region[1]:.1f} Hz) starts less than "
+                f"{params.accept.min_judge_octaves:g} octave above the "
+                f"{params.verify_floor_hz:g} Hz judging floor, so there is no low end "
+                "beneath it to restore; restoration withheld"
+            )
+        elif texture is not None and low_end is not None:
             ripple, (edge_low, edge_high) = texture
             deepest = float(np.max(low_end))
             if deepest <= ripple:

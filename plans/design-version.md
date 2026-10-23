@@ -148,5 +148,7 @@ a backlog item ("Fit sensitivity to arithmetic"). beqdesigner was told.
 
 Design version 6 (TODO 28) brought `counterfactual` back into the golden on every platform;
 `parametric` still differs by 0.06 dB on macOS arm64 and stays out
-([verdict](library-review-improvements.md#built-a-reproducible-fit-input-22-october-2026-design_version-6)).
+([verdict](library-review-improvements.md#built-a-reproducible-fit-input-22-october-2026-design_version-6)). It also carries
+the sub feed from the request's bass management (TODO 1) and O2's exception for a passband
+whose knee lands under 10 Hz ([TODO 31](library-v5-review.md#o2-at-the-knee-design-version-6-23-october-2026)).
 
