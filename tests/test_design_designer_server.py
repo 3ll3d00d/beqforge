@@ -19,6 +19,7 @@ import base64
 import http.client
 import json
 import logging
+import multiprocessing
 import threading
 from dataclasses import replace
 
@@ -260,28 +261,42 @@ def test_accepts_a_real_injected_rolloff_over_http(server) -> None:
     validate_response(_response_from_json(body))  # must not raise
 
 
-def test_health_answers_while_a_design_runs(server) -> None:
-    """The designs run in the worker process, so a health check never waits behind one."""
-    answered = []
-    designing = threading.Thread(
-        target=lambda: answered.append(
-            _request(
-                server,
-                "POST",
-                DESIGN_PATH,
-                body=_known_filter_request(),
-                timeout=DESIGN_TIMEOUT_S,
+def test_health_answers_while_a_design_runs() -> None:
+    """The designs run in the worker process, so a health check never waits behind one.
+
+    The worker is held by a task waiting on an event, so the design request queues behind it
+    and is still in flight whatever the runner's speed. A real design raced the health check:
+    one finishing first would have failed the test with nothing wrong."""
+    httpd, thread = _serve(PipelineParams(strategies=("flatten",)), None)
+    manager = multiprocessing.get_context("spawn").Manager()
+    try:
+        release = manager.Event()
+        held = httpd.workers[0]._pool.submit(release.wait, DESIGN_TIMEOUT_S)
+        answered = []
+        designing = threading.Thread(
+            target=lambda: answered.append(
+                _request(
+                    httpd.server_address,
+                    "POST",
+                    DESIGN_PATH,
+                    body=_no_evidence_request(),
+                    timeout=DESIGN_TIMEOUT_S,
+                )
             )
         )
-    )
-    designing.start()
-    try:
-        status, _ = _request(server, "GET", "/health", timeout=3.0)
-        assert status == 200
-        assert designing.is_alive()
+        designing.start()
+        try:
+            status, _ = _request(httpd.server_address, "GET", "/health", timeout=3.0)
+            assert status == 200
+            assert designing.is_alive()
+        finally:
+            release.set()
+            designing.join(timeout=DESIGN_TIMEOUT_S)
+        assert held.result(timeout=DESIGN_TIMEOUT_S) is True
+        assert answered[0][0] == 200
     finally:
-        designing.join(timeout=DESIGN_TIMEOUT_S)
-    assert answered[0][0] == 200
+        manager.shutdown()
+        _stop(httpd, thread)
 
 
 def test_a_dead_worker_is_a_500_and_the_next_request_gets_a_new_one() -> None:
