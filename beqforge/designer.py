@@ -97,8 +97,9 @@ the reference (TODO 29, released together, so one version). 0.2.10 is 6: it make
 reproducible: identification converges to 1e-12 and the fit's target and ceiling are quantised
 to 0.01 dB (TODO 28), builds the sub feed from the request's `bass_management` instead of
 reading only its crossover, which moves `gain_reduction_db` (TODO 1), and keeps a passband whose
-knee lands under 10 Hz as the reference (TODO 31). `plans/design-version.md`
-has each one's build."""
+knee lands under 10 Hz as the reference (TODO 31). 0.2.11 is 6 too: it keeps the share within
+tolerance in [0, 1] (a last-digit difference, not an answer change) and only renames run records
+(TODO 35). `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
