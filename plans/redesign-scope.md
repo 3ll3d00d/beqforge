@@ -86,13 +86,28 @@ The author reads the list and decides whether to redesign, and which titles.
 ## Validation before relying on it
 
 Comparing beqforge's answers across versions is not calibration against the catalogue, so this
-is allowed. There are already 1,335 records in `/media/beq/work/records/`, each stamped with its
-revision. Version 5 covers the whole library, and the version 6 full redesign now starting will
-cover it again. That pair gives the ground truth without any extra work: score every v5 record
-against the 5-to-6 delta (rows 1, 28 and 31's O2 at the knee, declared after the fact) and
-compare the ranking with which titles' answers actually changed. If the will-move and likely
-tiers don't hold nearly every title that moved, the scheme isn't ready, whatever the
-regression check says.
+is allowed. The plan was to score the library's v5 records against the 5-to-6 delta and compare
+the ranking with what the v6 redesign moved. That doesn't work as planned, for two reasons
+found on 24 October 2026:
+
+* **The v5 records are gone.** A record is named after its request's digest and the library
+  sends the same request every time, so each v6 record overwrote its v5 one (1,284 of 1,335
+  files now hold 0.2.10). Records must not be overwritten by a later design; naming or stamping
+  them per design version comes before this scheme.
+* **The library's flips mix code and machine.** `design_version` names an algorithm on one
+  machine (`designer-interface.md` §3), and before row 28 the fit wasn't reproducible across
+  processors. v5 was designed by two builds on two machines, so a v5-to-v6 flip there isn't
+  evidence of a code change by itself.
+
+The test is therefore a rerun of both commits on one machine, which yields records for both
+sides. The 14 titles that went from designed to declined were rerun this way (see TODO 35):
+all of them move, and the change behind every one of them is row 28. For a behaviour change
+like row 28's, which re-rolls the fitter's choice among near-equal optima, the declared degree
+is what matters: 31 of 1,287 titles flipped between designed and declined in the library (the
+14 losses confirmed as row 28, the 17 gains not yet rerun), a share no reliance reader could
+have picked out in advance. A change like that is "all" until TODO 32 makes the fit's choice stable. If
+the will-move and likely tiers don't hold nearly every title that moved, the scheme isn't
+ready, whatever the regression check says.
 
 ## What it asks of each side
 
@@ -105,9 +120,13 @@ regression check says.
   readable as **unknown** where they lack it.
 * **beqdesigner:** a title the author chose not to redesign keeps its design but needs to stop
   showing as out of date. That needs a "reviewed at version N" stamp beside "designed at
-  version M", or an equivalent. This is the only contract change, and `designer-interface.md`
-  is theirs to agree. The search itself can be a CLI over their records directory or a server
-  endpoint taking a record; they choose which.
+  version M", or an equivalent. §3 already says a caller "never redesigns on that alone", so
+  this is an addition, not a change of meaning; beqdesigner agreed it on 24 October 2026. They
+  chose a batched server endpoint over a CLI, because their service has no beqforge in it. It
+  takes record paths relative to the shared root, under §7.1's rules for files by reference,
+  not the absolute `run_record` paths in commentary (the frozen Windows build writes those as
+  UNC paths). The route and its schema are to be drafted for their review before anything is
+  built.
 
 ## Open questions
 
