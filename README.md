@@ -258,7 +258,9 @@ pure `design(request) -> response` adapter, independently testable without a soc
 that can alter an answer for an unchanged request: the candidates, the rejected designs, a
 decline or a fit figure. Wording, speed and
 packaging don't bump it, so the executable and the image of one release report the same
-version and different `designer_build`s (the string also in `beqforge_revision`). Releases
+version and different `designer_build`s (the string also in `beqforge_revision`). `GET
+/health` also names the release, `designer_release` (`0.2.11`), for people: a build names a
+revision, not a release. Releases
 before it: 0.0.x and 0.1.0 are 0, 0.2.0 is 1, 0.2.1 is 2, 0.2.2 is 3, and 0.2.3 to 0.2.5
 are 4, as is 0.2.7, the first release to report it. One version is one algorithm, not one
 filter on every machine: the `counterfactual` and `parametric` fits can land on a different

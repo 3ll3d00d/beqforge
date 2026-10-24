@@ -53,6 +53,7 @@ from beqforge.designer import (  # noqa: E402
     response_to_json,
     validate_response,
 )
+from beq_common import __version__
 from beqforge import filters, record  # noqa: E402
 from beqforge.adjustments import kinds_for  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
@@ -505,6 +506,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "record_dir": _path_or_none(self.server.settings.record_dir),
                     "log_file": _path_or_none(self.server.settings.log_file),
                     **self.server.identity,
+                    # the release this is, for people: designer_build names a revision
+                    "designer_release": __version__,
                     # 1.5: the adjustments this server takes, their defaults its own settings
                     "adjustment_kinds": kinds_for(self.server.settings.params),
                 },

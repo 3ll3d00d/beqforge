@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 from scipy import signal
 
+from beq_common import __version__
 from beqforge import Alignment, BiquadSpec, HighPass, record
 from beqforge.adjustments import kinds_for
 from beqforge.designer import (
@@ -177,6 +178,7 @@ def test_health_check(server) -> None:
         "record_dir": None,
         "log_file": None,
         **_identity(PipelineParams(strategies=("flatten",))),
+        "designer_release": __version__,
         "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }
 
@@ -544,6 +546,7 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
         "record_dir": None,
         "log_file": None,
         **_identity(PipelineParams(strategies=("flatten",))),
+        "designer_release": __version__,
         "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
     }
 
