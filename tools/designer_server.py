@@ -257,6 +257,7 @@ def _design_in_worker(raw: bytes, token: int) -> tuple[int, dict, dict[str, floa
             settings.params,
             record_dir=settings.record_dir,
             cache=settings.cache,
+            shared_root=settings.shared_root,
         )
         designed = time.perf_counter()
         try:
@@ -625,7 +626,7 @@ def build_parser() -> _EnvironmentParser:
         type=Path,
         metavar="DIR",
         help=(
-            "write each request's run record here (designer-<digest>.run.json.gz), "
+            "write each request's run record here (designer-<audio>-<request>-v<N>.run.json.gz), "
             "replayable with `beqforge replay`; responses name the file. Default: records "
             "in the per-user data directory. Created and checked for writes at startup"
         ),

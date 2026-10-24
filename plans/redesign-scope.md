@@ -92,8 +92,8 @@ found on 24 October 2026:
 
 * **The v5 records are gone.** A record is named after its request's digest and the library
   sends the same request every time, so each v6 record overwrote its v5 one (1,284 of 1,335
-  files now hold 0.2.10). Records must not be overwritten by a later design; naming or stamping
-  them per design version comes before this scheme.
+  files now hold 0.2.10). Records must not be overwritten by a later design. Since 0.2.11 they are named
+  per request and design version and carry the identity themselves (TODO 35).
 * **The library's flips mix code and machine.** `design_version` names an algorithm on one
   machine (`designer-interface.md` §3), and before row 28 the fit wasn't reproducible across
   processors. v5 was designed by two builds on two machines, so a v5-to-v6 flip there isn't

@@ -139,7 +139,8 @@ Device realisation, which strategies run, authored exclusions, the goal (`--goal
 `--goal-tolerance`, as for `design`) and the opt-in `--content-edge` are server-wide flags (see `--help`); everything
 per-title — the audio itself, its coverage, an optional per-channel decomposition and
 bass-management model — arrives in the request. The server keeps each request's full run record
-(`designer-<digest>.run.json.gz`, named by a digest of the request's audio), which `beqforge replay`
+(`designer-<audio>-<request>-v<design version>.run.json.gz`: one per request and design version, so a redesign
+by a newer release keeps the older record), which `beqforge replay`
 can redraw and export, and writes its log to `designer.log` (10 MB, five kept) as well as the
 console. Both go to the per-user data directory unless moved with `--record-dir DIR` and
 `--log-dir DIR`: `%LOCALAPPDATA%\beqforge` on Windows, `~/Library/Application Support/beqforge` on

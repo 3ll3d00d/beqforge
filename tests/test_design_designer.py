@@ -790,7 +790,9 @@ def test_a_decline_names_the_build_that_made_it(monkeypatch) -> None:
     validate_response(response)
 
 
-def test_a_request_writes_a_replayable_record_named_by_its_audio(tmp_path) -> None:
+def test_a_request_writes_a_replayable_record_named_by_its_audio(
+    tmp_path, monkeypatch
+) -> None:
     """The fast no-channels abstention, through the real pipeline and the real writer."""
     from beqforge import record
 
@@ -809,11 +811,56 @@ def test_a_request_writes_a_replayable_record_named_by_its_audio(tmp_path) -> No
     assert fingerprint.revision == record.revision()
     assert record.stale_against(fingerprint) == []
 
+    assert written[0].name.endswith(f"-v{DESIGN_VERSION}.run.json.gz")
+    assert document["design_identity"] == {
+        "design_version": DESIGN_VERSION,
+        "design_settings": response.design_settings,
+    }
+
     # the same request is the same file; a different mix is a different one
     design(request, record_dir=tmp_path)
     assert len(list(tmp_path.glob("*.run.json.gz"))) == 1
     design(_small_request(mono_mix=mono * 0.5), record_dir=tmp_path)
     assert len(list(tmp_path.glob("*.run.json.gz"))) == 2
+    # so is the same mix asked for differently, and a redesign at a new version keeps the
+    # old one's record rather than writing over it (TODO 35)
+    design(dataclasses.replace(request, coverage="excerpt"), record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 3
+    monkeypatch.setattr("beqforge.designer.DESIGN_VERSION", DESIGN_VERSION + 1)
+    design(request, record_dir=tmp_path)
+    assert len(list(tmp_path.glob("*.run.json.gz"))) == 4
+    assert written[0].exists()
+
+
+def test_the_response_names_its_record_relative_to_the_shared_root(tmp_path) -> None:
+    """1.6: a path the caller hands back to /impact as is, never a path on this machine."""
+    mono = np.random.default_rng(0).normal(scale=0.05, size=1000 * 60)
+    request = _small_request(mono_mix=mono)
+    response = design(request, record_dir=tmp_path / "records", shared_root=tmp_path)
+    written = list((tmp_path / "records").glob("*.run.json.gz"))
+    assert response.run_record == f"records/{written[0].name}"
+    assert response_to_json(response)["run_record"] == response.run_record
+    validate_response(response)
+
+    outside = design(request, record_dir=tmp_path / "records", shared_root=tmp_path / "audio")
+    assert outside.run_record is None
+    assert "run_record" not in response_to_json(outside)
+    assert design(request, record_dir=tmp_path / "records").run_record is None
+
+
+@pytest.mark.parametrize(
+    "path", ["", "/work/records/r.gz", "records\\r.gz", "../records/r.gz", "a/../../r.gz"]
+)
+def test_a_run_record_off_the_shared_root_is_refused(path) -> None:
+    with pytest.raises(ContractViolation, match="run_record"):
+        validate_response(
+            DesignResponse(
+                contract_version=CONTRACT_VERSION,
+                decline_reason="excerpt_coverage",
+                decline_message="x",
+                run_record=path,
+            )
+        )
 
 
 def test_an_unwritable_record_dir_does_not_fail_the_design(tmp_path) -> None:

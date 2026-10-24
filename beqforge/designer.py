@@ -29,6 +29,11 @@ answers each in `adjustment_outcomes` (`beqforge.adjustments`, `plans/contract-1
 this request's parameters only, after the settings digest (which describes the server, not the request); a request
 without them is untouched, so its answer is the 1.4 answer.
 
+1.6 (drafted with beqdesigner, `plans/redesign-scope.md`; not yet in the contract, and additive):
+`run_record` on every response names its run record relative to the shared root, so a caller can
+hand it back to `/impact` without parsing commentary. Records are named per request and design
+version and carry the identity themselves, so a redesign no longer overwrites the last one.
+
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
 means this", not new analysis. Where there is genuine judgement (declining, `gain_reduction_db`
@@ -248,6 +253,9 @@ class DesignResponse:
     """1.4: `record.revision()`, the same string as the commentary's `beqforge_revision`."""
     adjustment_outcomes: list[AdjustmentOutcome] | None = None
     """1.5: one per request adjustment, on a design and a decline alike; None when none were asked."""
+    run_record: str | None = None
+    """1.6: this answer's run record, POSIX and relative to the shared root, so a caller can hand
+    it back to `/impact` unchanged; None without a shared root, a record, or one inside the root."""
 
 
 # Substrings `pipeline.run` puts in `Report.evidence_notes` when it returns `candidates=[]`
@@ -389,26 +397,55 @@ def design_settings_digest(params: PipelineParams) -> str:
     return digest.hexdigest()[:12]
 
 
+def _request_digest(request: DesignRequest, settings: str) -> str:
+    """Everything beside the audio that can change the answer: coverage, the playback chain, the
+    adjustments (order and the caller's ids carry no meaning, §2) and the server's settings."""
+    asked = sorted(
+        json.dumps([a.kind, a.params, a.text], sort_keys=True)
+        for a in request.adjustments or ()
+    )
+    body = json.dumps(
+        {
+            "coverage": request.coverage,
+            "bass_management": request.bass_management,
+            "adjustments": asked,
+            "design_settings": settings,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
 def _provenance(
     report: Report,
     params: PipelineParams,
     material: Material,
     record_dir: Path | None,
-) -> dict[str, str]:
+    request: DesignRequest,
+    settings: str,
+) -> tuple[dict[str, str], Path | None]:
     """Which build answered, and where its run record went — so a response can be replayed.
 
     A response carries only the accepted candidate (or a decline) and nothing about the code,
     so a review queue built from responses cannot say which build made an entry or why the
-    other candidates lost. The record is named by the request audio's digest: the same
-    request writes the same file, and it replays with `tools/replay.py` (charts from the mix
-    only; the material itself never touched disk). A failed write is logged and reported in
-    the provenance, never raised — the design is the product, the record is a receipt.
+    other candidates lost. The record is named by the request audio's digest, the rest of the
+    request's (`_request_digest`) and the design version: the same request at the same version
+    writes the same file, and it replays with `tools/replay.py` (charts from the mix only; the
+    material itself never touched disk). It was the audio's digest alone, so a library's
+    redesign at a new version overwrote every record of the old one (TODO 35), and a request
+    with adjustments overwrote the plain one. A failed write is logged and reported in the
+    provenance, never raised — the design is the product, the record is a receipt.
     """
     provenance = {"beqforge_revision": record.revision()}
     if record_dir is None:
-        return provenance
+        return provenance, None
     digest = record.array_digest(material)
-    path = Path(record_dir) / f"designer-{digest[:16]}.run.json.gz"
+    rest = _request_digest(request, settings)
+    path = (
+        Path(record_dir)
+        / f"designer-{digest[:16]}-{rest[:8]}-v{DESIGN_VERSION}.run.json.gz"
+    )
     try:
         curves = record.curves_from(
             material,
@@ -416,12 +453,31 @@ def _provenance(
             (),
             params.realisation,
         )
-        record.write(path, report, params, None, curves, material_sha256=digest)
+        record.write(
+            path,
+            report,
+            params,
+            None,
+            curves,
+            material_sha256=digest,
+            identity={"design_version": DESIGN_VERSION, "design_settings": settings},
+        )
         provenance["run_record"] = str(path)
     except (OSError, ValueError) as failed:
         logger.warning(f"run record not written to {path}: {failed}")
         provenance["run_record"] = f"not written: {failed}"
-    return provenance
+        return provenance, None
+    return provenance, path
+
+
+def _under_root(path: Path | None, shared_root: Path | None) -> str | None:
+    """1.6's `run_record`: `path` relative to `shared_root`, POSIX, or None when it lies outside."""
+    if path is None or shared_root is None:
+        return None
+    try:
+        return path.resolve().relative_to(shared_root.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def design(
@@ -430,6 +486,7 @@ def design(
     *,
     record_dir: Path | None = None,
     cache: Store | None = None,
+    shared_root: Path | None = None,
 ) -> DesignResponse:
     """designer-interface.md §1: one call, one title, one answer.
 
@@ -483,7 +540,10 @@ def design(
         params = dataclasses.replace(params, playback=playback)
 
     report = run(material, params, cache_path=cache)
-    provenance = _provenance(report, params, material, record_dir)
+    provenance, written = _provenance(
+        report, params, material, record_dir, request, settings
+    )
+    run_record = _under_root(written, shared_root)
 
     unmodelled = unmodelled_bass_management(request.bass_management)
     rejected = _rejected(report, params, report_gain_reduction, unmodelled)
@@ -507,6 +567,7 @@ def design(
             design_settings=settings,
             designer_build=provenance["beqforge_revision"],
             adjustment_outcomes=outcomes,
+            run_record=run_record,
         )
 
     candidate = _to_design_candidate(
@@ -539,6 +600,7 @@ def design(
         design_settings=settings,
         designer_build=provenance["beqforge_revision"],
         adjustment_outcomes=outcomes,
+        run_record=run_record,
     )
 
 
@@ -726,6 +788,8 @@ def response_to_json(response: DesignResponse) -> dict:
         body["adjustment_outcomes"] = [
             outcome_to_json(o) for o in response.adjustment_outcomes
         ]
+    if response.run_record is not None:
+        body["run_record"] = response.run_record
     return body
 
 
@@ -832,6 +896,18 @@ def _validate_identity(response: DesignResponse) -> None:
         value = getattr(response, name)
         if value is not None and (not isinstance(value, str) or not value):
             raise ContractViolation(f"{name} must be a non-empty string, got {value!r}")
+    path = response.run_record
+    if path is not None and (
+        not isinstance(path, str)
+        or not path
+        or "\\" in path
+        or path.startswith("/")
+        or ".." in path.split("/")
+    ):
+        # 1.6: the caller hands it back to /impact, under 1.2's rules for a path by reference
+        raise ContractViolation(
+            f"run_record must be a relative POSIX path under the shared root, got {path!r}"
+        )
 
 
 def _validate_rejected(rejected: list[DesignCandidate] | None) -> None:

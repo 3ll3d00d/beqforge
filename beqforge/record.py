@@ -385,6 +385,7 @@ def write(
     curves: dict[str, Any] | None = None,
     *,
     material_sha256: str | None = None,
+    identity: dict[str, Any] | None = None,
 ) -> Path:
     """Write the run record, gzipped, and return where it went.
 
@@ -394,6 +395,9 @@ def write(
 
     Material that never touched disk — a designer request — has no `material_path`; pass
     its `array_digest` as `material_sha256` instead, and the path is recorded as empty.
+
+    `identity` is a designer's `design_version` and `design_settings` (contract 1.4), so the
+    record says which answer it holds without trusting its file name; absent for a CLI run.
     """
     if material_path is None and material_sha256 is None:
         raise ValueError("a record needs the material's path or its digest")
@@ -412,6 +416,7 @@ def write(
             revision=revision(),
             written_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         ).to_json(),
+        "design_identity": identity,
         "material": {
             "name": report.material.name,
             "fs": int(report.material.fs),
