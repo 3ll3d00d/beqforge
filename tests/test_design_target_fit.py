@@ -42,6 +42,18 @@ def test_a_shortfall_is_signed_located_and_weighted():
     assert found.within_tolerance == pytest.approx(0.0)
 
 
+def test_the_share_within_tolerance_never_rounds_above_one():
+    # every boost it asks for is met; the bins it asks to cut are missed but weigh nothing,
+    # and over the old denominator they rounded this share to 1.0000000000000002
+    inside = (DESIGN_GRID >= BAND[0]) & (DESIGN_GRID <= BAND[1])
+    rng = np.random.default_rng(2)
+    asked = rng.uniform(0.0, 0.5, inside.sum())
+    asked[rng.random(inside.sum()) < 0.3] = -5.0
+    target = np.zeros_like(DESIGN_GRID)
+    target[inside] = asked
+    assert target_fit([], target, DEVICE, BAND, 0.5).within_tolerance == 1.0
+
+
 def test_an_unrequested_boost_has_a_worst_error_but_no_weighted_one():
     found = target_fit(SHELF, np.zeros_like(DESIGN_GRID), DEVICE, BAND, 0.5)
     assert found.over

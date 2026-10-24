@@ -521,7 +521,12 @@ def target_fit(
     total = float(weight.sum())
     if total > 0:
         rms = math.sqrt(float(np.sum(weight * error**2)) / total)
-        within = float(np.sum(weight[np.abs(error) <= tolerance_db])) / total
+        # met over met plus missed, not over `total`: bins with no weight still change how
+        # numpy pairs up a sum, so the met share alone can round above it (A Quiet Place
+        # Part II, 1.0000000000000002), and the contract wants [0, 1]
+        close = np.abs(error) <= tolerance_db
+        met = float(np.sum(weight[close]))
+        within = met / (met + float(np.sum(weight[~close])))
     else:
         rms = within = math.nan
     return TargetFit(
