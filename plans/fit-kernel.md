@@ -156,7 +156,7 @@ dB at 50 Hz. Send Help's 0.98 dB is at 5 Hz, which doesn't count, but its 0.5-0.
 close. The fit is the reason: it scores the worst absolute dB error the same at every frequency,
 so it treats near-equal fits as interchangeable wherever their error sits, and a re-roll among
 them (TODO 28, 32) can move the top of the band. Whether the fit should use the same
-frequency-dependent tolerance is TODO 37.
+frequency-dependent tolerance is TODO 37: [tried, and not adopted as built](fit-weighting.md).
 
 **Protocol** (seeds 101 and 947): false acceptances 1 and 1, unchanged; abstentions unchanged.
 One selection moved, `varying_filtered` on seed 101, parametric to flatten, its recovery error
