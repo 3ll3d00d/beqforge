@@ -181,6 +181,14 @@ moved by more than 1 dB at 5-50 Hz. The v6 rerun reproduced the library's own re
 58 titles (Blazing Saddles declined here where the library designed it), so machine noise is
 small against these shares.
 
+*25 October 2026, after 0.2.12:* `impact.MOVED`'s cascade line is now 20/f dB, capped at 2 dB at
+10 Hz and below (1 dB at 20 Hz, 0.5 dB at 40 Hz), not a flat 1 dB: a dB deep in the boost does
+not matter, the same dB near the top of the band does. The designed classes were recounted on
+beqdesigner's larger redesign sample (library v6 records against their v7 redesigns): designed
+with failures 16 of 35 (15 by the flat line), all passing 22 of 60 (15). The 8 that only the new
+line counts all moved 0.4-1.0 dB at 26-50 Hz. The two declined classes can only move by being
+designed, so the line does not reach them and their counts below stand.
+
 | Class (library count) | Measured | Moved |
 | --- | --- | --- |
 | declined after the fit (34) | all 34 | 18 (13 of row 35's 14, 5 of the other 20) |

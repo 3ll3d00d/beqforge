@@ -68,10 +68,14 @@ evidence = "plans/library-review-improvements.md#row-32-choosing-among-near-equa
 [[change.touches]]
 feature = "fit.choice"
 kind = "behaviour"
-# Measured on the library: v6 records rerun at version 6 and 7 on one machine, from requests
-# identical to the library's (plans/redesign-scope.md#outcome); moved by `impact.MOVED`.
-# declined_after_fit is every such title; the designed classes and no_fit are random samples.
-basis = { no_fit = [0, 8], declined_after_fit = [18, 34], designed_with_failures = [7, 15], designed_all_passed = [2, 15] }
+# Measured on the library, moved by `impact.MOVED`. no_fit and declined_after_fit: v6 records
+# rerun at version 6 and 7 on one machine, from requests identical to the library's
+# (plans/redesign-scope.md#outcome); declined_after_fit is every such title, no_fit a random
+# sample. A record in either class can only move by being designed, so MOVED's cascade line
+# does not reach them. The designed classes: beqdesigner's redesign sample, library v6 records
+# against their v7 redesigns, recounted when MOVED's line became 20/f dB (it was a flat 1 dB:
+# 15 of 35 and 15 of 60).
+basis = { no_fit = [0, 8], declined_after_fit = [18, 34], designed_with_failures = [16, 35], designed_all_passed = [22, 60] }
 
 [[change.touches]]
 feature = "fit.input"
@@ -101,7 +105,7 @@ kind = "behaviour"
 # variants, a20ed8c against this change on one machine; moved by `impact.MOVED`. Not a library
 # sample: the variants are steep injected rolloffs and fill the failing classes, so
 # declined_after_fit's 0 of 21 is all variants and says little about the library's declines.
-basis = { no_fit = [0, 1], declined_after_fit = [0, 21], designed_with_failures = [13, 18], designed_all_passed = [2, 14] }
+basis = { no_fit = [0, 1], declined_after_fit = [0, 21], designed_with_failures = [14, 18], designed_all_passed = [2, 14] }
 
 [[change.touches]]
 feature = "fit.input"

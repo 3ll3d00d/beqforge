@@ -137,15 +137,26 @@ in either mode.
 
 **Decisions, real runs** (the 11 titles, `compare_verdicts.py` against 0.2.12's records from the
 same timing runs): no verdict and no accepted candidate changed; section counts and types moved
-on seven titles. Three accepted cascades moved by more than 1 dB on 5-50 Hz (`impact.MOVED`), all
-still `flatten`, and their corrected low ends stay within 1.1 dB of 0.2.12's inside the judged
-band (rms 0.37-0.70 dB):
+on seven titles. Three accepted cascades moved by `impact.MOVED`, all still `flatten`. Their
+corrected low ends stay within 1.1 dB of 0.2.12's inside the judged band (rms 0.37-0.70 dB), but
+that is not reassurance: two of the moves land where they matter most, near the top of the band
+(see below):
 
 * Black Bag: three sections (1.30 dB) became one low shelf (1.89 dB). Row 32's fewest-sections
   rule: the best multi-section fit now sits within 0.5 dB of the single shelf, which it did not.
   It drifts 0.13 dB on publication rounding where the three sections drifted 1.73.
 * 28 Years Later: two shelves (0.74 dB) became a shelf and a peak (0.86 dB).
 * Obsession: three shelves (0.76 dB) became three shelves placed differently (0.72 dB).
+
+**Where the moves land.** By a flat 1 dB line these were the three moves; by `impact.MOVED`'s
+line as it now stands (20/f dB, capped at 2 dB at 10 Hz and below) they still are, but for other
+reasons. 28 Years Later differs by 1.13 dB at 33 Hz and Obsession by 1.09 dB at 29 Hz, against a
+line of about 0.6-0.7 dB there. Black Bag's 1.80 dB is at 15 Hz, within its line; it moves on 0.60
+dB at 50 Hz. Send Help's 0.98 dB is at 5 Hz, which doesn't count, but its 0.5-0.6 dB at 20-50 Hz is
+close. The fit is the reason: it scores the worst absolute dB error the same at every frequency,
+so it treats near-equal fits as interchangeable wherever their error sits, and a re-roll among
+them (TODO 28, 32) can move the top of the band. Whether the fit should use the same
+frequency-dependent tolerance is TODO 37.
 
 **Protocol** (seeds 101 and 947): false acceptances 1 and 1, unchanged; abstentions unchanged.
 One selection moved, `varying_filtered` on seed 101, parametric to flatten, its recovery error
@@ -161,8 +172,8 @@ true positives 7/9, median recovery 1.375 to 1.369 dB RMS. Three filtered cases 
 passes. Windows and macOS are CI's.
 
 **Impact basis** (`impact.toml`, `fit.search`): from the refit probe's default mode, by
-`impact.MOVED`: no_fit 0/1, declined_after_fit 0/21, designed_with_failures 13/18,
-designed_all_passed 2/14. Not a library sample: 43 of the 54 are injected variants, and every
+`impact.MOVED`: no_fit 0/1, declined_after_fit 0/21, designed_with_failures 14/18,
+designed_all_passed 2/14 (13/18 and 2/14 by the flat 1 dB line it replaced). Not a library sample: 43 of the 54 are injected variants, and every
 declined_after_fit case is one. Measure a library sample before 0.3.0 is released and replace it,
 as version 7's basis was.
 

@@ -670,8 +670,9 @@ def owners(qualified: str) -> tuple[Feature, ...]:
 
 MOVED = (
     "a design of the same request swapped between designed and declined, won with another "
-    "strategy (a counterfactual's cap included), or its published cascade moved by more than "
-    "1 dB anywhere on 5-50 Hz"
+    "strategy (a counterfactual's cap included), or its published cascade moved anywhere on "
+    "5-50 Hz by more than 20/f dB, capped at 2 dB at 10 Hz and below (1 dB at 20 Hz, 0.5 dB "
+    "at 40 Hz)"
 )
 """What beqforge counts as a design moving, in a basis and in `moved`."""
 
@@ -944,6 +945,11 @@ def record_identity(
 
 # -- whether a design moved: how a change's basis is measured
 
+MOVED_GRID = np.geomspace(5.0, 50.0, 200)
+MOVED_TOLERANCE_DB = np.minimum(2.0, 20.0 / MOVED_GRID)
+"""`MOVED`'s line on `MOVED_GRID`, halving each octave up from 2 dB at 10 Hz: a dB deep in the
+boost is inaudible, the same dB near the top of the band is a change of balance."""
+
 
 def _response_db(filters: list) -> np.ndarray:
     from beqforge import BiquadSpec
@@ -956,7 +962,7 @@ def _response_db(filters: list) -> np.ndarray:
         else BiquadSpec(*f)
         for f in filters
     ]
-    grid = np.geomspace(5.0, 50.0, 200)
+    grid = MOVED_GRID
     if not specs:
         return np.zeros_like(grid)
     return magnitude_db(biquad_sos(specs, PUBLISH_FS), grid, PUBLISH_FS)
@@ -971,10 +977,12 @@ def moved(before: dict, after: dict) -> tuple[bool, str]:
         next(c for c in r["candidates"] if c["label"] == w)
         for r, w in ((before, won[0]), (after, won[1]))
     )
-    shift = float(
-        np.max(np.abs(_response_db(a["filters"]) - _response_db(b["filters"])))
+    apart = np.abs(_response_db(a["filters"]) - _response_db(b["filters"]))
+    worst = int(np.argmax(apart / MOVED_TOLERANCE_DB))
+    return bool(apart[worst] > MOVED_TOLERANCE_DB[worst]), (
+        f"{won[0]}, cascade {apart[worst]:.2f} dB apart at {MOVED_GRID[worst]:.1f} Hz "
+        f"(line {MOVED_TOLERANCE_DB[worst]:.2f} dB)"
     )
-    return shift > 1.0, f"{won[0]}, cascade {shift:.2f} dB apart at 5-50 Hz"
 
 
 # -- scoring

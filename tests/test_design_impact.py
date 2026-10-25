@@ -433,7 +433,7 @@ def _design(label: str | None, *filters: dict) -> dict:
 SHELF = {"type": "low_shelf", "freq_hz": 20.0, "gain_db": 10.0, "q": 0.7}
 
 
-def test_moved_is_a_decision_a_strategy_or_more_than_a_db_of_cascade() -> None:
+def test_moved_is_a_decision_a_strategy_or_the_cascade_past_its_line() -> None:
     nudged = {**SHELF, "gain_db": 10.5}
     shifted = {**SHELF, "gain_db": 12.0}
     assert impact.moved(_design(None), _design(None))[0] is False
@@ -448,7 +448,28 @@ def test_moved_is_a_decision_a_strategy_or_more_than_a_db_of_cascade() -> None:
         impact.moved(_design("flatten", SHELF), _design("flatten", nudged))[0] is False
     )
     changed, how = impact.moved(_design("flatten", SHELF), _design("flatten", shifted))
-    assert changed and "1.98 dB apart" in how
+    assert changed and "dB apart at" in how
+
+
+def _peak(freq_hz: float) -> dict:
+    return {"type": "peaking_eq", "freq_hz": freq_hz, "gain_db": 1.0, "q": 2.0}
+
+
+def test_the_moved_line_is_loose_deep_in_the_boost_and_tight_near_the_top() -> None:
+    assert impact.MOVED_TOLERANCE_DB[0] == 2.0
+    assert np.isclose(
+        np.interp(20.0, impact.MOVED_GRID, impact.MOVED_TOLERANCE_DB), 1.0, atol=1e-3
+    )
+    # the same 1 dB bump is nothing at 10 Hz and a move at 40
+    deep = impact.moved(
+        _design("flatten", SHELF), _design("flatten", SHELF, _peak(10.0))
+    )
+    high = impact.moved(
+        _design("flatten", SHELF), _design("flatten", SHELF, _peak(40.0))
+    )
+    assert deep[0] is False
+    assert high[0] is True
+    assert "dB apart at 4" in high[1]
 
 
 # -- the endpoint
