@@ -1,11 +1,16 @@
 """Which designs a designer upgrade may move, and whether a commit range declares what it changed.
 
     uv run python tools/impact.py rank RECORD... [--design-settings DIGEST]
+    uv run python tools/impact.py moved BEFORE AFTER [BEFORE AFTER ...]
     uv run python tools/impact.py check BASE [HEAD]
 
 `rank` scores run records as `POST /impact` does (designer-interface.md 1.6 §7.1), against this
 checkout's design version and the default settings (or `--design-settings`), and prints them by
 tier, highest score first, with each reason.
+
+`moved` says whether each pair of run records of one request holds different designs, by
+`beqforge.impact.MOVED`: how a change's basis in `impact.toml` is measured. Pairs are given as
+BEFORE AFTER BEFORE AFTER ...
 
 `check` is part of the regression check (beqforge/AGENTS.md): every function, class field and
 module constant under `beqforge/` and `beq_common/` that changed between BASE and HEAD (the
@@ -134,12 +139,7 @@ def rank(paths: list[str], settings: str | None) -> int:
                 record = json.load(f)
             result = impact.assess(record, current, data)
         except (OSError, EOFError, json.JSONDecodeError) as unreadable:
-            result = impact.Assessment(
-                "unknown",
-                None,
-                None,
-                (impact.Reason(None, None, f"unreadable: {unreadable}"),),
-            )
+            result = impact._unknown("unreadable", f"unreadable: {unreadable}")
         found.append((path, result))
     found.sort(key=lambda p: (_TIERS.index(p[1].tier), -(p[1].score or 0.0), p[0]))
     counts = defaultdict(int)
@@ -157,6 +157,23 @@ def rank(paths: list[str], settings: str | None) -> int:
     return 0
 
 
+def _record(path: str) -> dict:
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def moved(paths: list[str]) -> int:
+    if len(paths) % 2:
+        raise SystemExit("moved takes pairs: BEFORE AFTER [BEFORE AFTER ...]")
+    count = 0
+    for before, after in zip(paths[::2], paths[1::2], strict=True):
+        changed, how = impact.moved(_record(before), _record(after))
+        count += changed
+        print(f"{'MOVED' if changed else 'same '}  {how}  {after}")
+    print(f"{count} of {len(paths) // 2} moved ({impact.MOVED})")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -168,6 +185,10 @@ def main() -> int:
         "--design-settings",
         help="the settings digest to score against (default: the default settings')",
     )
+    moving = sub.add_parser(
+        "moved", help="whether pairs of records hold different designs"
+    )
+    moving.add_argument("records", nargs="+", help="BEFORE AFTER [BEFORE AFTER ...]")
     checking = sub.add_parser(
         "check", help="check a commit range declares what it changed"
     )
@@ -176,6 +197,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "rank":
         return rank(args.records, args.design_settings)
+    if args.command == "moved":
+        return moved(args.records)
     return check(args.base, args.head)
 
 

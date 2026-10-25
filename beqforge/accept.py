@@ -17,7 +17,7 @@ thresholds are guesses; this one has nothing to guess.
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -273,6 +273,19 @@ class Verdict:
 
     wobble_db: float = math.nan
     """The same statistic on the corrected curve. The flatness clause compares these two."""
+
+    margins: dict[str, float] = field(default_factory=dict)
+    """What each check compared with its bar, in that bar's units (TODO 34): a check fails when
+    its figure is above the bar, or for `span` and `sections` below it. Record-only, so a
+    threshold change can be scored from a run record (`beqforge.impact`): `span` octaves judged
+    (`min_judge_octaves`), `tilt` and `level` the distance from the intent
+    (`tilt_tolerance_db_per_octave`, `level_tolerance_db`), `turnover` the corrected turnover
+    over the material's (`tilt_tolerance_db_per_octave`), `overlift` the worst overshoot (0),
+    `wobble` the corrected wobble over the material's (`spread_margin_db`), `cliff` the
+    corrected worst gradient over the input's (`cliff_tolerance_db_per_octave`), `extent` the
+    corrected extent over the content's terminus (1.2) and `sections` the smallest section
+    contribution (`min_section_contribution_db`). The tilt, level and turnover bars are
+    compared at `decision_quantum_db`, these figures unrounded."""
 
     def __str__(self) -> str:
         head = "accept" if self.passed else "REJECT"
@@ -569,15 +582,18 @@ def assess(
             worst_gradient_after=math.nan,
             extent_hz=math.nan,
             drift_db=math.nan,
+            margins={"span": octaves},
         )
 
     # --- R1: the shape asked for, no step, down to the noise floor
     # One negation, here: the dial reads in the audio sense (positive rises toward the bottom)
     # while `tilt_db_per_octave` is positive when the curve falls toward it.
+    figures: dict[str, float] = {"span": octaves}
     quantum = params.decision_quantum_db
     wanted = params.target_tilt_db_per_octave
     intent_tilt = -correction.intent_tilt_db_per_octave(target_db, wanted)
     achieved = -correction.tilt_db_per_octave
+    figures["tilt"] = abs(achieved - intent_tilt)
     if _at(abs(achieved - intent_tilt), quantum) > _at(
         params.tilt_tolerance_db_per_octave, quantum
     ):
@@ -589,6 +605,7 @@ def assess(
             "(positive rises toward the bottom)"
         )
     intent_level = correction.intent_level_db(target_db, wanted)
+    figures["level"] = abs(correction.level_db - intent_level)
     if _at(abs(correction.level_db - intent_level), quantum) > _at(
         params.level_tolerance_db, quantum
     ):
@@ -599,6 +616,7 @@ def assess(
 
     # Compare turnover over the same segment of input and corrected material.
     turnover, material_turnover, peak_hz = turnover_db_per_octave(correction, params)
+    figures["turnover"] = turnover - material_turnover
     if _at(turnover, params.decision_quantum_db) > _at(
         material_turnover + params.tilt_tolerance_db_per_octave,
         params.decision_quantum_db,
@@ -612,6 +630,7 @@ def assess(
     guard, bar = overlift_bar_db(correction, params)
     overshoot = correction.after_db[guard] - bar
     worst = int(np.argmax(overshoot))
+    figures["overlift"] = float(overshoot[worst])
     if _at(float(overshoot[worst]), quantum) > 0.0:
         at_hz = float(correction.freqs[guard][worst])
         failures.append(
@@ -622,6 +641,7 @@ def assess(
 
     roughness = spectral_roughness(correction, params.roughness_degree)
     wobble = corrected_wobble(correction, params.roughness_degree)
+    figures["wobble"] = wobble - roughness
     if wobble > roughness + params.spread_margin_db:
         failures.append(
             f"corrected low end is uneven: {wobble:.1f} dB of ripple about its trend over "
@@ -641,6 +661,7 @@ def assess(
         correction.band_hz,
         params.cliff_window_octaves,
     )
+    figures["cliff"] = after - before
     if after > before + params.cliff_tolerance_db_per_octave:
         failures.append(
             f"introduces a cliff of {after:.1f} dB/oct at {after_at:.1f} Hz where the input's "
@@ -654,6 +675,7 @@ def assess(
     terminus = correction.band_hz[0]
     if not math.isnan(noise_floor_hz):
         terminus = max(terminus, noise_floor_hz)
+    figures["extent"] = extent / terminus
     if extent > terminus * 1.2:
         failures.append(
             f"corrected only down to {extent:.1f} Hz; content continues to "
@@ -686,6 +708,7 @@ def assess(
     # the judged band; never the whole grid — see `min_section_contribution_db`
     credited = contribution_band_hz or correction.band_hz
     judged = (grid >= credited[0]) & (grid <= credited[1])
+    contributions = []
     for index, section in enumerate(filters):
         without = [f for j, f in enumerate(filters) if j != index]
         reduced = (
@@ -694,6 +717,7 @@ def assess(
             else np.zeros_like(full)
         )
         contribution = float(np.max(np.abs((full - reduced)[judged])))
+        contributions.append(contribution)
         if contribution < params.min_section_contribution_db:
             failures.append(
                 f"section {index + 1} ({section.type} at {section.freq_hz:.1f} Hz) "
@@ -753,4 +777,5 @@ def assess(
             target_tilt_db_per_octave=params.target_tilt_db_per_octave,
         ),
         shaping_fraction=shaping_frac,
+        margins={**figures, "sections": min(contributions, default=math.inf)},
     )

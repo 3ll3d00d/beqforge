@@ -460,6 +460,13 @@ class Candidate:
     target_fit: "TargetFit | None" = None
     """How closely the cascade that will play matches its target. Reported, never gated."""
 
+    fit_options: tuple[dict, ...] = ()
+    """Every fit `_choose_fit` had for this candidate, in the order it judged them. Record-only
+    (TODO 34): each has its `sections`, `error_db`, whether it is the fitter's `answer` and
+    whether it was `kept`; one that was judged also has `passed`, `failures`, `margins` and
+    `lift_db`, so a threshold change can be scored from the record, which fit it would keep
+    included. Empty for a candidate built outside `run`."""
+
 
 @dataclass(frozen=True, slots=True)
 class TargetFit:
@@ -2287,10 +2294,13 @@ def _within_ceiling(
     allowed = np.interp(correction.freqs[below], DESIGN_GRID, ceiling_db)
     excess = gain - allowed
     worst = int(np.argmax(excess))
+    # the worst excess, against `level_tolerance_db` (`Verdict.margins`)
+    margins = {**verdict.margins, "contrast": float(excess[worst])}
     if excess[worst] <= params.accept.level_tolerance_db:
-        return verdict
+        return dataclasses.replace(verdict, margins=margins)
     return dataclasses.replace(
         verdict,
+        margins=margins,
         passed=False,
         failures=[
             *verdict.failures,
@@ -2326,14 +2336,35 @@ def _choose_fit(
     that cleared the slot check on its own Q's overshoot, where every other fit of that ~1 dB
     target failed it.
     """
+    seen: list[dict] = []
+
+    def entry(filters, error, judged: Candidate | None = None, kept: bool = False):
+        found = {
+            "sections": len(filters),
+            "error_db": float(error),
+            "answer": filters is answer[0],
+            "kept": kept,
+        }
+        if judged is not None:
+            found |= {
+                "passed": bool(judged.verdict.passed),
+                "failures": list(judged.verdict.failures),
+                "margins": dict(judged.verdict.margins),
+                "lift_db": _lift_db(judged),
+            }
+        return found
+
     if len(options) > 1:
-        for filters, error in options:
+        for index, (filters, error) in enumerate(options):
             judged = judge(filters, error, False)
-            if not judged.verdict.passed:
+            usable = judged.verdict.passed and (filters is answer[0] or worth(judged))
+            seen.append(entry(filters, error, judged, kept=usable))
+            if not usable:
                 continue
-            if filters is not answer[0] and not worth(judged):
-                continue
-            kept = judge(filters, error, True)
+            seen += [entry(f, e) for f, e in options[index + 1 :]]
+            kept = dataclasses.replace(
+                judge(filters, error, True), fit_options=tuple(seen)
+            )
             if filters is answer[0]:
                 return kept
             return dataclasses.replace(
@@ -2346,19 +2377,28 @@ def _choose_fit(
                     "judge does not pass",
                 ),
             )
-    return judge(*answer, True)
+    kept = judge(*answer, True)
+    if not seen:
+        seen = [entry(*answer, kept)]
+    seen = [{**e, "kept": e["answer"]} for e in seen]
+    return dataclasses.replace(kept, fit_options=tuple(seen))
+
+
+def _lift_db(candidate: Candidate) -> float:
+    """The published cascade's greatest gain in the judged band; -inf for an empty band."""
+    low, high = candidate.correction.band_hz
+    band = (DESIGN_GRID >= low) & (DESIGN_GRID <= high)
+    if not band.any():
+        return -math.inf
+    gain = magnitude_db(
+        biquad_sos(candidate.filters, PUBLISH_FS), DESIGN_GRID, PUBLISH_FS
+    )
+    return float(np.max(gain[band]))
 
 
 def _lifts_beyond_goal(candidate: Candidate, params: PipelineParams) -> bool:
     """Whether the published cascade lifts the judged band by more than the goal tolerance."""
-    low, high = candidate.correction.band_hz
-    band = (DESIGN_GRID >= low) & (DESIGN_GRID <= high)
-    gain = magnitude_db(
-        biquad_sos(candidate.filters, PUBLISH_FS), DESIGN_GRID, PUBLISH_FS
-    )
-    return (
-        bool(band.any()) and float(np.max(gain[band])) > params.accept.goal_tolerance_db
-    )
+    return _lift_db(candidate) > params.accept.goal_tolerance_db
 
 
 def _judge(

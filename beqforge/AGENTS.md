@@ -189,10 +189,12 @@ uv run python tools/negative_corpus.py --seeds 1-9 --output <scratch>/corpus.jso
 
 **5. Declare what it changed (TODO 34).** A change that bumps `DESIGN_VERSION` adds a
 `[[change]]` to `beqforge/impact.toml` at the new version, naming every feature whose code it
-changed (`beqforge/impact.py`'s `FEATURES`) and how: `behaviour` with its degree, the share of
-each reliance class (`impact.OUTCOMES`) that moved in steps 2-4; `threshold` with the old and
-new values; `all`; or `unchanged` with how that was shown. This is what `POST /impact` ranks a
-library by, so a degree is measured, never guessed. Then:
+changed (`beqforge/impact.py`'s `FEATURES`) and how: `behaviour` with its `basis`, for each
+outcome class (`impact.OUTCOMES`) how many titles were measured and how many moved
+(`impact.MOVED`; `tools/impact.py moved` counts it over pairs of records); `threshold` with the
+old and new values, on a judge check that records its margin; `all`, with a basis too; or
+`unchanged` with how that was shown. `POST /impact` scores a library by these, as estimated
+probabilities of moving, so a basis is measured, never guessed. Then:
 
 ```bash
 uv run python tools/impact.py check <the commit before the change>   # against the working tree

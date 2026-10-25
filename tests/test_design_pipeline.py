@@ -4,6 +4,8 @@ Each derives a target its own way; all are fitted and judged identically, so the
 comparable and the acceptance model rather than a preference decides between them.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -465,7 +467,8 @@ def test_an_infrasonic_plateau_is_no_reference(walled) -> None:
     assert any("no low end beneath it to restore" in b for b in analysed.blockers)
 
     assert not any(
-        "no low end beneath it to restore" in b for b in analyse(walled, params).blockers
+        "no low end beneath it to restore" in b
+        for b in analyse(walled, params).blockers
     )
 
 
@@ -492,8 +495,10 @@ def steep_into_noise():
     noise-floored steep injections (TODO.md, steep-filter policy)."""
     samples = int(FS * 300.0)
     programme = high_passed(scened_noise(23, samples), 30.0, order=12)
-    floor = 1e-3 * np.std(programme) * np.random.default_rng(5).standard_normal(
-        programme.size
+    floor = (
+        1e-3
+        * np.std(programme)
+        * np.random.default_rng(5).standard_normal(programme.size)
     )
     return material_from({"L": programme + floor})
 
@@ -604,6 +609,8 @@ def test_a_low_end_within_the_goal_tolerance_is_left_alone(walled) -> None:
 class _Judged:
     def __init__(self, passed: bool):
         self.passed = passed
+        self.failures = [] if passed else ["tilts +3.0 dB/oct where +0.0 was intended"]
+        self.margins = {"tilt": 1.0 if passed else 3.0}
 
 
 def _choosing(passes: set[int]):
@@ -622,6 +629,8 @@ def _choosing(passes: set[int]):
             filters=filters,
             target_notes=(),
             verdict=_Judged(len(filters) in passes),
+            # a band off the design grid, so no lift is computed from these stand-in filters
+            correction=SimpleNamespace(band_hz=(1e6, 2e6)),
         )
         for name, value in fields.items():
             object.__setattr__(stand_in, name, value)
@@ -672,3 +681,30 @@ def test_an_alternative_lifting_within_the_goal_tolerance_is_not_kept() -> None:
     options = [(one, 1.17), (three, 0.94)]
     kept = _choose_fit((three, 0.94), options, judge, lambda c: False)
     assert kept.filters is three
+
+
+def test_every_fit_chosen_among_is_recorded_with_what_it_scored() -> None:
+    """TODO 34: a threshold change is scored from these, which fit it would keep included."""
+    from beqforge.pipeline import _choose_fit
+
+    two, three, four = [object()] * 2, [object()] * 3, [object()] * 4
+    judge, _ = _choosing({3})
+    kept = _choose_fit(
+        (four, 2.6), [(two, 2.5), (three, 2.6), (four, 2.6)], judge, lambda c: True
+    )
+    assert [(o["sections"], o["kept"], o.get("passed")) for o in kept.fit_options] == [
+        (2, False, False),
+        (3, True, True),
+        (4, False, None),  # never judged: the one before it was kept
+    ]
+    assert kept.fit_options[0]["margins"] == {"tilt": 3.0}
+    assert kept.fit_options[2]["answer"] and "margins" not in kept.fit_options[2]
+
+    judge, _ = _choosing(set())
+    declined = _choose_fit(
+        (four, 2.6), [(two, 2.5), (four, 2.6)], judge, lambda c: True
+    )
+    assert [(o["sections"], o["kept"]) for o in declined.fit_options] == [
+        (2, False),
+        (4, True),  # none passes: the fitter's answer is what is reported
+    ]

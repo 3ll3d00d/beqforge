@@ -62,6 +62,11 @@ def _num(value: float) -> float | None:
     return None if value is None or math.isnan(value) else float(value)
 
 
+def _finite(value: float | None) -> float | None:
+    """A figure that may be infinite (no sections, an empty band), as null when it is not finite."""
+    return None if value is None or not math.isfinite(value) else float(value)
+
+
 def _back(value: float | None) -> float:
     return math.nan if value is None else float(value)
 
@@ -315,6 +320,7 @@ def _verdict(verdict) -> dict[str, Any]:
         "drift_db": _num(verdict.drift_db),
         "recovered_fraction": _num(verdict.recovered_fraction),
         "shaping_fraction": _num(verdict.shaping_fraction),
+        "margins": {k: _finite(v) for k, v in verdict.margins.items()},
     }
 
 
@@ -374,6 +380,24 @@ def _candidate(candidate) -> dict[str, Any]:
             "reference_level_db": _num(correction.reference_level_db),
         },
         "verdict": _verdict(candidate.verdict),
+        # TODO 34: every fit the candidate chose among, with what each scored
+        "fit_options": [
+            {
+                **option,
+                **(
+                    {
+                        "error_db": _num(option["error_db"]),
+                        "lift_db": _finite(option["lift_db"]),
+                        "margins": {
+                            k: _finite(v) for k, v in option["margins"].items()
+                        },
+                    }
+                    if "margins" in option
+                    else {"error_db": _num(option["error_db"])}
+                ),
+            }
+            for option in candidate.fit_options
+        ],
     }
 
 

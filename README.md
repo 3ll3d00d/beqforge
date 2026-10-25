@@ -277,14 +277,19 @@ answer differently.
 run record relative to the shared root. With `--shared-root`, `POST /impact` takes up to 500 of
 those paths and answers, for each, how likely a design of the same request by this server is to
 differ from the one the record holds: `will_move`, `likely`, `possible`, `unaffected` or
-`unknown`, with a score and the reasons. `/health` reports `"impact": true` when it answers. It
+`unknown`, with a score (an estimated probability of moving, so scores sum to expected movers),
+the reasons, and for an unknown an `unknown_reason` code. Each change in the answer carries the
+counts its scores were measured from (`basis`) and what counted as moving (`moved`). `/health`
+reports `"impact": true` when it answers. It
 is advisory: a person decides what to redesign. The answer comes from `beqforge/impact.toml`,
 where each design version declares what it changed and how much that moved in its regression
 check, and from what each record shows the design relied on (`beqforge/impact.py`). A record
 from before 0.2.11, which doesn't carry its identity, is recognised by the release that wrote
 it (0.2.6 on); one older than the impact data (design version 6) or designed under other
 settings is `unknown`. `beqforge impact rank RECORD...` gives the same answer for local
-records.
+records, and `beqforge impact moved BEFORE AFTER ...` says whether pairs of records of one
+request hold different designs. From 0.2.12 a record also holds each check's margin and every
+fit the designer chose among, so a later threshold change can be scored exactly.
 
 ### Running the designer in a container
 

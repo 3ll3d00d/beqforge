@@ -10,10 +10,14 @@
 # * [[change]]: one entry per answer-changing design version, naming every feature whose code
 #   it changed (`tools/impact.py check` enforces that from the diff) and, for each, the kind of
 #   change and its degree:
-#   - "behaviour": the share of records of each reliance class that moved in the regression
-#     check (`degree`, by class; `impact.OUTCOMES` names the classes);
-#   - "threshold": the old and new values; a record's recorded figure between them will move;
-#   - "all": reaches every design that relies on the feature (at least `likely`);
+#   - "behaviour": `basis`, per outcome class (`impact.OUTCOMES`), [moved, measured] in the
+#     regression check that measured it, a move being `impact.MOVED`; a record's score is the
+#     ratio for its class, so scores are estimated probabilities of moving;
+#   - "threshold": the old and new values, on a judge check that records its margin; a record
+#     whose recorded fits flip a deciding verdict between them will move, one that flips none
+#     is unaffected, and one that predates margins is unknown;
+#   - "all": reaches every design that relies on the feature (at least `likely`), with a basis
+#     as for a behaviour;
 #   - "unchanged": the code changed but the answers it computes did not (say how that was shown).
 
 # The oldest design version this file can score a record from: every change after it is below.
@@ -64,12 +68,10 @@ evidence = "plans/library-review-improvements.md#row-32-choosing-among-near-equa
 [[change.touches]]
 feature = "fit.choice"
 kind = "behaviour"
-# Measured on the library: v6 records rerun at version 6 and 7 on one machine (plans/redesign-
-# scope.md#outcome). A record moved if it swapped between designed and declined, changed strategy,
-# or its cascade moved by more than 1 dB at 5-50 Hz. declined_after_fit is every such title (18 of
-# 34); the designed classes are random samples (7 of 15, 2 of 15); no_fit 0 of 8, and it never
-# reaches the fit anyway.
-degree = { no_fit = 0.0, declined_after_fit = 0.53, designed_with_failures = 0.47, designed_all_passed = 0.13 }
+# Measured on the library: v6 records rerun at version 6 and 7 on one machine, from requests
+# identical to the library's (plans/redesign-scope.md#outcome); moved by `impact.MOVED`.
+# declined_after_fit is every such title; the designed classes and no_fit are random samples.
+basis = { no_fit = [0, 8], declined_after_fit = [18, 34], designed_with_failures = [7, 15], designed_all_passed = [2, 15] }
 
 [[change.touches]]
 feature = "fit.input"

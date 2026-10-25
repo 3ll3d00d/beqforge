@@ -25,13 +25,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
+
 IMPACT_FILE = Path(__file__).with_name("impact.toml")
 
 MAX_RECORDS = 500
 """Per `/impact` request (§7.1)."""
 
 LIKELY = 0.5
-"""A measured share at or above this is `likely`; anything above zero is `possible`."""
+"""A score at or above this is `likely`; anything above zero is `possible`."""
 
 OUTCOMES = (
     "no_fit",
@@ -54,9 +56,6 @@ class Reliance:
     """The class a change's degree is looked up by: one of `OUTCOMES`."""
     detail: str
     """For a person: what in the record put it here."""
-    value: float | None = None
-    """The recorded figure a threshold compares, in the threshold's units; None when the record
-    does not hold it, and then a threshold change cannot be scored."""
 
 
 Reader = Callable[[dict], Reliance | None]
@@ -71,6 +70,12 @@ class Feature:
     (`pipeline`, `beq_common.biquad`); see `owners`."""
     reader: Reader | None = None
     """None for a feature that changes no answer."""
+    margin: str | None = None
+    """For a judge check, its key in a verdict's `margins` (`accept.Verdict.margins`)."""
+    starts: tuple[str, ...] = ()
+    """For a judge check, how its failures start, to tell a candidate it alone failed."""
+    below: bool = False
+    """For a judge check, whether it fails below its bar rather than above it."""
 
     @property
     def answers(self) -> bool:
@@ -157,6 +162,17 @@ def _check(*starts: str) -> Reader:
         return found
 
     return read
+
+
+def _judged(
+    feature_id: str,
+    summary: str,
+    owns: tuple[str, ...],
+    margin: str,
+    *starts: str,
+    below: bool = False,
+) -> Feature:
+    return Feature(feature_id, summary, owns, _check(*starts), margin, starts, below)
 
 
 FEATURES: tuple[Feature, ...] = (
@@ -355,6 +371,9 @@ FEATURES: tuple[Feature, ...] = (
             "pipeline:_choose_fit",
             "pipeline:_lifts_beyond_goal",
             "pipeline:PipelineParams.residual_target_db",
+            "pipeline:_lift_db",
+            # publishability: a fit that drifts past it is never chosen
+            "accept:AcceptParams.max_drift_db",
             "pipeline:FitOptions",
         ),
         _fitted,
@@ -422,90 +441,103 @@ FEATURES: tuple[Feature, ...] = (
         ),
         _fitted,
     ),
-    Feature(
+    _judged(
         "judge.span",
         "the judged band must be wide enough to read a slope",
         ("accept:AcceptParams.min_judge_octaves",),
-        _check("only "),
+        "span",
+        "only ",
+        below=True,
     ),
-    Feature(
+    _judged(
         "judge.tilt",
         "the corrected tilt against the intended",
         ("accept:AcceptParams.tilt_tolerance_db_per_octave",),
-        _check("tilts "),
+        "tilt",
+        "tilts ",
     ),
-    Feature(
+    _judged(
         "judge.level",
         "the corrected level against the intended",
         ("accept:AcceptParams.level_tolerance_db",),
-        _check("corrected level "),
+        "level",
+        "corrected level ",
     ),
     Feature(
         "judge.goal",
         "the goal tolerance: how far from flat counts as flat",
-        (
-            "accept:AcceptParams.goal_tolerance_db",
-            "accept:AcceptParams.spread_margin_db",
-        ),
+        ("accept:AcceptParams.goal_tolerance_db",),
         _fitted,
     ),
-    Feature(
+    _judged(
         "judge.turnover",
         "too much too soon, then a rolloff",
         (
             "accept:turnover_db_per_octave",
             "accept:AcceptParams.turnover_min_octaves",
+            # its bar is the tilt tolerance over the material's turnover
+            "accept:AcceptParams.tilt_tolerance_db_per_octave",
         ),
-        _check("peaks at "),
+        "turnover",
+        "peaks at ",
     ),
-    Feature(
+    _judged(
         "judge.overlift",
         "lifting above anything the material or the target asks",
         ("accept:overlift_bar_db",),
-        _check("lifts "),
+        "overlift",
+        "lifts ",
     ),
-    Feature(
+    _judged(
         "judge.wobble",
         "ripple about the corrected trend against the material's",
         (
             "accept:spectral_roughness",
             "accept:corrected_wobble",
             "accept:AcceptParams.roughness_degree",
+            "accept:AcceptParams.spread_margin_db",
         ),
-        _check("corrected low end is uneven"),
+        "wobble",
+        "corrected low end is uneven",
     ),
-    Feature(
+    _judged(
         "judge.cliff",
         "a discontinuity the correction introduces",
         (
             "accept:worst_gradient",
             "accept:AcceptParams.cliff_*",
         ),
-        _check("introduces a cliff"),
+        "cliff",
+        "introduces a cliff",
     ),
-    Feature(
+    _judged(
         "judge.extent",
         "how far down the correction reaches against the content",
         (
             "accept:corrected_extent_hz",
             "accept:AcceptParams.extent_smoothing_bins",
         ),
-        _check("corrected only down to"),
+        "extent",
+        "corrected only down to",
     ),
-    Feature(
+    _judged(
         "judge.sections",
-        "each section stable after rounding and earning its slot",
-        (
-            "accept:AcceptParams.min_section_contribution_db",
-            "accept:AcceptParams.max_drift_db",
-        ),
-        _check("section "),
+        "each section earning its slot",
+        ("accept:AcceptParams.min_section_contribution_db",),
+        "sections",
+        "section ",
+        below=True,
     ),
-    Feature(
+    _judged(
         "judge.contrast",
         "boosting where contrast licenses less: lifting the quiet floor",
-        ("pipeline:_within_ceiling",),
-        _check("boosts "),
+        (
+            "pipeline:_within_ceiling",
+            # its bar is the level tolerance over what contrast licenses
+            "accept:AcceptParams.level_tolerance_db",
+        ),
+        "contrast",
+        "boosts ",
     ),
     Feature(
         "judge.headroom",
@@ -635,17 +667,30 @@ def owners(qualified: str) -> tuple[Feature, ...]:
 
 # -- what changed: impact.toml
 
+MOVED = (
+    "a design of the same request swapped between designed and declined, won with another "
+    "strategy (a counterfactual's cap included), or its published cascade moved by more than "
+    "1 dB anywhere on 5-50 Hz"
+)
+"""What beqforge counts as a design moving, in a basis and in `moved`."""
+
+Kind = Literal["behaviour", "threshold", "all", "unchanged"]
+
 
 @dataclass(frozen=True, slots=True)
 class Touch:
     feature: str
-    kind: Literal["behaviour", "threshold", "all", "unchanged"]
-    degree: dict[str, float] | None = None
+    kind: Kind
+    basis: dict[str, tuple[int, int]] | None = None
+    """For a behaviour or an all: per outcome class, (moved, measured) in the regression check
+    that measured it; the score is their ratio."""
     old: float | None = None
     new: float | None = None
-    near: float | None = None
-    """For a threshold: how far outside the old and new values a figure is still `likely`."""
     note: str = ""
+
+    def share(self, kind: str) -> float:
+        moved, measured = self.basis[kind]
+        return moved / measured if measured else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,6 +700,22 @@ class Change:
     summary: str
     touches: tuple[Touch, ...]
     evidence: str = ""
+
+    def basis(self) -> list[dict]:
+        """The measured counts behind its scores, for `changes` (§7.1), one entry per outcome
+        class in `OUTCOMES` order: the largest share declared for it, since that is what
+        scores a record of it."""
+        found: dict[str, tuple[int, int]] = {}
+        for touch in self.touches:
+            for kind, (moved, measured) in (touch.basis or {}).items():
+                held = found.get(kind)
+                if held is None or moved * held[1] > held[0] * measured:
+                    found[kind] = (moved, measured)
+        return [
+            {"class": kind, "measured": found[kind][1], "moved": found[kind][0]}
+            for kind in OUTCOMES
+            if kind in found
+        ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,7 +740,8 @@ class ImpactData:
 
 
 def parse(text: str) -> ImpactData:
-    """`impact.toml`'s contents, checked: every touch names a known feature with a valid kind."""
+    """`impact.toml`'s contents, checked: every touch names a known feature with a valid kind,
+    a measured basis where it needs one, and a threshold only on a check that records it."""
     raw = tomllib.loads(text)
     releases = tuple(
         Release(
@@ -699,24 +761,37 @@ def parse(text: str) -> ImpactData:
                 raise ValueError(f"change {c['id']}: unknown kind {kind!r}")
             if t["feature"] not in _BY_ID:
                 raise ValueError(f"change {c['id']}: unknown feature {t['feature']!r}")
-            degree = t.get("degree")
-            if kind == "behaviour":
-                if not degree or set(degree) != set(OUTCOMES):
+            basis = t.get("basis")
+            if kind in ("behaviour", "all"):
+                if not basis or set(basis) != set(OUTCOMES):
                     raise ValueError(
-                        f"change {c['id']}: {t['feature']} needs a degree for each of {OUTCOMES}"
+                        f"change {c['id']}: {t['feature']} needs a basis of [moved, measured] "
+                        f"for each of {OUTCOMES}"
                     )
-                if any(not 0.0 <= float(v) <= 1.0 for v in degree.values()):
-                    raise ValueError(f"change {c['id']}: degrees are shares in [0, 1]")
-            if kind == "threshold" and ("old" not in t or "new" not in t):
-                raise ValueError(f"change {c['id']}: a threshold needs old and new")
+                if any(
+                    len(v) != 2 or not 0 <= int(v[0]) <= int(v[1])
+                    for v in basis.values()
+                ):
+                    raise ValueError(
+                        f"change {c['id']}: a basis is [moved, measured], moved <= measured"
+                    )
+            if kind == "threshold":
+                if "old" not in t or "new" not in t:
+                    raise ValueError(f"change {c['id']}: a threshold needs old and new")
+                if _BY_ID[t["feature"]].margin is None:
+                    raise ValueError(
+                        f"change {c['id']}: {t['feature']} records no margin to score a "
+                        "threshold by; declare it a behaviour, measured"
+                    )
             touches.append(
                 Touch(
                     t["feature"],
                     kind,
-                    {k: float(v) for k, v in degree.items()} if degree else None,
+                    {k: (int(v[0]), int(v[1])) for k, v in basis.items()}
+                    if basis
+                    else None,
                     t.get("old"),
                     t.get("new"),
-                    t.get("near"),
                     t.get("note", ""),
                 )
             )
@@ -784,6 +859,15 @@ def _literal(node: ast.AST):
     raise ValueError(f"not a literal: {ast.dump(node)[:80]}")
 
 
+def _params(text: str) -> dict | None:
+    """A record's `PipelineParams` repr as nested dicts, read as literals and never evaluated."""
+    try:
+        tree = _literal(ast.parse(text, mode="eval").body)
+    except (SyntaxError, ValueError):
+        return None
+    return tree if isinstance(tree, dict) else None
+
+
 def settings_from_params(text: str) -> str | None:
     """The design settings digest of a record's `PipelineParams` repr, or None if it can't be read.
 
@@ -794,8 +878,10 @@ def settings_from_params(text: str) -> str | None:
     from beqforge.designer import design_settings_digest
     from beqforge.pipeline import PipelineParams
 
+    tree = _params(text)
+    if tree is None:
+        return None
     try:
-        tree = _literal(ast.parse(text, mode="eval").body)
         default = PipelineParams()
         params = replace(
             default,
@@ -816,25 +902,78 @@ def settings_from_params(text: str) -> str | None:
                 integer_bits=int(tree["realisation"]["integer_bits"]),
             ),
         )
-    except (SyntaxError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
     return design_settings_digest(params)
 
 
-def record_identity(record: dict, data: ImpactData) -> RecordIdentity | str:
+UnknownReason = Literal[
+    "not_found",
+    "unreadable",
+    "outside_root",
+    "not_a_record",
+    "unknown_build",
+    "older_than_data",
+    "other_settings",
+    "newer_version",
+    "no_figure",
+]
+
+
+def record_identity(
+    record: dict, data: ImpactData
+) -> RecordIdentity | tuple[UnknownReason, str]:
     """The identity a record was designed at, or why it can't be known."""
     fingerprint = record.get("fingerprint")
     if not isinstance(fingerprint, dict) or "revision" not in fingerprint:
-        return "not a beqforge run record"
+        return "not_a_record", "not a beqforge run record"
     stated = record.get("design_identity")
     if isinstance(stated, dict) and isinstance(stated.get("design_version"), int):
         return RecordIdentity(stated["design_version"], stated.get("design_settings"))
     release = _release_of(str(fingerprint["revision"]), data)
     if release is None:
-        return f"designed by a build this designer does not know ({fingerprint['revision']})"
+        return (
+            "unknown_build",
+            f"designed by a build this designer does not know ({fingerprint['revision']})",
+        )
     return RecordIdentity(
         release.design_version, settings_from_params(str(fingerprint.get("params", "")))
     )
+
+
+# -- whether a design moved: how a change's basis is measured
+
+
+def _response_db(filters: list) -> np.ndarray:
+    from beqforge import BiquadSpec
+    from beqforge.filters import biquad_sos, magnitude_db
+    from beqforge.pipeline import PUBLISH_FS
+
+    specs = [
+        BiquadSpec(f["type"], f["freq_hz"], f["gain_db"], f["q"])
+        if isinstance(f, dict)
+        else BiquadSpec(*f)
+        for f in filters
+    ]
+    grid = np.geomspace(5.0, 50.0, 200)
+    if not specs:
+        return np.zeros_like(grid)
+    return magnitude_db(biquad_sos(specs, PUBLISH_FS), grid, PUBLISH_FS)
+
+
+def moved(before: dict, after: dict) -> tuple[bool, str]:
+    """Whether two run records of one request hold different designs, by `MOVED`, and how."""
+    won = before.get("accepted"), after.get("accepted")
+    if won[0] is None or won[1] is None or won[0] != won[1]:
+        return won[0] != won[1], f"{won[0] or 'declined'} -> {won[1] or 'declined'}"
+    a, b = (
+        next(c for c in r["candidates"] if c["label"] == w)
+        for r, w in ((before, won[0]), (after, won[1]))
+    )
+    shift = float(
+        np.max(np.abs(_response_db(a["filters"]) - _response_db(b["filters"])))
+    )
+    return shift > 1.0, f"{won[0]}, cascade {shift:.2f} dB apart at 5-50 Hz"
 
 
 # -- scoring
@@ -851,47 +990,122 @@ class Reason:
 class Assessment:
     tier: Tier
     score: float | None
+    """An estimated probability of moving (§7.1), from the measured shares; None when unknown."""
     from_design_version: int | None
     reasons: tuple[Reason, ...]
+    unknown_reason: UnknownReason | None = None
 
 
 def _unknown(
+    code: UnknownReason,
     reason: str,
     version: int | None = None,
     change: str | None = None,
     feature: str | None = None,
 ) -> Assessment:
-    return Assessment("unknown", None, version, (Reason(change, feature, reason),))
+    return Assessment(
+        "unknown", None, version, (Reason(change, feature, reason),), code
+    )
 
 
-def _threshold(touch: Touch, relied: Reliance) -> tuple[float, bool] | None:
-    """(score, certain) for a threshold change, or None when the record lacks the figure."""
-    if relied.value is None:
-        return None
+def _fails_this(check: Feature, failure: str) -> bool:
+    return str(failure).startswith(check.starts) and not (
+        check.margin == "sections" and "not stable" in str(failure)
+    )
+
+
+def _threshold(record: dict, touch: Touch) -> tuple[str, str]:
+    """A threshold change against what each recorded fit scored on that check: ("will_move",
+    why) when it flips a verdict that decides the answer, ("unaffected", why) when it flips
+    none, ("no_figure", why) when the record can't say."""
+    check = feature(touch.feature)
     low, high = sorted((float(touch.old), float(touch.new)))
-    if low <= relied.value <= high:
-        return 1.0, True
-    if touch.near:
-        distance = min(abs(relied.value - low), abs(relied.value - high))
-        if distance <= touch.near:
-            return LIKELY + (1.0 - LIKELY) * (1.0 - distance / touch.near) * 0.99, False
-    return 0.1, False
+    tree = _params(str((record.get("fingerprint") or {}).get("params", ""))) or {}
+    goal = (tree.get("accept") or {}).get("goal_tolerance_db")
+
+    def flips(option: dict) -> bool | None:
+        """Whether the new threshold changes this fit's whole verdict."""
+        value = (option.get("margins") or {}).get(check.margin)
+        if check.margin not in (option.get("margins") or {}):
+            return None
+        if value is None or not low <= value <= high:
+            return False
+        if option["passed"]:
+            return True
+        return all(_fails_this(check, f) for f in option.get("failures") or ())
+
+    winner = record.get("accepted")
+    for candidate in record.get("candidates") or []:
+        options = candidate.get("fit_options")
+        if not options:
+            return (
+                "no_figure",
+                "the record predates the margins a threshold is scored by",
+            )
+        changes = becomes_passing = False
+        for option in options:
+            if "margins" not in option:
+                continue
+            flipped = flips(option)
+            if flipped is None:
+                return "no_figure", f"the record holds no {check.margin} margin"
+            if not flipped:
+                continue
+            if option["kept"]:
+                changes = True
+                becomes_passing |= not option["passed"]
+            elif not option["passed"] and (
+                option["answer"]
+                or (
+                    goal is not None
+                    and option.get("lift_db") is not None
+                    and option["lift_db"] > goal
+                )
+            ):
+                # a fit judged before the kept one now passes, so it would be kept instead
+                changes = becomes_passing = True
+        if not changes:
+            continue
+        label = candidate["label"]
+        if label == winner:
+            return (
+                "will_move",
+                f"{label}, the winner, changes verdict or fit at the new value",
+            )
+        if winner is None and becomes_passing:
+            return (
+                "will_move",
+                f"{label} passes at the new value, where every candidate failed",
+            )
+        if winner is not None and becomes_passing:
+            return (
+                "no_figure",
+                f"{label} passes at the new value; the record can't say if it outranks {winner}",
+            )
+    return "unaffected", "no recorded verdict changes at the new value"
 
 
 def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessment:
     """How likely a design of `record`'s request by a designer at `current` (design version,
-    settings digest) is to differ from the one it holds (§7.1, "Impact")."""
+    settings digest) is to differ from the one it holds (§7.1, "Impact").
+
+    The score is an estimated probability of moving: each touch's measured share for the
+    record's outcome class, 1.0 for a threshold that flips a deciding verdict, and touches
+    combined as independent, 1 - prod(1 - p)."""
     identity = record_identity(record, data)
-    if isinstance(identity, str):
-        return _unknown(identity)
+    if isinstance(identity, tuple):
+        return _unknown(*identity)
     version, settings = identity.design_version, identity.design_settings
     now, now_settings = current
     if settings is None:
         return _unknown(
-            "the record does not say which settings it was designed under", version
+            "other_settings",
+            "the record does not say which settings it was designed under",
+            version,
         )
     if settings != now_settings:
         return _unknown(
+            "other_settings",
             f"designed under other settings ({settings}; this designer's are {now_settings})",
             version,
         )
@@ -899,17 +1113,20 @@ def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessme
         return Assessment("unaffected", 0.0, version, ())
     if version > now:
         return _unknown(
-            f"designed at version {version}, newer than this designer's {now}", version
+            "newer_version",
+            f"designed at version {version}, newer than this designer's {now}",
+            version,
         )
     if version < data.since:
         return _unknown(
+            "older_than_data",
             f"designed at version {version}, older than this designer's impact data "
             f"(version {data.since} on)",
             version,
         )
     reasons: list[Reason] = []
-    best = 0.0
-    certain = likely = False
+    stays = 1.0
+    certain = reaches_all = False
     for change in data.after(version, now):
         for touch in change.touches:
             if touch.kind == "unchanged":
@@ -917,41 +1134,40 @@ def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessme
             relied = feature(touch.feature).reader(record)
             if relied is None:
                 continue
-            if touch.kind == "behaviour":
-                share = touch.degree[relied.kind]
-                if share <= 0.0:
-                    continue
-                detail = f"{relied.detail}; {share:.0%} of such designs moved"
-            elif touch.kind == "all":
-                share, likely = 1.0, True
-                detail = f"{relied.detail}; the change reaches every such design"
-            else:
-                scored = _threshold(touch, relied)
-                if scored is None:
+            if touch.kind == "threshold":
+                found, why = _threshold(record, touch)
+                if found == "no_figure":
                     return _unknown(
-                        f"the record lacks the figure {touch.feature} compares, "
-                        f"which moves from {touch.old} to {touch.new}",
+                        "no_figure",
+                        f"{why}; {touch.feature} moves from {touch.old} to {touch.new}",
                         version,
                         change.id,
                         touch.feature,
                     )
-                share, sure = scored
-                certain |= sure
-                detail = (
-                    f"{relied.detail}; recorded {relied.value:g}, the threshold moves "
-                    f"from {touch.old} to {touch.new}"
-                )
-            best = max(best, share)
+                if found == "unaffected":
+                    continue
+                share, certain = 1.0, True
+                detail = f"{why} ({touch.old} -> {touch.new})"
+            else:
+                share = touch.share(relied.kind)
+                moved_, measured = touch.basis[relied.kind]
+                if touch.kind == "all":
+                    reaches_all = True
+                elif share <= 0.0:
+                    continue
+                detail = f"{relied.detail}; {moved_} of {measured} such designs moved"
+            stays *= 1.0 - share
             reasons.append(Reason(change.id, touch.feature, detail))
+    score = 1.0 - stays
     if certain:
         tier: Tier = "will_move"
-    elif likely or best >= LIKELY:
+    elif reaches_all or score >= LIKELY:
         tier = "likely"
-    elif best > 0.0:
+    elif score > 0.0:
         tier = "possible"
     else:
         return Assessment("unaffected", 0.0, version, ())
-    return Assessment(tier, round(best, 4), version, tuple(reasons))
+    return Assessment(tier, round(score, 4), version, tuple(reasons))
 
 
 # -- the endpoint
@@ -997,21 +1213,23 @@ def _check_request(body: object) -> list[tuple[str, str]]:
     return pairs
 
 
-def _read(root: Path, relative: str) -> dict | str:
+def _read(root: Path, relative: str) -> dict | tuple[UnknownReason, str]:
     from beqforge.reference import UnusableReference, resolve
 
     try:
         path = resolve(root, relative, "record")
     except UnusableReference as refused:
-        return refused.reason
+        return "outside_root", refused.reason
     if not path.is_file():
-        return "record not found"
+        return "not_found", "record not found"
     try:
         with gzip.open(path, "rt", encoding="utf-8") as f:
             record = json.load(f)
     except (OSError, EOFError, UnicodeDecodeError, json.JSONDecodeError) as unreadable:
-        return f"record unreadable: {unreadable}"
-    return record if isinstance(record, dict) else "not a beqforge run record"
+        return "unreadable", f"record unreadable: {unreadable}"
+    if not isinstance(record, dict):
+        return "not_a_record", "not a beqforge run record"
+    return record
 
 
 def answer(
@@ -1036,22 +1254,23 @@ def answer(
     for rid, relative in pairs:
         record = _read(shared_root, relative)
         found = (
-            _unknown(record)
-            if isinstance(record, str)
+            _unknown(*record)
+            if isinstance(record, tuple)
             else assess(record, current, data)
         )
-        results.append(
-            {
-                "id": rid,
-                "tier": found.tier,
-                "score": found.score,
-                "from_design_version": found.from_design_version,
-                "reasons": [
-                    {"change": r.change, "feature": r.feature, "detail": r.detail}
-                    for r in found.reasons
-                ],
-            }
-        )
+        result = {
+            "id": rid,
+            "tier": found.tier,
+            "score": found.score,
+            "from_design_version": found.from_design_version,
+            "reasons": [
+                {"change": r.change, "feature": r.feature, "detail": r.detail}
+                for r in found.reasons
+            ],
+        }
+        if found.unknown_reason is not None:
+            result["unknown_reason"] = found.unknown_reason
+        results.append(result)
     versions = [
         r["from_design_version"]
         for r in results
@@ -1064,7 +1283,13 @@ def answer(
         "design_settings": identity["design_settings"],
         "designer_build": identity.get("designer_build"),
         "changes": [
-            {"design_version": c.design_version, "id": c.id, "summary": c.summary}
+            {
+                "design_version": c.design_version,
+                "id": c.id,
+                "summary": c.summary,
+                "basis": c.basis(),
+                "moved": MOVED,
+            }
             for c in changes
         ],
         "results": results,

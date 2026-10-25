@@ -58,10 +58,14 @@ def _data(
     )
 
 
-def _behaviour(feature: str, **degree: float) -> impact.Touch:
+def _touch(feature: str, kind: str, **counts: tuple[int, int]) -> impact.Touch:
     return impact.Touch(
-        feature, "behaviour", {k: degree.get(k, 0.0) for k in impact.OUTCOMES}
+        feature, kind, {k: counts.get(k, (0, 1)) for k in impact.OUTCOMES}
     )
+
+
+def _behaviour(feature: str, **counts: tuple[int, int]) -> impact.Touch:
+    return _touch(feature, "behaviour", **counts)
 
 
 # -- the catalogue
@@ -104,8 +108,20 @@ def test_the_shipped_impact_data_loads() -> None:
         ('feature = "no.such"\nkind = "all"', "unknown feature"),
         ('feature = "fit.choice"\nkind = "sideways"', "unknown kind"),
         (
-            'feature = "fit.choice"\nkind = "behaviour"\ndegree = { no_fit = 0.5 }',
-            "a degree",
+            'feature = "fit.choice"\nkind = "behaviour"\nbasis = { no_fit = [1, 2] }',
+            "needs a basis",
+        ),
+        (
+            (
+                'feature = "fit.choice"\nkind = "behaviour"\nbasis = { no_fit = [3, 2], '
+                "declined_after_fit = [0, 1], designed_with_failures = [0, 1], "
+                "designed_all_passed = [0, 1] }"
+            ),
+            "moved <= measured",
+        ),
+        (
+            'feature = "fit.choice"\nkind = "threshold"\nold = 1.0\nnew = 2.0',
+            "records no margin",
         ),
         ('feature = "judge.cliff"\nkind = "threshold"\nold = 2.0', "old and new"),
     ],
@@ -149,7 +165,7 @@ def test_an_older_record_is_recognised_by_the_release_that_wrote_it(
     record = _record(version=None, revision=revision, params=repr(PipelineParams()))
     found = impact.record_identity(record, impact.load())
     if version is None:
-        assert isinstance(found, str)
+        assert found[0] == "unknown_build"
     else:
         assert found == impact.RecordIdentity(version, SETTINGS)
 
@@ -175,48 +191,79 @@ def test_a_record_at_this_identity_is_unaffected_with_no_reasons() -> None:
 
 
 @pytest.mark.parametrize(
-    "record, because",
+    "record, code, because",
     [
-        (_record(settings="0123456789ab"), "other settings"),
-        (_record(settings=None), "settings"),
-        (_record(version=8), "newer"),
-        (_record(version=5), "older than this designer's impact data"),
-        ({"candidates": []}, "not a beqforge run record"),
+        (_record(settings="0123456789ab"), "other_settings", "other settings"),
+        (_record(settings=None), "other_settings", "settings"),
+        (_record(version=8), "newer_version", "newer"),
+        (
+            _record(version=5),
+            "older_than_data",
+            "older than this designer's impact data",
+        ),
+        ({"candidates": []}, "not_a_record", "not a beqforge run record"),
+        (
+            _record(version=None, revision="unknown+src:c1ae12bafc27"),
+            "unknown_build",
+            "does not know",
+        ),
     ],
 )
-def test_what_cannot_be_scored_is_unknown_never_left_out(record, because) -> None:
+def test_what_cannot_be_scored_is_unknown_never_left_out(record, code, because) -> None:
     found = impact.assess(record, (7, SETTINGS), _data())
     assert found.tier == "unknown" and found.score is None
+    assert found.unknown_reason == code
     assert because in found.reasons[0].detail
 
 
 def test_a_behaviour_change_scores_by_the_share_of_its_class_that_moved() -> None:
     data = _data(
-        _behaviour("fit.choice", declined_after_fit=0.8, designed_all_passed=0.2)
+        _behaviour("fit.choice", declined_after_fit=(4, 5), designed_all_passed=(1, 5))
     )
     declined = _record([_candidate("flatten", False, ("tilts +3 dB/oct",))])
     designed = _record([_candidate("flatten", True)], "flatten")
     first = impact.assess(declined, (7, SETTINGS), data)
     assert (first.tier, first.score, first.from_design_version) == ("likely", 0.8, 6)
-    assert (
-        first.reasons[0].change == "a-change"
-        and first.reasons[0].feature == "fit.choice"
+    assert (first.reasons[0].change, first.reasons[0].feature) == (
+        "a-change",
+        "fit.choice",
     )
-    assert "80% of such designs moved" in first.reasons[0].detail
+    assert "4 of 5 such designs moved" in first.reasons[0].detail
     second = impact.assess(designed, (7, SETTINGS), data)
     assert (second.tier, second.score) == ("possible", 0.2)
 
 
+def test_changes_combine_as_independent_chances_of_moving() -> None:
+    """A score is an estimated probability, so two halves make three quarters, not one half."""
+    data = impact.ImpactData(
+        5,
+        (),
+        tuple(
+            impact.Change(
+                name, version, "s", (_behaviour(feature, designed_all_passed=(1, 2)),)
+            )
+            for name, version, feature in (
+                ("six", 6, "fit.choice"),
+                ("seven", 7, "fit.search"),
+            )
+        ),
+    )
+    record = _record([_candidate("flatten", True)], "flatten", version=5)
+    found = impact.assess(record, (7, SETTINGS), data)
+    assert (found.tier, found.score) == ("likely", 0.75)
+    assert [r.change for r in found.reasons] == ["six", "seven"]
+
+
 def test_a_design_declined_before_the_fit_does_not_rely_on_it() -> None:
-    data = _data(_behaviour("fit.choice", **dict.fromkeys(impact.OUTCOMES, 1.0)))
+    data = _data(_behaviour("fit.choice", **dict.fromkeys(impact.OUTCOMES, (1, 1))))
     found = impact.assess(_record(), (7, SETTINGS), data)
     assert found.tier == "unaffected"
 
 
 def test_a_change_reaching_every_design_is_at_least_likely() -> None:
-    data = _data(impact.Touch("analysis.input", "all"))
+    data = _data(_touch("analysis.input", "all", no_fit=(1, 4)))
     found = impact.assess(_record(), (7, SETTINGS), data)
-    assert (found.tier, found.score) == ("likely", 1.0)
+    assert (found.tier, found.score) == ("likely", 0.25)
 
 
 def test_an_unchanged_touch_scores_nothing() -> None:
@@ -227,36 +274,22 @@ def test_an_unchanged_touch_scores_nothing() -> None:
     assert found.tier == "unaffected"
 
 
-def test_a_threshold_needs_the_recorded_figure_or_says_it_cannot_score() -> None:
-    data = _data(impact.Touch("judge.cliff", "threshold", old=2.0, new=2.5))
-    record = _record([_candidate("flatten", False, ("introduces a cliff of 3",))])
-    found = impact.assess(record, (7, SETTINGS), data)
-    assert found.tier == "unknown"
-    assert (found.reasons[0].change, found.reasons[0].feature) == (
-        "a-change",
-        "judge.cliff",
-    )
-    assert (
-        "failed it: flatten" not in found.reasons[0].detail
-    )  # the figure is what's missing
-
-
-def test_a_recorded_figure_between_a_thresholds_values_will_move() -> None:
-    touch = impact.Touch("judge.cliff", "threshold", old=2.0, new=2.5, near=0.5)
-    assert impact._threshold(touch, impact.Reliance("x", "", 2.2)) == (1.0, True)
-    near, sure = impact._threshold(touch, impact.Reliance("x", "", 2.75))
-    assert not sure and impact.LIKELY <= near < 1.0
-    assert impact._threshold(touch, impact.Reliance("x", "", 9.0)) == (0.1, False)
-
-
 def test_only_changes_after_the_records_version_count() -> None:
     data = impact.ImpactData(
         5,
         (),
         (
-            impact.Change("six", 6, "s", (impact.Touch("analysis.input", "all"),)),
             impact.Change(
-                "seven", 7, "s", (_behaviour("fit.choice", designed_all_passed=0.3),)
+                "six",
+                6,
+                "s",
+                (_touch("analysis.input", "all", designed_all_passed=(1, 1)),),
+            ),
+            impact.Change(
+                "seven",
+                7,
+                "s",
+                (_behaviour("fit.choice", designed_all_passed=(3, 10)),),
             ),
         ),
     )
@@ -279,6 +312,143 @@ def test_the_strategy_and_check_readers_say_what_the_record_shows() -> None:
     cliff = impact.feature("judge.cliff").reader(record)
     assert cliff.kind == "designed_with_failures"
     assert "failed it: counterfactual/25dB" in cliff.detail
+
+
+# -- a threshold, from the margins each recorded fit scored
+
+CLIFF = impact.Touch("judge.cliff", "threshold", old=2.0, new=2.5)
+CLIFF_FAILURE = "introduces a cliff of 40 dB/oct"
+
+
+def _fit(
+    cliff: float,
+    passed: bool,
+    *,
+    kept: bool,
+    answer: bool = True,
+    failures=(),
+    lift=3.0,
+):
+    return {
+        "sections": 2,
+        "error_db": 0.4,
+        "answer": answer,
+        "kept": kept,
+        "passed": passed,
+        "failures": list(failures),
+        "margins": {"cliff": cliff, "tilt": 0.5},
+        "lift_db": lift,
+    }
+
+
+def _fitted(label: str, *options: dict) -> dict:
+    kept = next(o for o in options if o["kept"])
+    return {
+        "label": label,
+        "verdict": {"passed": kept["passed"], "failures": kept["failures"]},
+        "fit_options": list(options),
+    }
+
+
+def _scored(*candidates: dict, accepted=None) -> impact.Assessment:
+    record = _record(list(candidates), accepted, params=repr(PipelineParams()))
+    return impact.assess(record, (7, SETTINGS), _data(CLIFF))
+
+
+def test_a_threshold_that_flips_the_winners_verdict_will_move() -> None:
+    found = _scored(_fitted("flatten", _fit(2.2, True, kept=True)), accepted="flatten")
+    assert (found.tier, found.score) == ("will_move", 1.0)
+    assert "the winner" in found.reasons[0].detail
+
+
+def test_a_threshold_that_flips_nothing_leaves_the_design_unaffected() -> None:
+    found = _scored(_fitted("flatten", _fit(0.4, True, kept=True)), accepted="flatten")
+    assert found.tier == "unaffected"
+
+
+def test_a_decline_designs_when_a_fit_failing_only_that_check_passes() -> None:
+    alone = _scored(
+        _fitted("flatten", _fit(2.3, False, kept=True, failures=(CLIFF_FAILURE,)))
+    )
+    assert alone.tier == "will_move"
+    also_tilt = _scored(
+        _fitted(
+            "flatten",
+            _fit(2.3, False, kept=True, failures=(CLIFF_FAILURE, "tilts +4.0 dB/oct")),
+        )
+    )
+    assert also_tilt.tier == "unaffected"
+
+
+def test_an_earlier_fit_that_now_passes_would_be_kept_instead() -> None:
+    """TODO 32's choice: the fewest-section fit failed only the cliff, so it is kept now."""
+    candidate = _fitted(
+        "flatten",
+        _fit(2.4, False, kept=False, answer=False, failures=(CLIFF_FAILURE,)),
+        _fit(0.3, True, kept=True),
+    )
+    assert _scored(candidate, accepted="flatten").tier == "will_move"
+    lifts_little = _fitted(
+        "flatten",
+        _fit(2.4, False, kept=False, answer=False, failures=(CLIFF_FAILURE,), lift=1.0),
+        _fit(0.3, True, kept=True),
+    )
+    assert _scored(lifts_little, accepted="flatten").tier == "unaffected"
+
+
+def test_a_loser_that_now_passes_cannot_be_ranked_from_the_record() -> None:
+    found = _scored(
+        _fitted("flatten", _fit(0.3, True, kept=True)),
+        _fitted(
+            "counterfactual/25dB",
+            _fit(2.3, False, kept=True, failures=(CLIFF_FAILURE,)),
+        ),
+        accepted="flatten",
+    )
+    assert (found.tier, found.unknown_reason) == ("unknown", "no_figure")
+    assert "outranks flatten" in found.reasons[0].detail
+
+
+def test_a_record_before_margins_cannot_score_a_threshold() -> None:
+    found = _scored(_candidate("flatten", False, (CLIFF_FAILURE,)))
+    assert (found.tier, found.unknown_reason) == ("unknown", "no_figure")
+    assert (found.reasons[0].change, found.reasons[0].feature) == (
+        "a-change",
+        "judge.cliff",
+    )
+
+
+# -- whether a design moved
+
+
+def _design(label: str | None, *filters: dict) -> dict:
+    return {
+        "accepted": label,
+        "candidates": []
+        if label is None
+        else [{"label": label, "filters": list(filters)}],
+    }
+
+
+SHELF = {"type": "low_shelf", "freq_hz": 20.0, "gain_db": 10.0, "q": 0.7}
+
+
+def test_moved_is_a_decision_a_strategy_or_more_than_a_db_of_cascade() -> None:
+    nudged = {**SHELF, "gain_db": 10.5}
+    shifted = {**SHELF, "gain_db": 12.0}
+    assert impact.moved(_design(None), _design(None))[0] is False
+    assert impact.moved(_design(None), _design("flatten", SHELF))[0] is True
+    assert impact.moved(
+        _design("flatten", SHELF), _design("counterfactual/25dB", SHELF)
+    )[0]
+    assert impact.moved(
+        _design("counterfactual/25dB", SHELF), _design("counterfactual/45dB", SHELF)
+    )[0]
+    assert (
+        impact.moved(_design("flatten", SHELF), _design("flatten", nudged))[0] is False
+    )
+    changed, how = impact.moved(_design("flatten", SHELF), _design("flatten", shifted))
+    assert changed and "1.98 dB apart" in how
 
 
 # -- the endpoint
@@ -305,7 +475,7 @@ def _ask(*records: tuple[str, str]) -> dict:
 def test_impact_answers_each_record_in_order_with_the_changes_since_the_oldest(
     tmp_path,
 ) -> None:
-    data = _data(_behaviour("fit.choice", designed_all_passed=0.6))
+    data = _data(_behaviour("fit.choice", designed_all_passed=(3, 5)))
     old = _write(
         tmp_path, "a.run.json.gz", _record([_candidate("flatten", True)], "flatten")
     )
@@ -338,12 +508,39 @@ def test_impact_answers_each_record_in_order_with_the_changes_since_the_oldest(
         "score": None,
         "from_design_version": None,
         "reasons": [{"change": None, "feature": None, "detail": "record not found"}],
+        "unknown_reason": "not_found",
     }
+    assert body["results"][3]["unknown_reason"] == "unreadable"
+    assert "unknown_reason" not in body["results"][1]
     assert body["changes"] == [
-        {"design_version": 7, "id": "a-change", "summary": "what moved"}
+        {
+            "design_version": 7,
+            "id": "a-change",
+            "summary": "what moved",
+            "basis": [
+                {"class": "no_fit", "measured": 1, "moved": 0},
+                {"class": "declined_after_fit", "measured": 1, "moved": 0},
+                {"class": "designed_with_failures", "measured": 1, "moved": 0},
+                {"class": "designed_all_passed", "measured": 5, "moved": 3},
+            ],
+            "moved": impact.MOVED,
+        }
     ]
     assert {k: body[k] for k in IDENTITY} == IDENTITY
     assert body["contract_version"] == "1.6"
+
+
+def test_one_record_under_two_ids_is_answered_for_each(tmp_path) -> None:
+    """Two library entries can name one record; each id gets its own result."""
+    path = _write(tmp_path, "a.run.json.gz", _record(version=7))
+    status, body = impact.answer(
+        _ask(("x", path), ("y", path)), tmp_path, IDENTITY, _data()
+    )
+    assert status == 200
+    assert [(r["id"], r["tier"]) for r in body["results"]] == [
+        ("x", "unaffected"),
+        ("y", "unaffected"),
+    ]
 
 
 def test_a_symlink_out_of_the_root_is_that_records_unknown(tmp_path) -> None:
@@ -359,6 +556,7 @@ def test_a_symlink_out_of_the_root_is_that_records_unknown(tmp_path) -> None:
     assert status == 200
     assert body["results"][0]["tier"] == "unknown"
     assert "outside the root" in body["results"][0]["reasons"][0]["detail"]
+    assert body["results"][0]["unknown_reason"] == "outside_root"
 
 
 @pytest.mark.parametrize(
@@ -405,7 +603,9 @@ def test_a_real_record_scores_against_this_designer_and_a_later_one(
     status, body = impact.answer(_ask(("t", response.run_record)), tmp_path, identity)
     assert status == 200 and body["results"][0]["tier"] == "unaffected"
     later = {**identity, "design_version": DESIGN_VERSION + 1}
-    data = _data(impact.Touch("analysis.input", "all"), version=DESIGN_VERSION + 1)
+    data = _data(
+        _touch("analysis.input", "all", no_fit=(1, 1)), version=DESIGN_VERSION + 1
+    )
     status, body = impact.answer(
         _ask(("t", response.run_record)), tmp_path, later, data
     )
@@ -490,7 +690,8 @@ def test_check_passes_a_declared_change(monkeypatch, capsys) -> None:
         },
         _TOML
         + '[[change.touches]]\nfeature = "fit.choice"\nkind = "behaviour"\n'
-        + "degree = { no_fit = 0, declined_after_fit = 0, designed_with_failures = 0, designed_all_passed = 0 }\n",
+        + "basis = { no_fit = [0, 1], declined_after_fit = [0, 1], "
+        + "designed_with_failures = [0, 1], designed_all_passed = [0, 1] }\n",
     )
     assert tool.check("base", "head") == 0
 
@@ -499,7 +700,7 @@ def test_check_refuses_code_no_feature_owns(monkeypatch, capsys) -> None:
     _fake_git(
         monkeypatch,
         {"beqforge/filters.py": (None, "def brand_new():\n    pass\n")},
-        _TOML + '[[change.touches]]\nfeature = "fit.choice"\nkind = "all"\n',
+        _TOML + '[[change.touches]]\nfeature = "fit.choice"\nkind = "unchanged"\n',
     )
     assert tool.check("base", "head") == 1
     assert "filters:brand_new changed and no feature owns it" in capsys.readouterr().out

@@ -213,3 +213,31 @@ class. That's the "all" case this plan foresaw. The scheme will pay off on narro
 * the regression check's second direction, every moved case relying on a declared feature,
   which needs reliance read from the probe's output, not only from records;
 * splitting a feature when a validation shows it over-including.
+
+### Agreed with beqdesigner, 25 October 2026
+
+Both users agreed the following, and beqforge built it before 0.2.12:
+
+* **The score is an estimated probability of moving**, measured, so a caller can sum scores
+  into expected movers above any cut-off. Changes combine as independent, 1 − ∏(1 − p). A
+  `behaviour` or `all` touch declares its `basis`, per outcome class [moved, measured], and its
+  score is their ratio. Each `changes` item in the response carries that `basis` and `moved`,
+  beqforge's own definition (`impact.MOVED`, counted by `tools/impact.py moved`).
+* **A threshold is scored exactly from the record, or not at all.** Every verdict records each
+  check's figure against its bar (`Verdict.margins`), and every candidate records each fit
+  `_choose_fit` had, with its margins and lift (`Candidate.fit_options`). A threshold scores
+  `will_move` when it flips a verdict that decides the answer: the winner's, a fit judged
+  before the kept one, or a decline's candidate that failed only that check. It's `unaffected`
+  when it flips none. It's `unknown` (`no_figure`) when the record predates margins, or when a
+  losing candidate would start passing, since the record can't rank it. The invented "near"
+  scores are gone. Margins change no answer: rejudge probe unchanged at `--tol 0` (11 of 11)
+  and refit probe unchanged against cd48850 (0 of 54 titles moved).
+* **`unknown_reason`** on each unknown result: not_found, unreadable, outside_root,
+  not_a_record, unknown_build (the library's 70 pre-design-version records), older_than_data,
+  other_settings, newer_version, no_figure.
+* **Verification before a cut-off** (beqdesigner's step 4): after 0.2.12 ships, beqdesigner
+  redesigns 105 titles that neither side has measured, drawn with a fixed seed and interleaved
+  so any prefix is proportional: 35 possible at 0.47, 60 possible at 0.13, and 10 unaffected.
+  The list is `/media/beq/triage/impact-step4-sample.json`. The person picks the cut-off for the
+  rest of the library from the measured rates, and the counts are folded back into
+  `impact.toml`, which changes scores but no design.
