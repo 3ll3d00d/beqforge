@@ -273,6 +273,19 @@ settings as `design_settings_detail`, for reading when two designers disagree. A
 each title on (`design_version`, `design_settings`) to tell which titles a new release would
 answer differently.
 
+**Which designs a new version may move (contract 1.6).** Each response's `run_record` names its
+run record relative to the shared root. With `--shared-root`, `POST /impact` takes up to 500 of
+those paths and answers, for each, how likely a design of the same request by this server is to
+differ from the one the record holds: `will_move`, `likely`, `possible`, `unaffected` or
+`unknown`, with a score and the reasons. `/health` reports `"impact": true` when it answers. It
+is advisory: a person decides what to redesign. The answer comes from `beqforge/impact.toml`,
+where each design version declares what it changed and how much that moved in its regression
+check, and from what each record shows the design relied on (`beqforge/impact.py`). A record
+from before 0.2.11, which doesn't carry its identity, is recognised by the release that wrote
+it (0.2.6 on); one older than the impact data (design version 6) or designed under other
+settings is `unknown`. `beqforge impact rank RECORD...` gives the same answer for local
+records.
+
 ### Running the designer in a container
 
 `ghcr.io/3ll3d00d/beqforge-designer:<version>` runs `beqforge serve-designer` for a beqdesigner

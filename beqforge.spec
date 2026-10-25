@@ -46,7 +46,12 @@ a = Analysis(
     ["beqforge/cli.py"],
     pathex=[],
     binaries=[],
-    datas=[(str(_stamp), "beqforge"), (str(_digests), "beqforge")],
+    # impact.toml: which designs each design version may move, read by `POST /impact`
+    datas=[
+        (str(_stamp), "beqforge"),
+        (str(_digests), "beqforge"),
+        ("beqforge/impact.toml", "beqforge"),
+    ],
     hiddenimports=list(_SUBCOMMANDS.values()),
     hookspath=[],
     hooksconfig={},

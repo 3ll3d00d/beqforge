@@ -29,10 +29,10 @@ answers each in `adjustment_outcomes` (`beqforge.adjustments`, `plans/contract-1
 this request's parameters only, after the settings digest (which describes the server, not the request); a request
 without them is untouched, so its answer is the 1.4 answer.
 
-1.6 (drafted with beqdesigner, `plans/redesign-scope.md`; not yet in the contract, and additive):
-`run_record` on every response names its run record relative to the shared root, so a caller can
-hand it back to `/impact` without parsing commentary. Records are named per request and design
-version and carry the identity themselves, so a redesign no longer overwrites the last one.
+1.6 (additive): `run_record` on every response names its run record relative to the shared root,
+so a caller can hand it back to `POST /impact` without parsing commentary. Records are named per
+request and design version and carry the identity themselves, so a redesign no longer
+overwrites the last one. `/impact` itself is `beqforge.impact` (`plans/redesign-scope.md`).
 
 The whole file exists because this repo already does the work the contract asks for — the
 mapping is almost entirely "read the field off `Report`/`Candidate`/`Verdict` that already
@@ -74,7 +74,7 @@ from beqforge.reference import array_from_reference
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.5"
+CONTRACT_VERSION = "1.6"
 """The version this module implements. Responses echo the request's own version instead."""
 
 DESIGN_VERSION = 7

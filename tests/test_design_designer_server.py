@@ -16,6 +16,7 @@ recipe `beqforge.harness.evidence_cases` uses for its own validated positives.
 """
 
 import base64
+import gzip
 import http.client
 import json
 import logging
@@ -172,7 +173,7 @@ def test_health_check(server) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.5",
+        "contract_version": "1.6",
         "shared_root": False,
         "parallel": 1,
         "record_dir": None,
@@ -540,7 +541,7 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
     assert status == 200
     assert body == {
         "status": "ok",
-        "contract_version": "1.5",
+        "contract_version": "1.6",
         "shared_root": True,
         "parallel": 1,
         "record_dir": None,
@@ -548,7 +549,64 @@ def test_health_says_whether_references_are_accepted(tmp_path) -> None:
         **_identity(PipelineParams(strategies=("flatten",))),
         "designer_release": __version__,
         "adjustment_kinds": kinds_for(PipelineParams(strategies=("flatten",))),
+        # 1.6: only a server with a shared root can read records under it
+        "impact": True,
     }
+
+
+def test_impact_over_a_real_connection(tmp_path) -> None:
+    """1.6: the server's own identity, a record under its root, one result per record."""
+    params = PipelineParams(strategies=("flatten",))
+    (tmp_path / "records").mkdir()
+    with gzip.open(tmp_path / "records" / "a.run.json.gz", "wt", encoding="utf-8") as f:
+        json.dump(
+            {
+                "fingerprint": {"schema": 1, "revision": "x", "params": ""},
+                "design_identity": {
+                    "design_version": DESIGN_VERSION,
+                    "design_settings": design_settings_digest(params),
+                },
+                "candidates": [],
+                "accepted": None,
+            },
+            f,
+        )
+    httpd, thread = _serve(params, None, tmp_path)
+    try:
+        status, body = _request(
+            httpd.server_address,
+            "POST",
+            "/impact",
+            {
+                "contract_version": "1.6",
+                "records": [
+                    {"id": "a", "path": "records/a.run.json.gz"},
+                    {"id": "b", "path": "records/b.run.json.gz"},
+                ],
+            },
+        )
+        malformed, _ = _request(httpd.server_address, "POST", "/impact", b"{")
+    finally:
+        _stop(httpd, thread)
+    assert status == 200
+    assert body["design_version"] == DESIGN_VERSION
+    assert body["design_settings"] == design_settings_digest(params)
+    assert [(r["id"], r["tier"]) for r in body["results"]] == [
+        ("a", "unaffected"),
+        ("b", "unknown"),
+    ]
+    assert malformed == 400
+
+
+def test_impact_without_a_shared_root_is_422(server) -> None:
+    status, body = _request(
+        server,
+        "POST",
+        "/impact",
+        {"contract_version": "1.6", "records": [{"id": "a", "path": "x"}]},
+    )
+    assert status == 422
+    assert body["reason"] == "no shared root is configured on this designer"
 
 
 def test_a_request_by_reference_answers_as_the_same_request_inline(tmp_path) -> None:

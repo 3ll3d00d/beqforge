@@ -1,6 +1,6 @@
 # Say which titles a change is likely to move (TODO 34)
 
-Proposal, not built. 23 October 2026; revised 24 October 2026.
+Proposal 23 October 2026, revised 24 October; built 25 October 2026 as contract 1.6's `POST /impact` (see [Outcome](#outcome)).
 
 ## The problem
 
@@ -138,3 +138,78 @@ ready, whatever the regression check says.
   ranking honest when that happens, but the list will be long for such changes.
 * **Settings.** A change to the server settings digest (`design_settings`) is outside this
   scheme and stays a full redesign.
+
+## Outcome
+
+Built 25 October 2026, in the shape above with these decisions:
+
+* **The catalogue** is 37 features in `beqforge/impact.py` (`FEATURES`): 31 that can change an
+  answer, across analysis, targets, the fit, the judge's checks, selection, the response and
+  adjustments, and 6 that can't (identity, record, cache, reporting, validation, impact). Each
+  owns its code as `module:qualname` globs. A test fails if any function, class field or module
+  constant under `beqforge/` or `beq_common/` (1,119 today) has no owner, so the map can't fall
+  out of date.
+* **Changed code is found by its syntax tree, not by diff hunks.** `tools/impact.py check BASE
+  [HEAD]` compares each definition's AST with docstrings removed, so a docstring or comment
+  edit is not a change. It fails on a changed definition no feature owns, and, when the design
+  version moved, on an answer-reaching feature the new version's changes in `impact.toml`
+  don't declare. It is regression step 5 in `beqforge/AGENTS.md`. On version 7's commit range
+  it names `fit.choice`, plus `fit.input`, `selection` and `judge.verification` for the
+  plumbing, declared `unchanged` with how that was shown.
+* **Reliance is read per outcome class** for now. Four classes, from what every record holds:
+  declined before any fit, declined after it, designed with some candidate failing, designed
+  with all passing. A behaviour change's degree is the share of each class that moved.
+  Strategy and check features also say which candidate they reached. No reader returns a
+  threshold margin yet, so a threshold change makes every reliant record `unknown`: it
+  fails safe, and margins are the next step (the `reliance` record section above).
+* **Old records are identified by the release that wrote them.** Before 0.2.11 a record didn't
+  carry its identity. `impact.toml`'s release table matches its fingerprint's revision: a frozen
+  build by commit, anything else by source digest, since an image or wheel has no git. The
+  settings digest is recomputed from the record's params repr, parsed as literals, never
+  evaluated. 1,284 of the library's 1,354 records are 0.2.10's (728 from the Windows build, 556
+  from the image), so the current library can be scored. The other 70 predate design versions
+  and are `unknown`. `impact.toml` scores records from version 6 on (`since`).
+* **The endpoint** is `POST /impact` on the designer server, on the handler's thread. `/health`
+  reports `"impact": true` with a shared root. `CONTRACT_VERSION` is 1.6. 500 library records
+  are scored in 15 s over the share. `/health` and `/impact`'s request and response validate
+  against beqdesigner's 1.6 schemas.
+
+**Version 7's degree, measured on the library.** v6 records were rerun on one machine at
+117575c (version 6) and at 1600ae2 (version 7), from requests identical to the library's.
+A record moved if it swapped between designed and declined, changed strategy, or its cascade
+moved by more than 1 dB at 5-50 Hz. The v6 rerun reproduced the library's own records on 57 of
+58 titles (Blazing Saddles declined here where the library designed it), so machine noise is
+small against these shares.
+
+| Class (library count) | Measured | Moved |
+| --- | --- | --- |
+| declined after the fit (34) | all 34 | 18 (13 of row 35's 14, 5 of the other 20) |
+| designed, some candidate failing (349) | 15 at random | 7 |
+| designed, all passing (668) | 15 at random | 2 |
+| declined before any fit (236) | 8 at random | 0 |
+
+Two signs that the movers are real changes: the declined titles that moved are row 31's group 3
+and near misses (Amy, Bugonia, Return to Seoul, The Exorcist, Bill & Ted's Excellent
+Adventure), and the designed ones moved 1.2-3.4 dB or changed strategy. Nothing in the record
+separated the movers inside a class. Declines that missed one check moved 15 of 26 times,
+against 3 of 8 for several. That's too few to justify a finer reader.
+
+**Does it pass this plan's own bar?** For version 7, no. The likely tier (the 34 post-fit
+declines) holds 18 of the sample's 27 movers. The rest are in `possible`, at 0.47 and 0.13.
+What the scheme does show:
+
+* The 236 analysis declines are `unaffected`, correctly: none of the 8 measured moved, and none
+  reaches the fit.
+* The ranking holds. Redesigning by score, the first 383 records (likely, then designed with
+  failures, 30% of the library) hold about 182 of the roughly 270 expected to move.
+
+A change like row 32, which re-rolls the fit itself, can't be narrowed further by outcome
+class. That's the "all" case this plan foresaw. The scheme will pay off on narrower changes
+(a threshold with margins, a strategy-specific fix) and as the fit becomes stable.
+
+**Left:**
+
+* threshold margins in the record (the `reliance` section), as their own design version;
+* the regression check's second direction, every moved case relying on a declared feature,
+  which needs reliance read from the probe's output, not only from records;
+* splitting a feature when a validation shows it over-including.

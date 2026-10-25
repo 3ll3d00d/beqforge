@@ -1,0 +1,87 @@
+# Which designs a designer upgrade may move (TODO 34; designer-interface.md 1.6 §7.1, "Impact").
+#
+# `beqforge/impact.py` reads this. Two tables:
+#
+# * [[release]]: how to recognise a record written before records carried their own design
+#   identity (0.2.11), by the revision in its fingerprint. A frozen build is matched by its
+#   commit, anything else by its source digest (`record._source_digest`), since a wheel or an
+#   image has no git checkout. Releases older than `since` are listed so a record from one says
+#   which version it was designed at; it is still `unknown`.
+# * [[change]]: one entry per answer-changing design version, naming every feature whose code
+#   it changed (`tools/impact.py check` enforces that from the diff) and, for each, the kind of
+#   change and its degree:
+#   - "behaviour": the share of records of each reliance class that moved in the regression
+#     check (`degree`, by class; `impact.OUTCOMES` names the classes);
+#   - "threshold": the old and new values; a record's recorded figure between them will move;
+#   - "all": reaches every design that relies on the feature (at least `likely`);
+#   - "unchanged": the code changed but the answers it computes did not (say how that was shown).
+
+# The oldest design version this file can score a record from: every change after it is below.
+since = 6
+
+[[release]]
+version = "0.2.6"
+design_version = 4
+commit = "9f06a87a780a"
+sources = ["e9e5f0d71dfe"]
+
+[[release]]
+version = "0.2.7"
+design_version = 4
+commit = "d1e6de9d277f"
+sources = ["a65ff93e81a6"]
+
+[[release]]
+version = "0.2.8"
+design_version = 4
+commit = "4dc72b380341"
+sources = ["f0942c51c929"]
+
+[[release]]
+version = "0.2.9"
+design_version = 5
+commit = "485765698186"
+sources = ["26283322facb"]
+
+[[release]]
+version = "0.2.10"
+design_version = 6
+commit = "517cc6930fd6"
+sources = ["77edc1b4dc54"]
+
+[[release]]
+version = "0.2.11"
+design_version = 6
+commit = "117575c8904b"
+sources = ["1c88a85cbb71"]
+
+[[change]]
+id = "fit-choice"
+design_version = 7
+summary = "among the fits within the fitter's residual bar of its answer, the first the judge passes is kept, fewest sections first (TODO 32)"
+evidence = "plans/library-review-improvements.md#row-32-choosing-among-near-equal-fits-25-october-2026-design_version-7"
+
+[[change.touches]]
+feature = "fit.choice"
+kind = "behaviour"
+# Measured on the library: v6 records rerun at version 6 and 7 on one machine (plans/redesign-
+# scope.md#outcome). A record moved if it swapped between designed and declined, changed strategy,
+# or its cascade moved by more than 1 dB at 5-50 Hz. declined_after_fit is every such title (18 of
+# 34); the designed classes are random samples (7 of 15, 2 of 15); no_fit 0 of 8, and it never
+# reaches the fit anyway.
+degree = { no_fit = 0.0, declined_after_fit = 0.53, designed_with_failures = 0.47, designed_all_passed = 0.13 }
+
+[[change.touches]]
+feature = "fit.input"
+kind = "unchanged"
+note = "`_fit_all` asks for the near-equal fits instead of one; the fit's input is unchanged"
+
+[[change.touches]]
+feature = "selection"
+kind = "unchanged"
+note = "`run` passes those fits to `_choose_fit`; ranking between strategies is unchanged"
+
+[[change.touches]]
+feature = "judge.verification"
+kind = "unchanged"
+note = "`_judge` can skip the clipping figure, which is never gated; rejudge probe unchanged at --tol 0"

@@ -14,6 +14,10 @@ Device realisation, which strategies run, and authored exclusions are server-wid
 (the wire request carries none of that — see `beqforge.designer.design`'s docstring); restart
 with different flags to change them. `GET /health` is a plain liveness check, not part of the
 contract.
+
+With a shared root, `POST /impact` (1.6, `beqforge.impact`) scores run records under it: how
+likely a design of the same request by this server is to differ from the one each holds. It
+reads records, so it runs on the request's own thread, never a design worker.
 """
 
 import argparse
@@ -54,7 +58,7 @@ from beqforge.designer import (  # noqa: E402
     validate_response,
 )
 from beq_common import __version__
-from beqforge import filters, record  # noqa: E402
+from beqforge import filters, impact, record  # noqa: E402
 from beqforge.adjustments import kinds_for  # noqa: E402
 from beqforge.accept import AcceptParams  # noqa: E402
 from beqforge.cache import DirStore, Store  # noqa: E402
@@ -65,6 +69,7 @@ from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
 logger = logging.getLogger(__name__)
 
 DESIGN_PATH = "/design"
+IMPACT_PATH = "/impact"
 
 MAX_WORKERS = 8
 """The most designs one server runs at once: the range beqdesigner accepts for an endpoint's
@@ -511,12 +516,21 @@ class _Handler(BaseHTTPRequestHandler):
                     "designer_release": __version__,
                     # 1.5: the adjustments this server takes, their defaults its own settings
                     "adjustment_kinds": kinds_for(self.server.settings.params),
+                    # 1.6: it scores records only under a shared root
+                    **(
+                        {"impact": True}
+                        if self.server.settings.shared_root is not None
+                        else {}
+                    ),
                 },
             )
             return
         self._respond(404, {"error": f"unknown path {self.path!r}"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == IMPACT_PATH:
+            self._impact()
+            return
         if self.path != DESIGN_PATH:
             self._respond(
                 404, {"error": f"unknown path {self.path!r}, expected {DESIGN_PATH!r}"}
@@ -544,6 +558,28 @@ class _Handler(BaseHTTPRequestHandler):
                 f"respond {time.perf_counter() - returned:.2f} s, "
                 f"queued {returned - read - timing['worker']:.2f} s"
             )
+
+    def _impact(self) -> None:
+        started = time.perf_counter()
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as malformed:
+            self._respond(400, {"error": f"malformed impact request: {malformed}"})
+            return
+        status, payload = impact.answer(
+            body, self.server.settings.shared_root, self.server.identity
+        )
+        self._respond(status, payload)
+        logger.info(
+            f"POST {IMPACT_PATH}: {status}, "
+            + (
+                f"{len(payload['results'])} record(s)"
+                if status == 200
+                else payload["error"]
+            )
+            + f" in {time.perf_counter() - started:.1f} s"
+        )
 
     def _respond(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
