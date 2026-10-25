@@ -589,6 +589,39 @@ class _Escalation:
 
     seconds: float = 0.0
     answer: tuple[list[BiquadSpec], float] | None = None
+    considered: list[tuple[list[BiquadSpec], float, bool, float]] = field(
+        default_factory=list
+    )
+    """`screened`'s entries and, with `near_db`, every other structure's fit at a count that came
+    within `near_db` of that count's best, screened the same way (TODO 32)."""
+
+    def near(self, near_db: float) -> list[tuple[list[BiquadSpec], float]]:
+        """Every fit within `near_db` of the answer's exposure, fewest sections first (TODO 32).
+
+        The fitter's answer is one of many near-equivalent optima, and which one it lands on
+        turns on digits nobody would defend: quantising the fit's input to 0.01 dB (TODO 28)
+        left the target of 14 library titles untouched and still swapped the fitted cascade for
+        another that was as good by this measure (worst-case error within 1 dB) and failed the
+        judge. These are the fits the fitter cannot tell apart, so the caller can choose among
+        them on what the judge checks. The answer is always among them; duplicates once
+        published are dropped.
+        """
+        answer = self.answer
+        exposure = next((e[3] for e in self.considered if e[0] is answer[0]), answer[1])
+        unique: dict[tuple, tuple[list[BiquadSpec], float, float]] = {}
+        for specs, residual, _, exposed in self.considered:
+            if not (math.isfinite(exposed) and exposed <= exposure + near_db):
+                continue
+            key = tuple(
+                (f.type, f.freq_hz, f.gain_db, f.q) for f in publication_filters(specs)
+            )
+            if key not in unique or specs is answer[0]:
+                unique[key] = (specs, residual, exposed)
+        ordered = sorted(unique.values(), key=lambda e: (len(e[0]), e[2]))
+        if not any(specs is answer[0] for specs, _, _ in ordered):
+            # an unstable or unbounded answer (`finish`'s last resort) is still offered
+            ordered.append((answer[0], answer[1], exposure))
+        return [(specs, residual) for specs, residual, _ in ordered]
 
     def settle(self, residual_target_db: float, max_sections: int) -> None:
         """Take the fewest sections that both publish and reach the target, if any yet do.
@@ -701,6 +734,78 @@ def fit_minimal_biquads_all(
     stop a target at the first publishable tier within the residual limit.
     Return results in request order for the proposal and verdict stages.
     """
+    return [
+        state.answer
+        for state in _settled(
+            requests,
+            freqs,
+            fs,
+            max_sections,
+            residual_target_db,
+            band_hz,
+            max_q,
+            max_gain_db,
+            realisation,
+            seeds,
+            min_contribution_db,
+            max_drift_db,
+            None,
+        )
+    ]
+
+
+def fit_near_equal_all(
+    requests: list[FitRequest],
+    freqs: np.ndarray,
+    fs: float,
+    max_sections: int,
+    residual_target_db: float,
+    near_db: float,
+    band_hz: tuple[float, float] | None = None,
+    max_q: float = 6.0,
+    max_gain_db: float = 30.0,
+    realisation: "Realisation | None" = None,
+    seeds: tuple[int, ...] = (0, 1, 2),
+    min_contribution_db: float = 1.0,
+    max_drift_db: float | None = None,
+) -> list[tuple[tuple[list[BiquadSpec], float], list[tuple[list[BiquadSpec], float]]]]:
+    """`fit_minimal_biquads_all`'s answer for each target, with every fit within `near_db` of
+    it (`_Escalation.near`), fewest sections first, for the caller to choose among (TODO 32)."""
+    return [
+        (state.answer, state.near(near_db))
+        for state in _settled(
+            requests,
+            freqs,
+            fs,
+            max_sections,
+            residual_target_db,
+            band_hz,
+            max_q,
+            max_gain_db,
+            realisation,
+            seeds,
+            min_contribution_db,
+            max_drift_db,
+            near_db,
+        )
+    ]
+
+
+def _settled(
+    requests: list[FitRequest],
+    freqs: np.ndarray,
+    fs: float,
+    max_sections: int,
+    residual_target_db: float,
+    band_hz: tuple[float, float] | None,
+    max_q: float,
+    max_gain_db: float,
+    realisation: "Realisation | None",
+    seeds: tuple[int, ...],
+    min_contribution_db: float,
+    max_drift_db: float | None,
+    near_db: float | None,
+) -> list["_Escalation"]:
     states = [_Escalation(_reproducible(request)) for request in requests]
     widest = len(requests) * max_sections * len(seeds)
     with _fit_pool(widest) as pool:
@@ -718,6 +823,7 @@ def fit_minimal_biquads_all(
             seeds,
             min_contribution_db,
             max_drift_db,
+            near_db,
         )
 
     for state in states:
@@ -728,7 +834,7 @@ def fit_minimal_biquads_all(
                 f"  {state.request.label}: {len(state.answer[0])} section(s) at "
                 f"{state.answer[1]:.3f} dB, {state.seconds:.0f} CPU-s"
             )
-    return [state.answer for state in states]
+    return states
 
 
 def _escalate(
@@ -745,6 +851,7 @@ def _escalate(
     seeds: tuple[int, ...],
     min_contribution_db: float,
     max_drift_db: float | None,
+    near_db: float | None = None,
 ) -> None:
     """Fit one group of section counts at a time, across every target not yet settled."""
     for group in _tiers(max_sections):
@@ -779,24 +886,34 @@ def _escalate(
         ):
             best = min(window, key=lambda r: r[1])
             state.seconds += sum(seconds for _, _, seconds in window)
-            specs, residual = _prune(
-                (best[0], best[1]),
-                state.request.target_db,
-                freqs,
-                fs,
-                band_hz,
-                min_contribution_db,
-            )
-            drift = _published_drift(specs, freqs, realisation, max_drift_db)
-            publishable = _within_drift(specs, residual, drift, max_drift_db)
-            state.screened.append(
-                (
+
+            def screen(result, state=state):
+                specs, residual = _prune(
+                    (result[0], result[1]),
+                    state.request.target_db,
+                    freqs,
+                    fs,
+                    band_hz,
+                    min_contribution_db,
+                )
+                drift = _published_drift(specs, freqs, realisation, max_drift_db)
+                publishable = _within_drift(specs, residual, drift, max_drift_db)
+                return (
                     specs,
                     residual,
                     publishable,
                     _exposure_db(residual, drift, publishable),
                 )
-            )
+
+            screened = screen(best)
+            state.screened.append(screened)
+            state.considered.append(screened)
+            if near_db is not None:
+                state.considered.extend(
+                    screen(result)
+                    for result in window
+                    if result is not best and result[1] <= best[1] + near_db
+                )
         for state in pending:
             state.settle(residual_target_db, max_sections)
 

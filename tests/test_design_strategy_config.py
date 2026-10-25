@@ -64,12 +64,14 @@ def test_nondefault_shared_settings_reach_both_fit_paths(monkeypatch):
     assert proposal.notes
     assert proposal.effective_params == repr(effective)
 
-    def fit_all(requests, grid, fs, budget, tolerance, **kwargs):
+    def fit_all(requests, grid, fs, budget, tolerance, near_db, **kwargs):
+        assert near_db == tolerance  # the fitter's own bar decides what is near-equal
         return [
-            fit(r.target_db, grid, fs, budget, tolerance, **kwargs) for r in requests
+            (fit(r.target_db, grid, fs, budget, tolerance, **kwargs), [])
+            for r in requests
         ]
 
-    monkeypatch.setattr(pipeline, "fit_minimal_biquads_all", fit_all)
+    monkeypatch.setattr(pipeline, "fit_near_equal_all", fit_all)
     pipeline._fit_all([replace(proposal, filters=None)], params)
     for _, budget, tolerance, kwargs in calls:
         assert budget == 2

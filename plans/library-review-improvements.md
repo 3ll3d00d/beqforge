@@ -514,3 +514,64 @@ which one it finds depends on digits nobody would defend. Seed, start or tie-bre
 reshuffle answers the same way. A fix would make the fitter choose among its optima on something
 meaningful, for example best-of-N starts by a coarse criterion. That's a research item for the
 backlog, not part of this row.
+
+### Row 32: choosing among near-equal fits (25 October 2026, `DESIGN_VERSION` 7)
+
+**What changed.** The fitter still searches as before (the same optimiser runs and cost
+evaluations on every protocol case), but it no longer hands back one cascade. Every result it
+screened whose exposure is within the residual bar (`residual_target_db`, 0.5 dB) of its answer's
+is kept, deduplicated by published filters and ordered fewest sections first, then by exposure,
+with the answer always among them (`filters.fit_near_equal_all`, `_Escalation.near`). The
+pipeline judges them in that order without headroom and keeps the first that passes, re-judged
+with headroom; a fit chosen this way says so in the candidate's target notes. If none passes, the
+fitter's own answer is judged as before (`pipeline._choose_fit`).
+
+An alternative may replace the answer only if it lifts by more than the goal tolerance (1.5 dB)
+somewhere in the correction band (`_lifts_beyond_goal`), the bar a target must clear to be
+proposed at all. Without that, a search over fits found designs nobody should publish: the band
+test `test_leaving_out_the_band_that_holds_the_rolloff_declines_and_says_so` accepted a 0.98 dB
+shelf. The judge itself has no such check (row 36).
+
+The research item proposed best of N perturbed inputs. This is cheaper (no extra fits) and asks
+the question that matters: when the arithmetic lands on one of several equally good optima, take
+one the judge passes rather than one it happens to fail.
+
+**Evidence** (scratch `t32/`; HEAD 117575c against the change, same machine):
+
+* Rejudge probe at `--tol 0`: 11 of 11 unchanged. The judge's default path does not move.
+* Refit probe against HEAD, 54 titles and variants: 31 moved, 11 winner changes. Two declines
+  become designs: Bugonia, both modes, by a one-section flatten within the bar of the
+  two-section answer, which passed extent where the answer did not (row 31's group 3). Every
+  other baseline winner stays within 1 dB of HEAD's cascade over 5-50 Hz (Caught Stealing and
+  Incredible Hulk parametric to flatten, 0.98 and 0.52 dB).
+* Stability, the point of the row: each side refitted with its fit input perturbed by up to
+  0.004 dB (`REFIT_PERTURB_DB`) and compared with itself unperturbed.
+
+  | | HEAD | change |
+  | --- | --- | --- |
+  | verdict flips | 36 | 33 |
+  | winner flips | 19 | 14 |
+  | designed and declined swapped | 1 | 0 |
+  | title-modes designed both times | 81 | 84 |
+  | of those, cascade moved > 1 dB (5-50 Hz) | 40 | 35 |
+  | of those, > 3 dB | 8 | 7 |
+
+  Better, not stable. What is left is mostly which *strategy* wins (flatten against a
+  counterfactual on the steep variants, 4-38 dB apart below the content edge), and the choice
+  among strategies is untouched.
+* Injected variants (`score_injected.py`, 43): accepted 22 to 22, median shortfall 0.65 to
+  0.35 dB. Black Bag LR4 35, row 32's worst case, goes from parametric at 15.8 dB shortfall
+  (3.4 dB peak) to flatten at 0.4 dB, and stays there under perturbation. Under perturbation
+  Black Bag BW12 30 still moves (flatten at 1.2 dB to counterfactual/25dB at 10.4 dB; on HEAD it
+  declined).
+* Protocol, seeds 101 and 947: every case unchanged (selection, false acceptances, recovery).
+* Corpus, seeds 1-9: gate PASS (gated negatives 0/45, upper bound 0.079); every negative family
+  0/9, `natural_droop` 5/9, `filtered` 7/9 as on HEAD. Three `filtered` winners swap, in both
+  directions (3: 1.18 to 1.37 dB RMS recovery; 7: 0.89 to 0.48; 9: 0.85 to 1.15), median
+  recovery 1.18 to 1.37 dB. The committed reference (an older build) already differs from HEAD
+  on two winners: this is the reshuffling row 32 describes, not a direction.
+* The library's v6 flips (row 35), rerun on the change from requests identical to the
+  library's: 13 of the 14 titles row 28 turned into declines design again. You've Got Mail still
+  declines: both candidates introduce cliffs (45 and 38 dB/oct against 31.5 in the input) and
+  no near-equal fit avoids them. All 17 titles that went from declined to designed in v6 still
+  design.

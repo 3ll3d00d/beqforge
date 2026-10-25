@@ -269,9 +269,9 @@ def test_section_placement_follows_the_target_not_a_fixed_ceiling(monkeypatch) -
 
     def spy(requests, *args, **kwargs):
         captured.append((requests, kwargs))
-        return [([], 0.0) for _ in requests]
+        return [(([], 0.0), [([], 0.0)]) for _ in requests]
 
-    monkeypatch.setattr(pipeline, "fit_minimal_biquads_all", spy)
+    monkeypatch.setattr(pipeline, "fit_near_equal_all", spy)
 
     # one low-frequency target, one that lives where the old ceiling was not
     low = np.where(DESIGN_GRID <= 20.0, 12.0, 0.0)
@@ -599,3 +599,76 @@ def test_a_low_end_within_the_goal_tolerance_is_left_alone(walled) -> None:
     assert report.accepted is None and not report.candidates
     assert report.blockers and "nothing worth correcting" in report.blockers[0]
     assert _decline_for_blockers(report.blockers)[0] == "within_goal_tolerance"
+
+
+class _Judged:
+    def __init__(self, passed: bool):
+        self.passed = passed
+
+
+def _choosing(passes: set[int]):
+    """A judge that passes the cascades of these lengths, logging what it was asked."""
+    import dataclasses
+
+    from beqforge.pipeline import Candidate
+
+    asked: list[tuple[int, bool]] = []
+
+    def judge(filters, error, measured):
+        asked.append((len(filters), measured))
+        stand_in = object.__new__(Candidate)
+        fields = {f.name: None for f in dataclasses.fields(Candidate)}
+        fields.update(
+            filters=filters,
+            target_notes=(),
+            verdict=_Judged(len(filters) in passes),
+        )
+        for name, value in fields.items():
+            object.__setattr__(stand_in, name, value)
+        return stand_in
+
+    return judge, asked
+
+
+def test_the_first_near_equal_fit_the_judge_passes_is_kept() -> None:
+    """TODO 32: the fitter's four-section answer fails, an equal two-section fit passes."""
+    from beqforge.pipeline import _choose_fit
+
+    two, four = [object()] * 2, [object()] * 4
+    judge, asked = _choosing({2})
+    kept = _choose_fit((four, 2.64), [(two, 2.64), (four, 2.64)], judge, lambda c: True)
+    assert kept.filters is two
+    assert asked == [(2, False), (2, True)]  # only the one kept is measured in full
+    assert "4-section answer" in kept.target_notes[-1]
+
+
+def test_with_nothing_passing_the_fitters_answer_is_reported() -> None:
+    from beqforge.pipeline import _choose_fit
+
+    two, four = [object()] * 2, [object()] * 4
+    judge, asked = _choosing(set())
+    kept = _choose_fit((four, 2.64), [(two, 2.64), (four, 2.64)], judge, lambda c: True)
+    assert kept.filters is four
+    assert asked[-1] == (4, True)
+    assert kept.target_notes == ()
+
+
+def test_a_lone_fit_is_judged_once() -> None:
+    from beqforge.pipeline import _choose_fit
+
+    four = [object()] * 4
+    judge, asked = _choosing({4})
+    kept = _choose_fit((four, 2.64), [(four, 2.64)], judge, lambda c: True)
+    assert kept.filters is four
+    assert asked == [(4, True)]
+
+
+def test_an_alternative_lifting_within_the_goal_tolerance_is_not_kept() -> None:
+    """A search over fits must not find a design the goal calls not worth making."""
+    from beqforge.pipeline import _choose_fit
+
+    one, three = [object()], [object()] * 3
+    judge, _ = _choosing({1})
+    options = [(one, 1.17), (three, 0.94)]
+    kept = _choose_fit((three, 0.94), options, judge, lambda c: False)
+    assert kept.filters is three

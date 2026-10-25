@@ -1,5 +1,5 @@
 {
- "design_version": 6,
+ "design_version": 7,
  "answers": {
   "no-channels": {
    "decline_reason": "channel_evidence_unavailable"
@@ -77,7 +77,7 @@
      "residual_at_hz": 17.325699468666283,
      "residual_direction": "over",
      "residual_rms_db": 0.3099329526979382,
-     "residual_within_tolerance": 0.8167438729904815,
+     "residual_within_tolerance": 0.8167438729904813,
      "residual_tolerance_db": 0.5
     }
    ]

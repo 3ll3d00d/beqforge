@@ -69,7 +69,7 @@ from beqforge.filters import (
     publication_filters,
     biquad_sos,
     correction_band_hz,
-    fit_minimal_biquads_all,
+    fit_near_equal_all,
     magnitude_db,
     unstable_sections,
 )
@@ -1592,19 +1592,24 @@ def overlift_allowance(
     return unfiltered.freqs[guard], bar - unfiltered.before_db[guard]
 
 
+FitOptions = tuple[tuple[list[BiquadSpec], float], list[tuple[list[BiquadSpec], float]]]
+"""The fitter's answer for one target, and every fit about as good, fewest sections first."""
+
+
 def _fit_all(
     proposals: list[Proposal],
     params: PipelineParams,
     ceiling: Ceiling | None = None,
-) -> list[tuple[list[BiquadSpec], float]]:
+) -> list[FitOptions]:
     """Fit all proposed targets under a shared section escalation.
 
     Derive each target's placement span from its active correction, expand the
-    scored band to cover those spans, and return the fitted cascades in order.
-    `ceiling` (`overlift_allowance`) bounds every fit's lift from above.
+    scored band to cover those spans, and return the fitted cascades in order, each with the
+    fits within `residual_target_db` of it (`_choose_fit`). `ceiling`
+    (`overlift_allowance`) bounds every fit's lift from above.
     """
     placements = _placements(proposals, params)
-    return fit_minimal_biquads_all(
+    return fit_near_equal_all(
         [
             FitRequest(p.target_db, placement, p.label, ceiling)
             for p, placement in zip(proposals, placements, strict=True)
@@ -1613,6 +1618,8 @@ def _fit_all(
         PUBLISH_FS,
         params.max_sections,
         params.residual_target_db,
+        # the fitter's own bar for "good enough": fits closer than it are ones it cannot rank
+        near_db=params.residual_target_db,
         band_hz=_fit_band_hz(placements, params),
         max_gain_db=params.max_gain_db,
         realisation=params.realisation,
@@ -2049,26 +2056,34 @@ def run(
     ceiling = evidence_ceiling if params.judge_from_content_edge else None
     for proposal in proposals:
         if proposal.filters is not None:
-            filters, error = proposal.filters, proposal.residual_db
+            answer = (proposal.filters, proposal.residual_db)
+            options = [answer]
         else:
-            filters, error = fitted[proposal.label]
+            answer, options = fitted[proposal.label]
+
+        def judge(filters, error, measured, proposal=proposal):
+            return _judge(
+                proposal.label,
+                filters,
+                proposal.target_db,
+                error,
+                material,
+                diagnosis,
+                params,
+                proposal.notes,
+                unpriced_target=proposal.unpriced_target_db,
+                method=proposal.method,
+                effective_params=proposal.effective_params,
+                judged_band=analysed.judged_band_hz,
+                ceiling_db=ceiling,
+                timings=timings,
+                measured=measured,
+            )
+
         with timings.stage(f"judge/{proposal.label}"):
             candidates.append(
-                _judge(
-                    proposal.label,
-                    filters,
-                    proposal.target_db,
-                    error,
-                    material,
-                    diagnosis,
-                    params,
-                    proposal.notes,
-                    unpriced_target=proposal.unpriced_target_db,
-                    method=proposal.method,
-                    effective_params=proposal.effective_params,
-                    judged_band=analysed.judged_band_hz,
-                    ceiling_db=ceiling,
-                    timings=timings,
+                _choose_fit(
+                    answer, options, judge, lambda c: _lifts_beyond_goal(c, params)
                 )
             )
         candidates[-1] = dataclasses.replace(
@@ -2286,6 +2301,66 @@ def _within_ceiling(
     )
 
 
+def _choose_fit(
+    answer: tuple[list[BiquadSpec], float],
+    options: list[tuple[list[BiquadSpec], float]],
+    judge,
+    worth,
+) -> Candidate:
+    """The first of `options` the judge passes, fewest sections first; else `answer` (TODO 32).
+
+    `options` are the fits within the fitter's own residual bar of its answer: it cannot tell
+    them apart, and which one it returns turns on digits nobody would defend. Row 28's 0.01 dB
+    quantisation of the fit's input left 14 library titles' targets untouched and swapped each
+    one's cascade for another as good by that measure that failed the judge, and the others
+    the same way the other way. Choosing among them by what the judge checks is choosing on
+    something meaningful, and the fewest sections first is the fitter's own preference
+    (`_Escalation.settle`). When none passes, the fitter's answer is what is reported, as
+    before. `judge(filters, error, measured)` judges one; each option is judged without
+    headroom, and only the one kept is measured in full.
+
+    An option other than the answer must also be `worth` keeping (`_lifts_beyond_goal`): lift
+    the judged band by more than the goal tolerance somewhere, the bar a target must clear to
+    be proposed at all (`_worth_correcting`), applied to what the cascade delivers. A search over options gives a
+    marginal title more chances to pass, and without it the one that did was a 0.98 dB shelf
+    that cleared the slot check on its own Q's overshoot, where every other fit of that ~1 dB
+    target failed it.
+    """
+    if len(options) > 1:
+        for filters, error in options:
+            judged = judge(filters, error, False)
+            if not judged.verdict.passed:
+                continue
+            if filters is not answer[0] and not worth(judged):
+                continue
+            kept = judge(filters, error, True)
+            if filters is answer[0]:
+                return kept
+            return dataclasses.replace(
+                kept,
+                target_notes=(
+                    *kept.target_notes,
+                    f"fit: {len(filters)} section(s) at {error:.2f} dB, one of "
+                    f"{len(options)} fits within the residual bar of the fitter's "
+                    f"{len(answer[0])}-section answer at {answer[1]:.2f} dB, which the "
+                    "judge does not pass",
+                ),
+            )
+    return judge(*answer, True)
+
+
+def _lifts_beyond_goal(candidate: Candidate, params: PipelineParams) -> bool:
+    """Whether the published cascade lifts the judged band by more than the goal tolerance."""
+    low, high = candidate.correction.band_hz
+    band = (DESIGN_GRID >= low) & (DESIGN_GRID <= high)
+    gain = magnitude_db(
+        biquad_sos(candidate.filters, PUBLISH_FS), DESIGN_GRID, PUBLISH_FS
+    )
+    return (
+        bool(band.any()) and float(np.max(gain[band])) > params.accept.goal_tolerance_db
+    )
+
+
 def _judge(
     label: str,
     filters: list[BiquadSpec],
@@ -2301,12 +2376,14 @@ def _judge(
     judged_band: tuple[float, float] | None = None,
     ceiling_db: np.ndarray | None = None,
     timings: Timings | None = None,
+    measured: bool = True,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
     Round its parameters, apply the quantised device response to the sub feed,
     measure headroom, then test the corrected curve against both the priced
-    target and material-based safeguards.
+    target and material-based safeguards. Unless `measured`, the clipping figure is skipped:
+    it is never gated, so the verdict is the same, and it is most of a judge's cost.
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
@@ -2330,8 +2407,18 @@ def _judge(
             reference_samples=material.mono_mix,
             playback_model=params.playback.description(),
         )
-    with timings.detail("judge.headroom"):
-        headroom = measure_headroom(material, filters, params, sub_samples=sub)
+    if measured:
+        with timings.detail("judge.headroom"):
+            headroom = measure_headroom(material, filters, params, sub_samples=sub)
+    else:
+        headroom = Headroom(
+            0.0,
+            None,
+            params.playback,
+            params.realisation,
+            float(material.fs),
+            "not measured: a fit judged only to choose among near-equal ones",
+        )
     with timings.detail("judge.assess"):
         verdict = assess(
             filters,

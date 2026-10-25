@@ -38,18 +38,21 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from beqforge import filters  # noqa: E402
 from beqforge import pipeline, record  # noqa: E402
-from beqforge.filters import publication_filters  # noqa: E402
 from beqforge.material import load  # noqa: E402
 from beqforge.pipeline import (  # noqa: E402
     Headroom,
     PipelineParams,
     Report,
+    _choose_fit,
     _fit_all,
     _judge,
+    _lifts_beyond_goal,
     analyse,
     contrast_ceiling_db,
     overlift_allowance,
@@ -107,6 +110,12 @@ def snapshot_title(path: str) -> dict:
 def _snapshot_title(material_path: Path) -> dict:
     logging.disable(logging.WARNING)
     filters.PARALLEL_FITS = False
+    perturb = float(os.environ.get("REFIT_PERTURB_DB", "0"))
+    if perturb:
+        # another machine's arithmetic, in effect: every target a few thousandths of a dB off
+        # before it is quantised, so the spread under it is the fit's stability (TODO 32)
+        quantised = filters._quantised
+        filters._quantised = lambda values: quantised(np.asarray(values) + perturb)
     pipeline.measure_headroom = _no_headroom
     material = load(material_path)
     cache_path = material_path.with_suffix(".cache.json.gz")
@@ -137,34 +146,45 @@ def _snapshot_title(material_path: Path) -> dict:
     candidates = []
     for proposal in proposals:
         if proposal.filters is not None:
-            cascade, error = proposal.filters, proposal.residual_db
+            answer = (proposal.filters, proposal.residual_db)
+            options = [answer]
         else:
-            cascade, error = fitted[proposal.label]
-        entry = {
-            "label": proposal.label,
-            "filters": [_spec(s) for s in publication_filters(cascade)],
-            "fit_error_db": error,
-        }
+            answer, options = fitted[proposal.label]
+        entry = {"label": proposal.label}
         for mode in MODES:
             run = analysed[mode]
-            candidate = _judge(
-                proposal.label,
-                cascade,
-                proposal.target_db,
-                error,
-                material,
-                run.diagnosis,
-                run.params,
-                proposal.notes,
-                unpriced_target=proposal.unpriced_target_db,
-                method=proposal.method,
-                judged_band=run.judged_band_hz,
-                ceiling_db=(
-                    contrast_ceiling_db(run.envelopes, run.params)
-                    if run.params.judge_from_content_edge
-                    else None
-                ),
+
+            def judge(cascade, error, measured, run=run, proposal=proposal):
+                return _judge(
+                    proposal.label,
+                    cascade,
+                    proposal.target_db,
+                    error,
+                    material,
+                    run.diagnosis,
+                    run.params,
+                    proposal.notes,
+                    unpriced_target=proposal.unpriced_target_db,
+                    method=proposal.method,
+                    judged_band=run.judged_band_hz,
+                    ceiling_db=(
+                        contrast_ceiling_db(run.envelopes, run.params)
+                        if run.params.judge_from_content_edge
+                        else None
+                    ),
+                    measured=measured,
+                )
+
+            # the pipeline's choice among near-equal fits, which the judging mode can change
+            candidate = _choose_fit(
+                answer,
+                options,
+                judge,
+                lambda c, run=run: _lifts_beyond_goal(c, run.params),
             )
+            if mode == "default":
+                entry["filters"] = [_spec(s) for s in candidate.filters]
+                entry["fit_error_db"] = candidate.fit_error_db
             entry[mode] = {
                 "passed": bool(candidate.verdict.passed),
                 "failures": list(candidate.verdict.failures),

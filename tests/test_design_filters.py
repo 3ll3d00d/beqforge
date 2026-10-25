@@ -834,3 +834,35 @@ def test_a_last_digit_difference_in_the_target_publishes_the_same_cascade() -> N
     here = F.fit_minimal_biquads(target, freqs, 96000.0, 2, 0.5, **kwargs)
     there = F.fit_minimal_biquads(target + nudge, freqs, 96000.0, 2, 0.5, **kwargs)
     assert here == there
+
+
+def _section(freq_hz: float, gain_db: float = 3.0) -> BiquadSpec:
+    return BiquadSpec("peaking_eq", freq_hz, gain_db, 1.0)
+
+
+def test_the_near_equal_fits_are_those_within_the_bar_fewest_sections_first():
+    """TODO 32: the fits the fitter cannot rank, for its caller to choose among."""
+    four = [_section(20.0), _section(30.0), _section(40.0), _section(50.0)]
+    two = [_section(25.0), _section(45.0)]
+    three = [_section(22.0), _section(33.0), _section(44.0)]
+    far = [_section(60.0)]
+    state = F._Escalation(F.FitRequest(np.zeros(8)))
+    state.considered = [
+        (far, 3.5, True, 3.5),  # 0.86 dB worse than the answer: one it can rank
+        (two, 2.64, True, 2.64),
+        (three, 2.70, False, 5.1),  # charged for its drift, so not near
+        (four, 2.64, True, 2.64),
+        (list(two), 2.64, True, 2.64),  # the same cascade again once published
+    ]
+    state.answer = (four, 2.64)
+    options = state.near(0.5)
+    assert [len(specs) for specs, _ in options] == [2, 4]
+    assert any(specs is four for specs, _ in options)
+
+
+def test_an_answer_outside_every_bound_is_still_offered():
+    unstable = [_section(20.0)]
+    state = F._Escalation(F.FitRequest(np.zeros(8)))
+    state.considered = [(unstable, 1.0, False, math.inf)]
+    state.answer = (unstable, 1.0)
+    assert state.near(0.5) == [(unstable, 1.0)]

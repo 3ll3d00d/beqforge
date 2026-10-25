@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "1.5"
 """The version this module implements. Responses echo the request's own version instead."""
 
-DESIGN_VERSION = 6
+DESIGN_VERSION = 7
 """Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
 `rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
 
@@ -99,7 +99,9 @@ to 0.01 dB (TODO 28), builds the sub feed from the request's `bass_management` i
 reading only its crossover, which moves `gain_reduction_db` (TODO 1), and keeps a passband whose
 knee lands under 10 Hz as the reference (TODO 31). 0.2.11 is 6 too: it keeps the share within
 tolerance in [0, 1] (a last-digit difference, not an answer change) and only renames run records
-(TODO 35). `plans/design-version.md` has each one's build."""
+(TODO 35). 0.2.12 is 7: among the fits within the fitter's residual bar of its answer it keeps
+the first the judge passes, fewest sections first, instead of whichever the arithmetic landed on
+(TODO 32). `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]
