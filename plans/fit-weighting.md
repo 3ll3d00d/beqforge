@@ -1,7 +1,9 @@
 # Weighting the fit's error by frequency (TODO 37)
 
-Tried 25 October 2026 on design version 8 (`4e9e539`); neither variant adopted. The code is on
-branch `experiment-fit-weighting` (`5753a14`, variant B).
+Tried 25 October 2026 on design version 8 (`4e9e539`). A and B fail; C works and is held back
+behind TODO 36, so 0.3.0 ships version 8 without it. The code is on branches
+`experiment-fit-weighting` (`5753a14`, variant B) and `experiment-fit-weighting-search`
+(`bcd6195`, variant C).
 
 ## Why
 
@@ -66,11 +68,37 @@ first (TODO 32). So a single shelf 3.6 dB off at 5-10 Hz, and worse at 30-40 Hz,
 two-section fit and wins on section count. The weight works on the search; the bars built on the
 error turn it into fewer sections rather than a better top of the band.
 
+## Variant C: weight the search only
+
+B's weight (f/40 Hz, 0.25 to 1), used only by the search: differential evolution and the
+polish. The residual a fit returns, the 0.5 dB bar, the near-equal window and pruning are back
+on the flat error. Same runs as A and B.
+
+* **Where the error goes:** across the 225 candidates, median worst error 1.09 to 1.47 dB at
+  5-10 Hz, 1.16 to 1.40 at 10-20, 1.05 to 0.76 at 20-30, 1.01 to 0.58 at 30-50 and 0.64 to 0.39
+  above 50. Mean sections 2.56 to 2.63.
+* **The winners keep it,** unlike B. Over the 31 designed titles and variants, median worst
+  error at 30-40 Hz 1.11 to 0.63 dB, at 40-60 Hz 0.86 to 0.65, at 5-10 Hz 1.05 to 1.65 (inside
+  the 2 dB line). Among the real titles, the top of the band improves on six (28 Years Later
+  0.85 to 0.77 at 30-40 Hz, Alto Knights 0.52 to 0.34, Caught Stealing 0.70 to 0.52, Send Help
+  0.59 to 0.34) and gets worse on Obsession (0.46 to 0.63) and Safe House (0.84 to 1.01).
+* **Decisions:** no real title's winner changed. Default mode: 11 verdicts pass to fail, 9 to
+  pass, 9 winners, one swap (Incredible_Hulk__BW16_30__n80 designs again). Protocol unchanged on
+  both seeds. Corpus gate 0/45, unchanged; filtered 7/9, median recovery 1.37 to 0.85 dB RMS.
+  One real-title candidate gains slot failures (Incredible Hulk's parametric, four sections; not
+  the winner).
+* **Why it is held back:** the suite's band-exclusion test (`test_design_adjustments.py`,
+  10-18 Hz left out of the synthetic rolloff title) now designs where it declined. The target
+  asks for about 2 dB, and C's fit, three shelves at 18.9-20.7 Hz netting about 1 dB, passes the
+  judge with no objections. Version 8's fit for it happened to fail. The judge has no rule
+  against a design within the goal tolerance: `_lifts_beyond_goal` gates only the alternatives
+  to the fitter's answer, never the answer itself. That is TODO 36, so C goes in with a rule for
+  it, validated together as one decision change.
+
 ## What could still work
 
 Not measured:
 
-* weight only the search's objective, and keep the residual bar, the near-equal window and
-  pruning on the flat error;
-* keep the weight, but hold the near-equal window in flat dB, or narrow it by the weight;
+* keep the weight on the bars, but hold the near-equal window in flat dB, or narrow it by the
+  weight;
 * a gentler slope: a floor of 0.5 rather than 0.25 below 10 Hz.
