@@ -1,7 +1,7 @@
 # A faster fit for 0.3: the population-vectorised cost (TODO 23)
 
 Measured 25 October 2026 on `a20ed8c` (0.2.12, design version 7); built the same day as design
-version 8, unreleased, for 0.3.0. See [Outcome](#outcome).
+version 8, released in 0.3.0. See [Outcome](#outcome).
 
 ## Where a title's time goes now
 
@@ -174,7 +174,7 @@ passes. Windows and macOS are CI's.
 **Impact basis** (`impact.toml`, `fit.search`): from the refit probe's default mode, by
 `impact.MOVED`: no_fit 0/1, declined_after_fit 0/21, designed_with_failures 14/18,
 designed_all_passed 2/14 (13/18 and 2/14 by the flat 1 dB line it replaced). Not a library sample: 43 of the 54 are injected variants, and every
-declined_after_fit case is one. Measure a library sample before 0.3.0 is released and replace it,
+declined_after_fit case is one. 0.3.0 shipped with it; measure a library sample and replace it in 0.3.1,
 as version 7's basis was.
 
 **Left for later** (TODO 23): reuse of repeated numerical identities, the ~9 s a title outside the

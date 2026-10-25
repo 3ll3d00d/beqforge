@@ -126,7 +126,7 @@ adjustments (0.2.9) did not bump it: a request without adjustments gets the same
 and honours the request's bass management ([TODO 1](playback-contract.md#outcome)) (TODO 28, [outcome](library-review-improvements.md#built-a-reproducible-fit-input-22-october-2026-design_version-6)).
 6 shipped in 0.2.10 and 0.2.11. 7 (0.2.12) chooses among the fits within the fitter's residual bar
 by the judge, fewest sections first (TODO 32, [outcome](library-review-improvements.md#row-32-choosing-among-near-equal-fits-25-october-2026-design_version-7)).
-8 (unreleased, for 0.3.0) scores the fit's search a generation at a time in the linear domain
+8 (0.3.0) scores the fit's search a generation at a time in the linear domain
 (TODO 23, [outcome](fit-kernel.md#outcome)).
 
 ### Correction after the v0.2.6 release tests
