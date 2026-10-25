@@ -12,7 +12,7 @@ beqforge-device-check = "beqforge_device_check.cli:main"
 beqoptimiser = "beqoptimiser.cli:main"
 
 [project.optional-dependencies]
-designer = ["scipy>=1.16.3", "matplotlib>=3.10.8"]
+designer = ["scipy>=1.16.3", "matplotlib>=3.10.8", "numba>=0.68.0"]
 optimiser = ["scipy>=1.16.3"]
 device-check = [
     "scipy>=1.16.3",
@@ -24,6 +24,7 @@ device-check = [
 all = [
     "scipy>=1.16.3",
     "matplotlib>=3.10.8",
+    "numba>=0.68.0",
     "pyfar==0.8.1",
     "sounddevice==0.5.6",
     "websocket-client==1.9.2",

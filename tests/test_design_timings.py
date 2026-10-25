@@ -57,7 +57,9 @@ def test_the_record_carries_the_accounting(monkeypatch, tmp_path):
         "optimiser_runs",
         "worker_seconds",
         "cost_evaluations",
+        "kernel",
     }
+    assert timings["fit"]["kernel"] in ("numba", "numpy")
     assert "judge.verify" in timings["details"]
 
 

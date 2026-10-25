@@ -269,7 +269,17 @@ def main() -> int:
             print("FAIL: the repeat request answered differently", file=sys.stderr)
             return 1
         with gzip.open(written, "rt", encoding="utf-8") as handle:
-            stages_run = [name for name, _ in json.load(handle)["timings"]["stages"]]
+            timings = json.load(handle)["timings"]
+        stages_run = [name for name, _ in timings["stages"]]
+        # numba falls back to numpy silently and with the same answer, so a frozen build that
+        # failed to bundle it would pass everything above and only be several times slower
+        if timings["fit"].get("kernel") != "numba":
+            print(
+                f"FAIL: the fit ran on the {timings['fit'].get('kernel')!r} kernel, "
+                "not numba: the executable did not bundle it",
+                file=sys.stderr,
+            )
+            return 1
         if "analysis/cached" not in stages_run:
             print(
                 f"FAIL: the repeat request did not reuse the analysis: {stages_run}",

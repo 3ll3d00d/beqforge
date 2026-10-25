@@ -34,6 +34,7 @@ from beqforge import (
     PolePair,
 )
 from beqforge.biquad import HighShelf, LowShelf, PeakingEQ
+from beqforge.fit_kernel import PopulationCost, kernel_name
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,8 @@ class FitStats:
         per = self.seconds / self.calls if self.calls else 0.0
         return (
             f"{self.calls} optimiser runs, {self.seconds:.1f} s "
-            f"({per:.1f} s each), {self.cost_evaluations:,} cost evaluations"
+            f"({per:.1f} s each), {self.cost_evaluations:,} cost evaluations, "
+            f"{kernel_name()} kernel"
         )
 
 
@@ -1230,8 +1232,9 @@ def _fit_structure(
 ) -> tuple[list[BiquadSpec], float, float, int]:
     """Optimise one shelf/peak structure against worst target and device error.
 
-    Differential evolution searches frequency, Q and gain bounds; bounded
-    Nelder-Mead polishes the result. Return the fit and worker-local cost stats.
+    Differential evolution searches frequency, Q and gain bounds, scoring each generation at
+    once (`fit_kernel.PopulationCost`, TODO 23); bounded Nelder-Mead polishes the result on
+    the scalar cost. Return the fit and worker-local cost stats.
 
     With a `ceiling`, the realised cascade must not lift any of its frequencies above it: the
     judge's over-lift bar (`accept.overlift_bar_db`) guards down to the bottom of the design
@@ -1298,9 +1301,23 @@ def _fit_structure(
             return worst, float(np.max(lift))
         return worst, -math.inf
 
-    coarse = optimize.differential_evolution(
-        cost, bounds, seed=seed, maxiter=300, popsize=20, tol=1e-10, polish=True
+    # The search scores a whole generation per call (`fit_kernel`), so its members are updated
+    # together rather than one by one; the polish and the residual returned stay on `cost`.
+    population_cost = PopulationCost(
+        target_db, freqs, fs, shelves, peaks, mask, realisation, ceiling
     )
+    coarse = optimize.differential_evolution(
+        population_cost,
+        bounds,
+        seed=seed,
+        maxiter=300,
+        popsize=20,
+        tol=1e-10,
+        polish=False,
+        vectorized=True,
+        updating="deferred",
+    )
+    evaluations += population_cost.evaluations
     # Keep the polish inside the physical parameter bounds.
     fine = optimize.minimize(
         cost,
@@ -1309,7 +1326,7 @@ def _fit_structure(
         bounds=bounds,
         options={"maxiter": 60000, "maxfev": 60000, "xatol": 1e-10, "fatol": 1e-12},
     )
-    best = fine.x if fine.fun < coarse.fun else coarse.x
+    best = fine.x if fine.fun < cost(coarse.x) else coarse.x
     specs = _unpack(_published_parameters(best), shelves, peaks)
     return specs, max(score(best)), time.perf_counter() - started, evaluations
 

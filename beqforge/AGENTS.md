@@ -29,7 +29,8 @@ still holds: no other API, no other service, and the server is a thin transport 
 | `beqforge/rolloff.py` | The soft-hinge attenuation model and its fit. An identity for Butterworth and Linkwitz-Riley, so it *identifies* rather than approximates. |
 | `beqforge/identify.py` | Fits `E(f) = N(f) + A(f)` — separating the rolloff from the content it sits in. **The weakest link — on the path to a target only through the `parametric` strategy, which inverts what it identifies; diagnostic for everything else. See "Working on the designer" below.** |
 | `beqforge/design.py` | Inversion: noise ceiling, dials, protective filter, publishable cascade. |
-| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once and is about half of a run with the analysis cached (see "Performance"); `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
+| `beqforge/filters.py` | High-pass synthesis, the closed-form shelf inversion of §5, and the numerical fallback with its publishability constraints. The fit escalates the section budget across every target at once; its search is scored by `fit_kernel` and its polish and residual by the scalar cost here (see "Performance"); `_sos_from_parameters` is a second copy of the RBJ formulae, kept honest by a test. |
+| `beqforge/fit_kernel.py` | The fit's cost over a whole differential-evolution population, compared in the linear domain (TODO 23). numba when installed (the `designer` extra), numpy otherwise; numpy computes every coefficient and transcendental for both, so the two give the same bits (`tests/test_fit_kernel.py`) and an answer never depends on which is installed. A third copy of the RBJ formulae, pinned to the scalar cost by the same test file. The record's `timings.fit.kernel` says which ran; the executable smoke test fails on numpy. |
 | `beqforge/harness.py` | Synthetic ground truth — known-filter injection and constructed negatives. |
 | `beqforge/e10.py` | E10's synthetic families and scorer (`plans/E10-validation-protocol.md`): each case keeps its source (the programme before the recipe shaped it), recorded and observed programme and noise, and whether it needs a correction is computed per goal from the observed programme against its source; scored on the published response. `tools/e10_run.py` runs it, and `--rescore` scores a past run again from the filters its rows kept. Not on the production path. |
 | `beqforge/verify.py` | Applies a design and measures the corrected low end, **including the error the device's own coefficient rounding adds** — so what is judged is what will play. **The only check that can say a filter is wrong rather than merely inaccurate.** |
@@ -538,7 +539,8 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
   the pipeline (load, record). A cold run adds the analysis on top. The 29 September split
   (49/41/10) and the ~75% once quoted for the fitter are both out of date; see
   [plans/fit-kernel.md](../plans/fit-kernel.md). `FIT_STATS` reports the fitter's own cost
-  breakdown per run.
+  breakdown per run. On the fit kernel (design version 8) the same titles take 28 s and 37 CPU-s
+  a title: `fit` 10% of wall time, judging 32%, target construction 21%.
 * **Exact-preserving changes and accuracy-for-time trades must never be mixed in one commit.**
   A run that got faster and also moved is a run that says nothing about either. Validate an
   exact change by reproducing the *whole record* byte-for-byte except the fingerprint and
@@ -557,7 +559,9 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
   (non-smooth, costs more than it buys), and raising `max_sections` past 4 to rescue an
   abstaining title (tested on two titles with real headroom to gain; verdicts did not move and
   one title's wobble got worse, not better — the gap is in what the target asks for, not in the
-  section budget). `tol` is not a lever for the optimiser; `maxiter` is. `verify` itself costs
+  section budget). `tol` is not a lever for the optimiser; `maxiter` is. Offloading the fit to a GPU (it needs float64: device rounding is below float32's
+  resolution) and hand-written C++ in place of the numba kernel were assessed and not pursued;
+  see [plans/fit-kernel.md](../plans/fit-kernel.md). `verify` itself costs
   ~0.3 s and is not worth trading accuracy for.
 * A real bug that bit twice: `_fit_structure`'s Nelder-Mead polish must be given the same
   `bounds` as the search that seeded it, or the simplex can walk outside them into parameters

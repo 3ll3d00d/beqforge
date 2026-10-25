@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "1.6"
 """The version this module implements. Responses echo the request's own version instead."""
 
-DESIGN_VERSION = 7
+DESIGN_VERSION = 8
 """Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
 `rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
 
@@ -101,7 +101,9 @@ knee lands under 10 Hz as the reference (TODO 31). 0.2.11 is 6 too: it keeps the
 tolerance in [0, 1] (a last-digit difference, not an answer change) and only renames run records
 (TODO 35). 0.2.12 is 7: among the fits within the fitter's residual bar of its answer it keeps
 the first the judge passes, fewest sections first, instead of whichever the arithmetic landed on
-(TODO 32). `plans/design-version.md` has each one's build."""
+(TODO 32). 0.3.0 is 8: the fit's search scores a whole generation at once, in the linear
+domain (TODO 23), which re-rolls the fit among near-equal optima as any change to its
+arithmetic does. `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]

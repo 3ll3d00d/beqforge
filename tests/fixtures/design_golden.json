@@ -1,5 +1,5 @@
 {
- "design_version": 7,
+ "design_version": 8,
  "answers": {
   "no-channels": {
    "decline_reason": "channel_evidence_unavailable"
@@ -10,22 +10,28 @@
      "filters": [
       {
        "type": "low_shelf",
-       "freq_hz": 15.5,
-       "gain_db": -2.185,
-       "q": 4.8853
+       "freq_hz": 16.61,
+       "gain_db": -1.002,
+       "q": 3.1
       },
       {
-       "type": "low_shelf",
-       "freq_hz": 20.01,
-       "gain_db": 3.299,
-       "q": 2.3087
+       "type": "peaking_eq",
+       "freq_hz": 36.25,
+       "gain_db": -1.545,
+       "q": 1.2395
+      },
+      {
+       "type": "peaking_eq",
+       "freq_hz": 17.08,
+       "gain_db": 10.59,
+       "q": 4.964
       }
      ],
      "confidence": 0.9849892809890275,
-     "mv_adjust_db": 8.801940198274066,
+     "mv_adjust_db": 10.024547522224397,
      "method": "non_parametric",
      "gain_reduction_db": null,
-     "residual_db": 1.683857644735708,
+     "residual_db": 2.178249303086387,
      "residual_band_hz": [
       5.0,
       200.0
@@ -35,10 +41,10 @@
      "fc_uncertainty_hz": null,
      "slope_uncertainty": null,
      "channel_scope": null,
-     "residual_at_hz": 16.496360274885337,
+     "residual_at_hz": 10.739646783980985,
      "residual_direction": "under",
-     "residual_rms_db": 0.8527455013531584,
-     "residual_within_tolerance": 0.4494374659096406,
+     "residual_rms_db": 0.3749486802463372,
+     "residual_within_tolerance": 0.8950117459109243,
      "residual_tolerance_db": 0.5
     }
    ]
@@ -49,22 +55,22 @@
      "filters": [
       {
        "type": "low_shelf",
-       "freq_hz": 22.51,
-       "gain_db": 6.993,
-       "q": 0.5603
+       "freq_hz": 22.45,
+       "gain_db": 7.076,
+       "q": 0.5845
       },
       {
        "type": "low_shelf",
-       "freq_hz": 18.94,
-       "gain_db": 4.435,
-       "q": 2.1446
+       "freq_hz": 18.92,
+       "gain_db": 4.304,
+       "q": 2.1549
       }
      ],
      "confidence": 0.9772255569185038,
-     "mv_adjust_db": 12.478721322065905,
+     "mv_adjust_db": 11.926971287118167,
      "method": "non_parametric",
      "gain_reduction_db": null,
-     "residual_db": 0.6207829240553355,
+     "residual_db": 0.7511055005535834,
      "residual_band_hz": [
       5.0,
       200.0
@@ -74,10 +80,10 @@
      "fc_uncertainty_hz": null,
      "slope_uncertainty": null,
      "channel_scope": null,
-     "residual_at_hz": 17.325699468666283,
-     "residual_direction": "over",
-     "residual_rms_db": 0.3099329526979382,
-     "residual_within_tolerance": 0.8167438729904813,
+     "residual_at_hz": 15.706719535968217,
+     "residual_direction": "under",
+     "residual_rms_db": 0.4155360891070304,
+     "residual_within_tolerance": 0.6438403257078801,
      "residual_tolerance_db": 0.5
     }
    ]

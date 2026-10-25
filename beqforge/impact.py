@@ -347,6 +347,7 @@ FEATURES: tuple[Feature, ...] = (
             "filters:FIT_STATS",
             "filters:FitTask*",
             "filters:PARALLEL_FITS",
+            "fit_kernel:*",
             "pipeline:PipelineParams.max_sections",
             "pipeline:PipelineParams.fit_seeds",
             "pipeline:PipelineParams.max_gain_db",

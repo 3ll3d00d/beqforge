@@ -35,6 +35,7 @@ import numpy as np
 
 from beqforge import BiquadSpec
 from beqforge.filters import Realisation
+from beqforge.fit_kernel import kernel_name
 from beqforge.material import Material
 
 logger = logging.getLogger(__name__)
@@ -484,6 +485,9 @@ def write(
                 "optimiser_runs": report.fit_stats.calls,
                 "worker_seconds": round(report.fit_stats.seconds, 3),
                 "cost_evaluations": report.fit_stats.cost_evaluations,
+                # which population kernel this install scores with (TODO 23): the answer is
+                # the same either way, the time is not; absent in older records
+                "kernel": kernel_name(),
             },
         },
     }

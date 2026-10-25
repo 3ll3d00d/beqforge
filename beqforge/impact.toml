@@ -87,3 +87,28 @@ note = "`run` passes those fits to `_choose_fit`; ranking between strategies is 
 feature = "judge.verification"
 kind = "unchanged"
 note = "`_judge` can skip the clipping figure, which is never gated; rejudge probe unchanged at --tol 0"
+
+[[change]]
+id = "fit-kernel"
+design_version = 8
+summary = "the fit's search scores each generation at once in the linear domain, so its members are updated together; the polish and the residual returned stay on the scalar cost (TODO 23)"
+evidence = "plans/fit-kernel.md#outcome"
+
+[[change.touches]]
+feature = "fit.search"
+kind = "behaviour"
+# Measured with the refit probe (default mode) on the 11 baseline titles and their 43 injected
+# variants, a20ed8c against this change on one machine; moved by `impact.MOVED`. Not a library
+# sample: the variants are steep injected rolloffs and fill the failing classes, so
+# declined_after_fit's 0 of 21 is all variants and says little about the library's declines.
+basis = { no_fit = [0, 1], declined_after_fit = [0, 21], designed_with_failures = [13, 18], designed_all_passed = [2, 14] }
+
+[[change.touches]]
+feature = "fit.input"
+kind = "unchanged"
+note = "the target and ceiling reach the fit quantised as before"
+
+[[change.touches]]
+feature = "fit.choice"
+kind = "unchanged"
+note = "`_choose_fit` and the near-equal window are untouched; what they choose among is re-rolled"
