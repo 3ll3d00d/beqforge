@@ -124,7 +124,7 @@ Later versions (the table in `DESIGN_VERSION`'s docstring is the authority): 0.2
 the library review's fixes 2-4 and O2 ([outcomes](library-review-improvements.md#outcomes)). Contract 1.5's
 adjustments (0.2.9) did not bump it: a request without adjustments gets the same answer. 6 (unreleased) makes the fit reproducible across processors
 and honours the request's bass management ([TODO 1](playback-contract.md#outcome)) (TODO 28, [outcome](library-review-improvements.md#built-a-reproducible-fit-input-22-october-2026-design_version-6)).
-6 shipped in 0.2.10 and 0.2.11. 7 (unreleased) chooses among the fits within the fitter's residual bar
+6 shipped in 0.2.10 and 0.2.11. 7 (0.2.12) chooses among the fits within the fitter's residual bar
 by the judge, fewest sections first (TODO 32, [outcome](library-review-improvements.md#row-32-choosing-among-near-equal-fits-25-october-2026-design_version-7)).
 
 ### Correction after the v0.2.6 release tests
