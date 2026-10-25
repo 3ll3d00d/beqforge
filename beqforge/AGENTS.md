@@ -531,10 +531,14 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
 
 * A run is ~40-80 s a title (down from ~100-490 s, 7.18x, every accepted filter's verdict
   preserved); the test suite is ~2 minutes. Run both in the background regardless — see
-  "Waiting on a long run" above. On the baseline records (mixed revisions, analysis and
-  `parametric` cached; measured 2026-09-29) fitting is ~49% of a run, judging ~41% and target
-  construction ~10%; a cold run adds the analysis on top. The ~75% once quoted for the fitter
-  predates that. `FIT_STATS` reports the fitter's own cost breakdown per run.
+  "Waiting on a long run" above. Measured 2026-10-25 on 0.2.12 (warm cache, 10 designing
+  titles, 70 s and 190 CPU-s a title on average): `fit` is 41% of wall time and 70% of CPU,
+  `parametric`'s own fit inside its target stage another ~10% and ~12%, the rest of target
+  construction ~12%, judging 17% (verify, headroom, sub feed) and ~13 s a title falls outside
+  the pipeline (load, record). A cold run adds the analysis on top. The 29 September split
+  (49/41/10) and the ~75% once quoted for the fitter are both out of date; see
+  [plans/fit-kernel.md](../plans/fit-kernel.md). `FIT_STATS` reports the fitter's own cost
+  breakdown per run.
 * **Exact-preserving changes and accuracy-for-time trades must never be mixed in one commit.**
   A run that got faster and also moved is a run that says nothing about either. Validate an
   exact change by reproducing the *whole record* byte-for-byte except the fingerprint and
