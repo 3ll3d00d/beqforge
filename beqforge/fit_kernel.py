@@ -221,12 +221,29 @@ def _power_numpy(coefficients, c1, s1, c2, s2):
     return num / den
 
 
+def _compiled(function):
+    """`numba.njit`, with its on-disk cache when there is somewhere to write one.
+
+    numba caches beside the source, or failing that in the user's cache directory, and refuses
+    to compile at all when it can write to neither: an install the running user can't write to,
+    with no home of its own, such as the designer image run as another user. The cache only saves
+    the compile (~0.7 s a process), so without one the kernel is compiled afresh, to the same
+    answer.
+    """
+    try:
+        return numba.njit(cache=True)(function)
+    except RuntimeError as e:
+        if "cannot cache" not in str(e):
+            raise
+        return numba.njit(function)
+
+
 if numba is None:
     _fit_and_drift = _fit_and_drift_numpy
     _worst_ratio = _worst_ratio_numpy
 else:
 
-    @numba.njit(cache=True)
+    @_compiled
     def _power_into(
         coefficients, m, c1, s1, c2, s2, out
     ):  # pragma: no cover - compiled
@@ -249,7 +266,7 @@ else:
         for i in range(bins):
             out[i] = num[i] / den[i]
 
-    @numba.njit(cache=True)
+    @_compiled
     def _fit_and_drift(
         response, realised, c1, s1, c2, s2, target_inverse
     ):  # pragma: no cover - compiled
@@ -277,7 +294,7 @@ else:
                 drift[m] = worst
         return error, drift
 
-    @numba.njit(cache=True)
+    @_compiled
     def _worst_ratio(
         numerator, denominator, c1, s1, c2, s2, weight, symmetric
     ):  # pragma: no cover - compiled

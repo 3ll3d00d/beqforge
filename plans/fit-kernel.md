@@ -171,10 +171,19 @@ true positives 7/9, median recovery 1.375 to 1.369 dB RMS. Three filtered cases 
 `pyinstaller-hooks-contrib`), 147 MB on Linux; the smoke test, including the new kernel check,
 passes. Windows and macOS are CI's.
 
+**Fixed in 0.3.1: the image run as another user.** 0.3.0's designer image could not start
+under `--user 1001:1001`, as Unraid runs it: numba's `cache=True` refuses to compile when it can
+write neither beside the source (site-packages, the image's) nor to a home, and the fitter is
+imported at startup (`RuntimeError: cannot cache function '_power_into': no locator available`,
+found by beqdesigner). The kernels now compile uncached when there is nowhere to cache
+(`fit_kernel._compiled`), and the image caches under `/tmp/numba` (`NUMBA_CACHE_DIR`), writable
+by any user. `packaging/designer/smoke.py` now runs the image as uid 1001 as well, which fails on
+0.3.0's image and passes on the fix. No answer changes: the cache only saves the compile.
+
 **Impact basis** (`impact.toml`, `fit.search`): from the refit probe's default mode, by
 `impact.MOVED`: no_fit 0/1, declined_after_fit 0/21, designed_with_failures 14/18,
 designed_all_passed 2/14 (13/18 and 2/14 by the flat 1 dB line it replaced). Not a library sample: 43 of the 54 are injected variants, and every
-declined_after_fit case is one. 0.3.0 shipped with it; measure a library sample and replace it in 0.3.1,
+declined_after_fit case is one. 0.3.0 shipped with it; measure a library sample and replace it in a later 0.3 release,
 as version 7's basis was.
 
 **Left for later** (TODO 23): reuse of repeated numerical identities, the ~9 s a title outside the

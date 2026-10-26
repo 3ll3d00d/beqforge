@@ -7,6 +7,8 @@
 # The defaults here listen on every interface, take audio by reference under /work (mount the
 # pipeline's work directory there), keep the stage cache in /cache and every request's run record
 # in /records (mount a volume on each). The log goes to the console only: `docker logs` keeps it.
+# numba's compiled fit kernel is cached under /tmp, writable whichever user the container runs as
+# (`--user`, as Unraid does); site-packages and the image user's home are not.
 FROM python:3.13-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.9.18 /uv /usr/local/bin/uv
 WORKDIR /src
@@ -34,6 +36,7 @@ RUN groupadd -g "${PGID}" beqforge && useradd -m -u "${PUID}" -g beqforge beqfor
     && chown beqforge:beqforge /work /cache /records
 COPY --from=build /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib \
+    NUMBA_CACHE_DIR=/tmp/numba \
     BEQFORGE_HOST=0.0.0.0 BEQFORGE_PORT=8420 BEQFORGE_SHARED_ROOT=/work BEQFORGE_CACHE_DIR=/cache \
     BEQFORGE_RECORD_DIR=/records BEQFORGE_LOG_FILE=false
 USER beqforge

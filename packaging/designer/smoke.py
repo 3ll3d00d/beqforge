@@ -5,8 +5,10 @@
 
 Standard library only, so it runs on a CI host with no project environment. The image's
 defaults are what is checked: it listens on 8420, takes audio by reference under /work and
-keeps its stage cache in /cache. `check()` is the same check against any running server, which
-`tests/test_designer_image.py` runs against an in-process one.
+keeps its stage cache in /cache. Then again as another user (`--user 1001:1001`), as Unraid runs
+it, with the records and stage cache under the mounted /work: 0.3.0's image could not start that
+way, because numba could not write its cache. `check()` is the same check against any running
+server, which `tests/test_designer_image.py` runs against an in-process one.
 """
 
 import argparse
@@ -158,7 +160,25 @@ def _wait_for(base: str, seconds: float = 60) -> None:
         time.sleep(0.5)
 
 
-def smoke(image: str) -> None:
+OTHER_USER = "1001:1001"
+
+
+def smoke(image: str, user: str | None = None) -> None:
+    """One container from `image`: as its own user with its own volumes, or as `user` with
+    everything it writes under the mounted /work."""
+    records = "/records" if user is None else "/work/records"
+    as_user = (
+        []
+        if user is None
+        else [
+            "--user",
+            user,
+            "-e",
+            f"BEQFORGE_RECORD_DIR={records}",
+            "-e",
+            "BEQFORGE_CACHE_DIR=/work/cache",
+        ]
+    )
     port = _free_port()
     with tempfile.TemporaryDirectory() as directory:
         work = pathlib.Path(directory)
@@ -176,6 +196,7 @@ def smoke(image: str) -> None:
                 f"127.0.0.1:{port}:8420",
                 "-v",
                 f"{work}:/work",
+                *as_user,
                 image,
             ],
             check=True,
@@ -184,16 +205,16 @@ def smoke(image: str) -> None:
             base = f"http://127.0.0.1:{port}"
             _wait_for(base)
             check(base, work)
-            records = call(base, "/health")[1].get("record_dir")
-            assert records == "/records", f"/health: records kept in {records!r}"
+            kept = call(base, "/health")[1].get("record_dir")
+            assert kept == records, f"/health: records kept in {kept!r}"
             listed = subprocess.run(
-                ["docker", "exec", name, "ls", "/records"],
+                ["docker", "exec", name, "ls", records],
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout.split()
             assert any(n.endswith(".run.json.gz") for n in listed), (
-                f"no run record in /records: {listed}"
+                f"no run record in {records}: {listed}"
             )
             health = subprocess.run(
                 ["docker", "inspect", "--format", "{{.State.Health.Status}}", name],
@@ -202,10 +223,18 @@ def smoke(image: str) -> None:
                 check=True,
             ).stdout.strip()
             print(
-                f"designer image {image}: inline and by-reference designs answered (health {health})"
+                f"designer image {image} as {user or 'its own user'}: inline and by-reference "
+                f"designs answered (health {health})"
             )
         finally:
             subprocess.run(["docker", "logs", name], check=False)
+            if user is not None:
+                # written as `user`, which the host's user may not be able to remove
+                subprocess.run(
+                    ["docker", "exec", name, "rm", "-rf", records, "/work/cache"],
+                    check=False,
+                    capture_output=True,
+                )
             subprocess.run(
                 ["docker", "rm", "-f", name], check=False, capture_output=True
             )
@@ -214,4 +243,6 @@ def smoke(image: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("image")
-    smoke(parser.parse_args().image)
+    image = parser.parse_args().image
+    smoke(image)
+    smoke(image, OTHER_USER)

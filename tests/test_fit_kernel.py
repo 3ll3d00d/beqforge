@@ -147,3 +147,23 @@ def test_a_fit_returns_the_scalar_residual_of_its_published_cascade() -> None:
     assert residual == _scalar_cost(params, target, 1, 1, Realisation(), None)
     assert math.isfinite(residual)
     assert evaluations > 300 * 20 * 6
+
+
+@pytest.mark.skipif(fit_kernel.numba is None, reason="numba is not installed")
+def test_a_kernel_compiles_uncached_when_numba_has_nowhere_to_cache(
+    monkeypatch,
+) -> None:
+    """The designer image run as another user can write neither beside the source nor to a home,
+    and numba then refuses to compile with `cache=True`: the server must still start."""
+    real = fit_kernel.numba.njit
+
+    def njit(*args, **kwargs):
+        if kwargs.get("cache"):
+            raise RuntimeError(
+                "cannot cache function 'f': no locator available for file 'x'"
+            )
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(fit_kernel.numba, "njit", njit)
+    compiled = fit_kernel._compiled(lambda x: x * 2.0)
+    assert compiled(1.5) == 3.0
