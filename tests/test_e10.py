@@ -67,14 +67,55 @@ def test_a_natural_droop_is_scored_against_the_programme_before_it():
     assert e10.truth(case, "flat").needs_correction
 
 
+def _bumped(db: float = 4.0) -> e10.E10Case:
+    """broadband/1 with a peak at 40 Hz in the observed programme: a bump over the goal."""
+    import dataclasses
+
+    from scipy import signal
+
+    from beqforge.filters import biquad_sos
+
+    case = e10.e10_case("broadband", 1, duration_s=60.0)
+    sos = biquad_sos([BiquadSpec("peaking_eq", 40.0, db, 1.0)], e10.FS)
+    observed = {name: signal.sosfilt(sos, s) for name, s in case.observed.items()}
+    return dataclasses.replace(case, recorded=observed, observed=observed)
+
+
 def test_leaving_a_bump_alone_is_not_an_overshoot_but_lifting_past_the_goal_is():
-    case = e10.e10_case("cancellation", 1, duration_s=60.0)
+    case = _bumped()
     known = e10.truth(case, "flat")
     assert (known.programme_db - known.goal_db)[known.truth_band].max() > 1.5
     nudge = BiquadSpec("peaking_eq", 30.0, 0.1, 1.0)
     assert not e10.score(case, "flat", _report(nudge), PipelineParams())["overshoot"]
     flat = e10.e10_case("broadband", 1, duration_s=60.0)
     assert e10.score(flat, "flat", _report(BOOST), PipelineParams())["overshoot"]
+
+
+def test_a_cancellation_is_a_plain_deficit_with_no_bump():
+    # v3 cancelled through a causal low-pass, whose phase near its 60 Hz corner added the
+    # inverted copy back: +3 to +3.8 dB at 40-71 Hz
+    for seed in (1, 2, 3):
+        known = e10.truth(e10.e10_case("cancellation", seed, duration_s=60.0), "flat")
+        change = (known.programme_db - known.goal_db)[known.truth_band]
+        assert change.max() < 0.5
+        assert known.needs_correction
+
+
+def test_overshoot_is_judged_by_the_accuracy_bound_at_every_goal():
+    # the tight goal's tolerance decides whether a case needs a correction, not how close a
+    # correction must land: a 1 dB over-lift is within the bound at every goal
+    case = e10.e10_case("broadband", 1, duration_s=60.0)
+    lift = BiquadSpec("peaking_eq", 40.0, 1.0, 1.0)
+    for goal in e10.GOALS:
+        assert not e10.score(case, goal, _report(lift), PipelineParams())["overshoot"]
+    over = BiquadSpec("peaking_eq", 40.0, e10.ACCURACY_DB + 1.0, 1.0)
+    assert e10.score(case, "flat", _report(over), PipelineParams())["overshoot"]
+
+
+def test_the_tight_goal_needs_a_correction_where_the_flat_one_does_not():
+    case = _bumped(-1.2)
+    assert not e10.truth(case, "flat").needs_correction
+    assert e10.truth(case, "tight").needs_correction
 
 
 def test_a_steep_coloured_floor_leaves_noise_only_bins_below_the_corner():

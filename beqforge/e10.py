@@ -23,9 +23,11 @@ from scipy.stats import beta
 from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
-PROTOCOL_VERSION = "e10-v3"
+PROTOCOL_VERSION = "e10-v4"
 """v1 read the goal deficit from the observed spectrum alone; v2 pivoted a tilted goal at the
-reference's bottom, not where the deficit begins; see `truth`."""
+reference's bottom, not where the deficit begins (see `truth`); v3 scored a correction's
+accuracy against the goal tolerance (see `ACCURACY_DB`) and cancelled through a causal low-pass
+(see `e10_case`)."""
 
 GOALS: dict[str, tuple[float, float]] = {
     "flat": (0.0, 1.5),
@@ -33,6 +35,15 @@ GOALS: dict[str, tuple[float, float]] = {
     "tight": (0.0, 0.75),
 }
 """Goal name: (`target_tilt_db_per_octave`, `goal_tolerance_db`), predeclared."""
+
+ACCURACY_DB = 1.5
+"""How far a correction may land from the goal, at every goal: overshoot and missed recovery.
+
+The goal tolerance is the pipeline's act threshold (`AcceptParams.goal_tolerance_db`: how far
+from the goal a low end may sit and still need nothing), not a bound on a correction's
+accuracy, so it decides only whether a case needs a correction. v3 scored overshoot and missed
+recovery against it too, so the tight goal, whose designs are the flat goal's filter for
+filter, counted the fit's ordinary 0.3-1 dB ripple as overshoot (11 of 36 on seeds 1-3)."""
 
 DEVELOPMENT_SEEDS = range(1, 1000)
 HELD_OUT_SEEDS = range(100001, 101000)
@@ -230,7 +241,11 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
         change = f"{hp} on {touched} only"
     elif family == "cancellation":
         depth = float(rng.uniform(0.3, 0.8))
-        low = signal.sosfilt(
+        # zero phase, so the low band cancels in phase and the mix's change is 1 - d|H|^2, a
+        # plain deficit. v3's causal low-pass turned through -180 degrees near its corner, so
+        # the inverted copy added there: +3 to +3.8 dB at 40-71 Hz, which the designer then
+        # levelled the band below up to
+        low = signal.sosfiltfilt(
             signal.butter(4, 60.0, fs=FS, output="sos"), recorded["LFE"]
         )
         from beqforge.material import LFE_GAIN, MAIN_GAIN
@@ -507,13 +522,12 @@ def score_selection(
         # there. Either alone mistakes the source's chance shape for an overshoot: filling a
         # chance dip in the programme rises over the first, restoring a chance peak the recipe
         # cut rises over the second
-        tolerance = known.tolerance_db
-        left = corrected > np.maximum(known.goal_db, known.programme_db) + tolerance
+        left = corrected > np.maximum(known.goal_db, known.programme_db) + ACCURACY_DB
         seen = known.observed_db + response
-        there = seen > np.maximum(known.goal_db, known.observed_db) + tolerance
+        there = seen > np.maximum(known.goal_db, known.observed_db) + ACCURACY_DB
         over = band & left & there
         gap = np.maximum(known.goal_db - corrected, 0.0)[band]
-        short = band & (corrected < known.goal_db - known.tolerance_db)
+        short = band & (corrected < known.goal_db - ACCURACY_DB)
         row["overshoot"] = bool(label is not None and over.any())
         row["shortfall_median_db"] = round(float(np.median(gap)), 2)
         row["shortfall_worst_db"] = round(float(gap.max()), 2)

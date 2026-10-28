@@ -246,11 +246,11 @@ def score(recipe: str, detail: dict, report, asis, params, tolerance: float) -> 
         )
         if band.any():
             gap = np.maximum(inverse - added, 0.0)[band]
-            short = band & (added < inverse - tolerance)
+            short = band & (added < inverse - e10.ACCURACY_DB)
             row["shortfall_median_db"] = round(float(np.median(gap)), 2)
             row["overshoot"] = bool(
                 report.accepted is not None
-                and (band & (added > inverse + tolerance)).any()
+                and (band & (added > inverse + e10.ACCURACY_DB)).any()
             )
             row["missed"] = bool(
                 row["needs_correction"]

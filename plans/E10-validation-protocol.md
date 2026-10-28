@@ -1,6 +1,6 @@
-# E10: a fresh validation protocol for the content goal (v3)
+# E10: a fresh validation protocol for the content goal (v4)
 
-**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, and the tilted goal's pivot was settled in v3 (below)** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, the tilted goal's pivot was settled in v3, and v4 fixed the accuracy bound, the cancellation recipe and the decision rule's first clause (all below)** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -39,8 +39,8 @@ Each scored case lands in one or more of these. They are tallied separately and 
 | --- | --- | --- |
 | **Noise lift** | The corrected noise spectrum rises more than 3 dB above the uncorrected noise anywhere programme sits below the noise in the truth (the truth arrays say where). | safety |
 | **Unnecessary intervention** | Any selected filter on a case whose truth is already within the goal and its tolerance across the truth band. | safety |
-| **Overshoot** | The corrected programme rises more than the goal tolerance above the goal, or above the uncorrected programme where that already stood over the goal, anywhere in the truth band. | safety |
-| **Missed recovery** | On a case with attenuated programme, abstaining, or a corrected programme still below the goal by more than the goal tolerance over more than a third of an octave of the truth band. | accuracy |
+| **Overshoot** | The corrected programme rises more than the accuracy bound (1.5 dB, at every goal; v4) above the goal, or above the uncorrected programme where that already stood over the goal, anywhere in the truth band. | safety |
+| **Missed recovery** | On a case with attenuated programme, abstaining, or a corrected programme still below the goal by more than the accuracy bound over more than a third of an octave of the truth band. | accuracy |
 | **Device failure** | The published cascade cannot be realised (infinite drift: unstable once quantised). A finite drift is already inside every curve the other classes read, and `max_drift_db` is the fitter's preference, not a gate (`AcceptParams`). | accuracy |
 
 "Truth band" is declared per recipe (below), not the scorer's fixed 60 Hz top: the band where
@@ -60,6 +60,11 @@ Every case is run at three goal settings, predeclared:
 | flat (the default) | 0 | 1.5 |
 | gentle rolloff | -1.5 dB/oct | 1.5 |
 | tight | 0 | 0.75 |
+
+A goal's tolerance is the pipeline's act threshold (`AcceptParams.goal_tolerance_db`): it
+decides whether a case needs a correction and whether a selection was unnecessary, never how
+close a correction must land. Overshoot and missed recovery use one accuracy bound, 1.5 dB, at
+every goal (v4). So the tight goal tests when the designer acts, not how precisely.
 
 What the goals license, which is the "goal/corpus follow-up" TODO row 17 sends here:
 
@@ -95,7 +100,7 @@ last column is what the recipe is built to provoke, not a label.
 | `correlated_noise` | The same noise in every channel (a mastering hiss or hum bed), so it tracks across channels like programme. | negative below the programme's own corner |
 | `finite_stopband` | Programme high-passed with a stopband floor of -40 or -60 dB (a filter, not a cut-off), no added noise. | positive down to where the stopband meets the floor |
 | `partial_channels` | The high-pass on the LFE only, or on the mains only. | positive; the restored channel must carry it |
-| `cancellation` | Mains and LFE partly out of phase below 60 Hz. | the mix's low band reduced by cancellation: under the content principle still programme, so computed like a droop |
+| `cancellation` | The mains carry the LFE's low band (a zero-phase fourth-order low-pass at 60 Hz) inverted, cancelling 30-80% of it in phase (v4). | the mix's low band reduced by cancellation: under the content principle still programme, so computed like a droop |
 | `natural_droop` | Programme synthesised with a rolled-off spectrum, no filter. | positive under flat, per-goal otherwise |
 | `continuous_bass` | Bass that never goes quiet (a concert film), filtered or not. | both, by seed parity |
 | `filtered` | As the corpus's: a 2-4 order Butterworth or Linkwitz-Riley at 15-40 Hz. | positive |
@@ -193,7 +198,10 @@ A change E10 gates (a retune, a new rule, a default change) is adopted when, on 
 half, against the commit before it, run at the same seeds and titles:
 
 1. **No safety class gets worse.** Noise-lift, unnecessary-intervention and overshoot counts do
-   not increase, pooled or in any family, and their pooled upper bounds stay at or below 5%.
+   not increase, pooled or in any family. Each run reports the pooled upper bounds against a 5%
+   target; the target is not a gate until the known failures are fixed (v4: at the version 8
+   build the pumping floor alone gives 4 of 15 noise lifts, so no change, row 33's fix
+   included, could pass a 5% gate).
 2. **It improves what it was for.** Missed recovery (count, and the median shortfall over the
    positives it targets) improves, with the bootstrap interval of the paired shortfall change
    excluding zero. A change for speed or wording is not gated here.
@@ -325,3 +333,66 @@ pivot):
   its 27-33 dB lift of the pumping floor below it is still noise lift (row 33).
   `natural_droop/2` turns from an overshoot into a miss (median shortfall 0.84 dB), and the
   gentle goal's median shortfall rises from 0.0 to 0.28 dB.
+
+## Version 8 baseline and v4 (28 October 2026)
+
+The development run again, seeds 1-3, every family, three goals, at design version 8
+(`d8e507a`, the fit kernel), since version 8 re-rolls the fit (TODO 23). Scratch evidence, not
+committed. Under v3 it gave, against version 6's run above:
+
+| Goal | Noise lift | Unnecessary | Overshoot | Missed | Device | Median shortfall |
+|---|---|---|---|---|---|---|
+| flat, v6 | 4/15 | 0/12 | 4/36 | 18/24 | 0/14 | 0.03 dB |
+| flat, v8 | 4/15 | 0/12 | 8/36 | 19/24 | 0/14 | 0.01 dB |
+| gentle, v8 | 5/15 | 0/12 | 1/36 | 21/24 | 0/13 | 0.49 dB |
+| tight, v8 | 4/15 | 0/12 | 11/36 | 19/24 | 0/14 | 0.01 dB |
+
+The extra flat overshoots are mostly hairlines: `filtered/1` +0.05 dB over one bin,
+`cancellation/3` +0.03, `filtered/3` +0.26 at 6 Hz, `natural_droop/2` +0.31 at 54 Hz. The
+gentle goal's fifth noise lift is `correlated_noise/2` (parametric, 9.4 dB). The two questions
+v3 left open before a held-out run, and two the run raised, were settled by the user:
+
+1. **The cancellation recipe (settled: cancel in phase).** The recipe passed the LFE's low band
+   through a causal fourth-order Butterworth, whose phase turns through -180 degrees near its
+   60 Hz corner, so the inverted copy added there. The mix's change was 1 - d·H(f): a deficit
+   only below about 28 Hz (-6 to -8 dB at 8 Hz) and +3 to +3.8 dB at 40-71 Hz. It barely reached
+   the reference (+0.8 to 1.0 dB at 80 Hz, nothing above 100 Hz, the median unmoved), so moving
+   the corner to 40 Hz would only have moved the bump. The designer levelled the band below up
+   to it (`cancellation/2` +1.56 dB over at 7 Hz). v4 cancels through a zero-phase low-pass, so
+   the change is 1 - d·|H|², a plain deficit with no bump. Under v4, `cancellation/1` designs
+   and scores clean, `/2` abstains (missed) and `/3` falls short by a median of 1.3 dB.
+2. **`finite_stopband/2`'s gentle overshoot (settled: the designer, not the instrument).** It is
+   +0.65 dB over at 16.6 Hz. E10 pivots at 32.6 Hz; the designer's anchor, read from the observed
+   spectrum (whose chance shape stands +0.4 dB at 30-36 Hz), is 29.0 Hz. That difference accounts
+   for 0.25 dB of the excess (1.5 × log2(32.6/29.0)). The rest is the design's own: at 16.6 Hz it
+   stands 1.9 dB over the designer's own goal, which its judge accepts. A residual pivot
+   difference of this size is one realisation's scatter, which the designer cannot avoid without
+   seeing the source, so the instrument stays as it is.
+3. **The tight goal (settled: the tolerance is the act threshold).** In the pipeline the goal
+   tolerance only decides whether a low end needs anything (`_worth_correcting`,
+   `_lifts_beyond_goal`), so the tight goal's designs were the flat goal's filter for filter on
+   every case, and v3's scoring against 0.75 dB counted the fit's ordinary 0.3-1 dB ripple as 11
+   overshoots. v4 scores overshoot and missed recovery against `e10.ACCURACY_DB` (1.5 dB) at every
+   goal, in both halves (`tools/e10_cases.py` too). Whether the designer should honour a tighter
+   tolerance in its fit is a separate decision change, not an instrument question.
+4. **The decision rule's 5% bound (settled: no worse than before).** See the decision rule above.
+   Overshoot still counts any bin over the line; the user kept that as declared.
+
+**Under v4** (cancellation designed again, every other family rescored from the run's filters):
+
+| Goal | Noise lift | Unnecessary | Overshoot | Missed | Device | Median shortfall |
+|---|---|---|---|---|---|---|
+| flat | 4/15 | 0/12 | 5/36 | 21/24 | 0/13 | 0.21 dB |
+| gentle | 5/15 | 0/12 | 1/36 | 21/24 | 0/14 | 0.69 dB |
+| tight | 4/15 | 0/12 | 5/36 | 21/24 | 0/13 | 0.21 dB |
+
+* Tight now scores as flat does: same designs, and on these seeds the stricter act threshold
+  changes no case's need for a correction.
+* The flat overshoots left are `nonstationary_floor/1,3` (row 33) and the hairlines on
+  `filtered/1,3` and `natural_droop/2`.
+* Missed recovery is close to saturated (21 of 24): most misses are a design that stops above a
+  truth band reaching 5 Hz under the synthetic 1e-5 white floor, with a median shortfall of 0 dB
+  (as the first run found). The shortfall is the more telling figure for gating recovery.
+
+Nothing now stands between E10 and freezing its first gated change. Row 33 (the pumping floor)
+is the candidate.
