@@ -23,11 +23,12 @@ from scipy.stats import beta
 from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
-PROTOCOL_VERSION = "e10-v4"
+PROTOCOL_VERSION = "e10-v5"
 """v1 read the goal deficit from the observed spectrum alone; v2 pivoted a tilted goal at the
 reference's bottom, not where the deficit begins (see `truth`); v3 scored a correction's
 accuracy against the goal tolerance (see `ACCURACY_DB`) and cancelled through a causal low-pass
-(see `e10_case`)."""
+(see `e10_case`); v4's `nonstationary_floor` swung about 37 dB with every event, which is
+event-locked content, not a pumping floor (see `REPORTED`)."""
 
 GOALS: dict[str, tuple[float, float]] = {
     "flat": (0.0, 1.5),
@@ -56,7 +57,7 @@ FAMILIES = (
     "sparse_dialogue",
     "stationary_noise",
     "coloured_floor",
-    "nonstationary_floor",
+    "tracking_floor",
     "correlated_noise",
     "finite_stopband",
     "partial_channels",
@@ -64,7 +65,25 @@ FAMILIES = (
     "natural_droop",
     "continuous_bass",
     "filtered",
+    "breathing_floor",
+    "event_locked_floor",
 )
+"""Appended, never reordered: a family's index is part of its seed's draws."""
+
+REPORTED = ("event_locked_floor",)
+"""Families reported beside the counts but kept out of every pooled tally.
+
+`event_locked_floor` is v4's `nonstationary_floor`: noise scaled by `0.25 + level / mean`, so it
+swings about 37 dB, rising only inside programme events. Below the corner it shows the contrast
+real stopband leakage does (32-36 dB against `finite_stopband`'s 30-32) and the same partial
+coherence (about zero), so under the content principle ("content correlated with the rest of
+the soundtrack is not noise") it is event-locked content, and no rule could refuse it without
+refusing that leakage too. Like the frozen protocol's `natural_bass_light`, it is reported, not
+counted. `tracking_floor` and `breathing_floor` are the pumping floors a mix can carry."""
+
+PUMPING_DB = (2.0, 6.0)
+"""How far a pumping floor moves with the programme, drawn per case: a compressor's or a codec's
+few dB, not an event's dynamic range."""
 
 FS = 1000
 DURATION_S = 240.0
@@ -156,6 +175,25 @@ def _shaped_noise(
     return noise / (np.std(noise) or 1.0)
 
 
+def _pumping_db(samples: np.ndarray, depth_db: float, family: str) -> np.ndarray:
+    """A floor's gain over time as the programme's 1 s level moves, at most `depth_db`.
+
+    Tracking: the floor rises with the programme above its median level, as a codec's noise
+    follows the signal. Breathing: a compressor's gain reduction pulls the floor down under loud
+    passages and releases it over about a second."""
+    level = np.convolve(np.abs(samples), np.ones(FS) / FS)[: samples.size]
+    above = np.clip(
+        20.0 * np.log10(np.maximum(level, 1e-30) / (np.median(level) or 1.0)),
+        0.0,
+        depth_db,
+    )
+    if family == "tracking_floor":
+        return above
+    release = math.exp(-1.0 / FS)
+    held = signal.lfilter([1.0 - release], [1.0, -release], above)
+    return -np.maximum(held, above)
+
+
 def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
     """One reproducible case: its family, and every parameter drawn from its seed."""
     if family not in FAMILIES:
@@ -202,20 +240,29 @@ def e10_case(family: str, seed: int, duration_s: float = DURATION_S) -> E10Case:
         colour = str(rng.choice(("pink", "brown", "codec")))
         noise = {name: _shaped_noise(rng, n, colour) * 0.01 for name in ("L", "LFE")}
         change = f"{colour} noise only"
-    elif family in ("coloured_floor", "nonstationary_floor"):
+    elif family in (
+        "coloured_floor",
+        "tracking_floor",
+        "breathing_floor",
+        "event_locked_floor",
+    ):
         hp = _high_pass(rng, (8, 12, 16))
         observed = {name: apply_high_pass(s, hp, FS) for name, s in recorded.items()}
         colour = str(rng.choice(("pink", "brown", "codec")))
         down = float(rng.uniform(30.0, 60.0))
+        depth = float(rng.uniform(*PUMPING_DB))
         noise = {}
         for name, samples in recorded.items():
             floor = _shaped_noise(rng, n, colour) * below(samples, down)
-            if family == "nonstationary_floor":
-                # pumping: the floor rises with the programme, as a compressor's would
+            if family == "event_locked_floor":
                 level = np.convolve(np.abs(samples), np.ones(FS) / FS, mode="same")
                 floor *= 0.25 + level / (np.mean(level) or 1.0)
+            elif family != "coloured_floor":
+                floor *= 10.0 ** (_pumping_db(samples, depth, family) / 20.0)
             noise[name] = floor
         change = f"{hp}; {colour} floor {down:.0f} dB down"
+        if family in ("tracking_floor", "breathing_floor"):
+            change += f", {family.split('_')[0]} {depth:.1f} dB"
     elif family == "correlated_noise":
         hp = _high_pass(rng, (8, 12))
         recorded = {name: apply_high_pass(s, hp, FS) for name, s in recorded.items()}
@@ -616,7 +663,7 @@ def summarise(rows: list[dict]) -> dict:
     for goal in sorted({r["goal"] for r in rows}):
         at_goal = [r for r in rows if r["goal"] == goal]
         summary[goal] = {
-            "pooled": tally(at_goal),
+            "pooled": tally([r for r in at_goal if r["family"] not in REPORTED]),
             "families": {
                 family: tally([r for r in at_goal if r["family"] == family])
                 for family in sorted({r["family"] for r in at_goal})

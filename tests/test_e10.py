@@ -118,6 +118,28 @@ def test_the_tight_goal_needs_a_correction_where_the_flat_one_does_not():
     assert e10.truth(case, "tight").needs_correction
 
 
+@pytest.mark.parametrize("family", ["tracking_floor", "breathing_floor"])
+def test_a_pumping_floor_moves_by_a_few_db_not_an_events_range(family):
+    # v4's floor swung about 37 dB with every event: event-locked content, not pumping
+    case = e10.e10_case(family, 1, duration_s=60.0)
+    gain = e10._pumping_db(case.recorded["L"], e10.PUMPING_DB[1], family)
+    assert np.ptp(gain) <= e10.PUMPING_DB[1] + 1e-9
+    assert (gain >= 0).all() if family == "tracking_floor" else (gain <= 0).all()
+
+
+def test_a_reported_family_stays_out_of_the_pooled_tally():
+    params = PipelineParams()
+    locked = e10.score(
+        e10.e10_case("event_locked_floor", 1, duration_s=60.0),
+        "flat",
+        _report(BOOST),
+        params,
+    )
+    summary = e10.summarise([locked])["flat"]
+    assert summary["pooled"]["overshoot"]["n"] == 0
+    assert summary["families"]["event_locked_floor"]["overshoot"]["n"] == 1
+
+
 def test_a_steep_coloured_floor_leaves_noise_only_bins_below_the_corner():
     known = e10.truth(e10.e10_case("coloured_floor", 2), "flat")
     assert known.noise_only.any()

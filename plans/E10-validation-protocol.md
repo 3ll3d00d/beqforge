@@ -1,6 +1,6 @@
-# E10: a fresh validation protocol for the content goal (v4)
+# E10: a fresh validation protocol for the content goal (v5)
 
-**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, the tilted goal's pivot was settled in v3, and v4 fixed the accuracy bound, the cancellation recipe and the decision rule's first clause (all below)** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, the tilted goal's pivot was settled in v3, v4 fixed the accuracy bound, the cancellation recipe and the decision rule's first clause, and v5 replaced the pumping floor (all below)** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -96,7 +96,9 @@ last column is what the recipe is built to provoke, not a label.
 | `sparse_dialogue` | Programme events rare and quiet, mid-band only. | negative |
 | `stationary_noise` | Coloured noise only, no programme. | negative |
 | `coloured_floor` | Programme high-passed at 15-40 Hz, order 8-16, then a floor whose spectrum is pink, brown or codec-shaped (a lossy encoder's low-band noise, from a recipe), 30-60 dB below the programme. | positive above the corner, noise-lift exposure below |
-| `nonstationary_floor` | As `coloured_floor`, the floor level varying by scene (rising with programme level, as a compressor's pumping would). | positive, noise-lift exposure |
+| `tracking_floor` | As `coloured_floor`, the floor rising with the programme's 1 s level above its median, by at most 2-6 dB (drawn), as a codec's noise follows the signal (v5). | positive, noise-lift exposure |
+| `breathing_floor` | As `coloured_floor`, the floor pulled down by 2-6 dB (drawn) under loud passages and released over about a second, as a compressor's gain reduction does (v5). | positive, noise-lift exposure |
+| `event_locked_floor` | v4's `nonstationary_floor`: the floor scaled by `0.25 + level / mean`, about 37 dB of swing, rising only inside events. **Reported, not counted** (`e10.REPORTED`): it is event-locked content (v5). | reported |
 | `correlated_noise` | The same noise in every channel (a mastering hiss or hum bed), so it tracks across channels like programme. | negative below the programme's own corner |
 | `finite_stopband` | Programme high-passed with a stopband floor of -40 or -60 dB (a filter, not a cut-off), no added noise. | positive down to where the stopband meets the floor |
 | `partial_channels` | The high-pass on the LFE only, or on the mains only. | positive; the restored channel must carry it |
@@ -396,3 +398,57 @@ v3 left open before a held-out run, and two the run raised, were settled by the 
 
 Nothing now stands between E10 and freezing its first gated change. Row 33 (the pumping floor)
 is the candidate.
+
+## The pumping floor (v5, 28 October 2026)
+
+TODO 33 recorded `nonstationary_floor` lifted 27-33 dB on every seed and goal. Measured below
+half its corner on seeds 1-3, against the positives that leak programme there (scratch
+evidence):
+
+| Below half the corner | Floor swing (p5 to p99) | Contrast | Boost ceiling | Partial coherence |
+|---|---|---|---|---|
+| `nonstationary_floor` 1-3 (scored as noise) | 36-39 dB | 32-36 dB | 29-32 dB | -0.21 to 0.01 |
+| `finite_stopband/1,2`, `filtered/1` (scored as programme) | | 30-40 dB | 28-34 dB | -0.05 to 0.02 |
+| `coloured_floor` 1-3 (stationary) | 0 | -2 to 2 dB | 0-0.4 dB | about 0 |
+
+The recipe's `0.25 + level / mean` made the floor rise about 37 dB inside every event and nowhere
+else. That is not a compressor's pumping (a few dB, and under gain reduction the floor falls while
+loud passages play); it is noise that exists only inside programme events. Every measure the
+evidence model has reads it as the leaked programme it resembles, and under the content principle
+it is content. No rule could refuse it without refusing `finite_stopband`'s and `filtered`'s
+legitimate lifts. Settled by the user: v5 replaces it with the pumping floors a mix can carry,
+`tracking_floor` and `breathing_floor` (2-6 dB, drawn), counted as noise, and keeps it as
+`event_locked_floor`, reported and kept out of every pooled tally (`e10.REPORTED`), as the frozen
+protocol's `natural_bass_light` is. `tracking_floor` takes `nonstationary_floor`'s place in
+`FAMILIES`, so no other family's draws move; the two new families are appended.
+
+A first experiment on the old recipe's own floors, flat goal, confirmed the depth decides it:
+modulated at most +6 dB with the programme, seeds 1-3 got 8.1 dB (parametric), nothing and
+3.06 dB; breathing by up to 6 dB, all three abstain.
+
+**v5's floors, seeds 1-3, at design version 8** (flat; tight is identical, gentle selects nothing):
+
+| Case | Selected | Noise lift | Beyond 1/3 octave under the truth band |
+|---|---|---|---|
+| `tracking_floor/1` (3.7 dB) | parametric | 13.9 dB | 4.0 dB |
+| `tracking_floor/2,3` | abstains | | |
+| `breathing_floor/1` | abstains | | |
+| `breathing_floor/2` (5.0 dB) | parametric | 10.8 dB | 9.9 dB |
+| `breathing_floor/3` (3.1 dB) | parametric | 13.0 dB | 2.9 dB |
+| `event_locked_floor/1-3` (reported) | flatten (flatten, counterfactual at gentle) | 17.9-33.6 dB | 17.9-30.5 dB |
+
+None of the realistic lifts reads noise as programme. At the bottom of the truth band the
+programme needs 32-51 dB and the design gives 11-16: these are partial restorations of the
+programme above the floor. They split two ways:
+
+* **The skirt of a restoration the target asks for.** On `tracking_floor/1` and
+  `breathing_floor/3` the design follows its evidence-priced target within about 1 dB; the lift
+  peaks within a third of an octave under the truth band's edge, where a 15-17 dB restoration
+  must roll off, and is 3-4 dB further down. v4's `natural_droop/1` (12.9 dB, 0 beyond a third of
+  an octave) and `correlated_noise/2` (9.4 dB, 1.7) are the same. The real-texture half already
+  allows for this: `noise_replaced` counts a boost only half an octave under its corner. Whether
+  the synthetic half should allow the same transition is an open instrument question.
+* **A fit over its own target below the floor.** On `breathing_floor/2` the target is held at
+  3.4-8.6 dB over 5-8 Hz (tracking floor 6.7 Hz); the design, a single shelf (17 Hz, +9 dB,
+  Q 2.94), gives 9.8-11.4 dB there, up to 6.4 dB over the evidence-priced target, with a -6 dB
+  ripple dip at 25 Hz, and the judge passes it. This is the pipeline finding TODO 33 now tracks.
