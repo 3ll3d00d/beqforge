@@ -1,6 +1,6 @@
-# E10: a fresh validation protocol for the content goal (v5)
+# E10: a fresh validation protocol for the content goal (v6)
 
-**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, the tilted goal's pivot was settled in v3, v4 fixed the accuracy bound, the cancellation recipe and the decision rule's first clause, and v5 replaced the pumping floor (all below)** (TODO row 3). This is the
+**Protocol written 22 October 2026; its instrument is built (`beqforge/e10.py`, `tools/e10_run.py`, `tools/e10_cases.py`) and the title partition frozen (`plans/e10-titles-v1.json`). The first development run revised the instrument to v2, the tilted goal's pivot was settled in v3, v4 fixed the accuracy bound, the cancellation recipe and the decision rule's first clause, v5 replaced the pumping floor, and v6 allowed a restoration's skirt (all below)** (TODO row 3). This is the
 predeclaration E10 asks for: what a held-out evaluation contains, how it is scored and what a
 change must show on it, fixed before any held-out case is generated. Rows 2 and 26 (the texture
 yardstick and its retune), the library review's research items 1b and 5, steep-filter scoring
@@ -37,7 +37,7 @@ Each scored case lands in one or more of these. They are tallied separately and 
 
 | Class | Definition (on the published response, in the case's truth band) | Kind |
 | --- | --- | --- |
-| **Noise lift** | The corrected noise spectrum rises more than 3 dB above the uncorrected noise anywhere programme sits below the noise in the truth (the truth arrays say where). | safety |
+| **Noise lift** | The corrected noise spectrum rises more than 3 dB above the uncorrected noise anywhere programme sits below the noise in the truth (the truth arrays say where), more than half an octave under the truth band's bottom (v6; the whole noise-only region when there is no truth band). | safety |
 | **Unnecessary intervention** | Any selected filter on a case whose truth is already within the goal and its tolerance across the truth band. | safety |
 | **Overshoot** | The corrected programme rises more than the accuracy bound (1.5 dB, at every goal; v4) above the goal, or above the uncorrected programme where that already stood over the goal, anywhere in the truth band. | safety |
 | **Missed recovery** | On a case with attenuated programme, abstaining, or a corrected programme still below the goal by more than the accuracy bound over more than a third of an octave of the truth band. | accuracy |
@@ -452,3 +452,38 @@ programme above the floor. They split two ways:
   3.4-8.6 dB over 5-8 Hz (tracking floor 6.7 Hz); the design, a single shelf (17 Hz, +9 dB,
   Q 2.94), gives 9.8-11.4 dB there, up to 6.4 dB over the evidence-priced target, with a -6 dB
   ripple dip at 25 Hz, and the judge passes it. This is the pipeline finding TODO 33 now tracks.
+
+## The skirt and the cases it leaves (v6, 28 October 2026)
+
+Settled by the user: noise lift counts only more than half an octave under the truth band's
+bottom (`e10.TRANSITION_OCTAVES`), the allowance the real-texture half's `noise_replaced`
+already makes; a case with no truth band counts every noise-only bin. Rows keep the whole
+region's maximum as `noise_lift_skirt_db`.
+
+The floor families on development seeds 1-12, three goals, design version 8 (scratch evidence):
+
+| Family (flat) | Noise lift | Overshoot | Missed | Median shortfall |
+|---|---|---|---|---|
+| `coloured_floor` | 0/12 | 0/12 | 10/12 | 0.14 dB |
+| `tracking_floor` | 1/11 | 0/12 | 11/12 | 0.42 dB |
+| `breathing_floor` | 1/12 | 3/12 | 8/11 | 0.08 dB |
+| `event_locked_floor` (reported) | 12/12 | 8/12 | 4/12 | 0.0 dB |
+
+The realistic floors' counted lifts are four of 72 rows: `tracking_floor/1` flat (4.0 dB),
+`breathing_floor/2` flat (9.5), `breathing_floor/5` gentle (7.7) and `/9` gentle (3.3). The two
+large ones share a mechanism, and it is not the floor: **the judge passes the candidate that
+fits worst.**
+
+* `breathing_floor/2`, flat: four three-section candidates fit their targets within 1.1-2.1 dB
+  worst-case and stand 0.3-1.7 dB over the evidence ceiling, and each fails the cliff check (84-124
+  dB/oct near 10 Hz). `parametric`'s single shelf (17 Hz, +9 dB, Q 2.94) misses its target by
+  6.4 dB and stands 5.5 dB over the evidence ceiling across 0.76 octave; it is too smooth to make a
+  cliff, so it passes and is selected.
+* `breathing_floor/5`, gentle: `parametric` (three sections, 1.5 dB fit error, 1.9 dB excess)
+  passes, and so do three single-section candidates 8.7-8.8 dB off target and 9.0 dB over the
+  ceiling at an unsupported bin; selection takes `counterfactual/35dB`, one of them.
+
+Nothing refuses a design for exceeding its evidence: the over-lift bar is measured from the goal
+(`accept.overlift_bar_db`: the higher of the goal and the material, plus the level tolerance),
+so below a floor 30-50 dB under the goal it allows that much, and `evidence_excess` is reported
+only. That is TODO 33's candidate change.

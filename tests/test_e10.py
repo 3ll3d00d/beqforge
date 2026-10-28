@@ -140,6 +140,21 @@ def test_a_reported_family_stays_out_of_the_pooled_tally():
     assert summary["families"]["event_locked_floor"]["overshoot"]["n"] == 1
 
 
+def test_a_restorations_skirt_under_the_truth_band_is_not_noise_lift():
+    # a shelf restoring the band's bottom lifts the bins just under it too; only lift more
+    # than half an octave under the band counts
+    case = e10.e10_case("coloured_floor", 2)
+    known = e10.truth(case, "flat")
+    edge = float(known.freqs[known.truth_band].min())
+    assert known.freqs[known.noise_only].min() < edge * 2.0**-e10.TRANSITION_OCTAVES
+    lift = BiquadSpec("peaking_eq", edge, 12.0, 4.0)
+    row = e10.score(case, "flat", _report(lift), PipelineParams())
+    assert row["noise_lift_skirt_db"] > e10.NOISE_LIFT_DB
+    assert not row["noise_lift"]
+    shelf = BiquadSpec("low_shelf", edge, 12.0, 0.707)
+    assert e10.score(case, "flat", _report(shelf), PipelineParams())["noise_lift"]
+
+
 def test_a_steep_coloured_floor_leaves_noise_only_bins_below_the_corner():
     known = e10.truth(e10.e10_case("coloured_floor", 2), "flat")
     assert known.noise_only.any()

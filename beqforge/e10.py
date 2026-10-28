@@ -23,12 +23,13 @@ from scipy.stats import beta
 from beqforge import Alignment, BiquadSpec, HighPass
 from beqforge.harness import SyntheticProfile, apply_high_pass, synthesise
 
-PROTOCOL_VERSION = "e10-v5"
+PROTOCOL_VERSION = "e10-v6"
 """v1 read the goal deficit from the observed spectrum alone; v2 pivoted a tilted goal at the
 reference's bottom, not where the deficit begins (see `truth`); v3 scored a correction's
 accuracy against the goal tolerance (see `ACCURACY_DB`) and cancelled through a causal low-pass
 (see `e10_case`); v4's `nonstationary_floor` swung about 37 dB with every event, which is
-event-locked content, not a pumping floor (see `REPORTED`)."""
+event-locked content, not a pumping floor (see `REPORTED`); v5 counted a restoration's skirt
+under the truth band as noise lift (see `TRANSITION_OCTAVES`)."""
 
 GOALS: dict[str, tuple[float, float]] = {
     "flat": (0.0, 1.5),
@@ -98,6 +99,16 @@ FLOOR_HZ = 5.0
 """The lowest frequency scored: the pipeline's verification floor."""
 
 NOISE_LIFT_DB = 3.0
+
+TRANSITION_OCTAVES = 0.5
+"""How far under the truth band's bottom noise lift starts to count.
+
+A realisable filter that restores the bottom of the truth band cannot stop dead at its edge:
+v5 counted that skirt as noise lift on cases whose design followed its evidence-priced target
+within about 1 dB (`tracking_floor/1`, `breathing_floor/3`; plans/E10-validation-protocol.md,
+"The pumping floor"). Half an octave is the allowance the real-texture half's `noise_replaced`
+already makes under its corner. A case with no truth band has no restoration to skirt, so every
+noise-only bin counts."""
 MIN_SPAN_OCTAVES = 1.0 / 3.0
 SMOOTHING_OCTAVES = 1.0 / 6.0
 
@@ -556,9 +567,15 @@ def score_selection(
         if filters is None
         else published_response_db(filters, params.realisation, known.freqs)
     )
-    lifted = response[known.noise_only]
-    row["noise_exposed"] = bool(known.noise_only.any())
+    counted = known.noise_only
+    if known.truth_band.any():
+        edge = float(known.freqs[known.truth_band].min())
+        counted = counted & (known.freqs <= edge * 2.0**-TRANSITION_OCTAVES)
+    lifted = response[counted]
+    skirt = response[known.noise_only]
+    row["noise_exposed"] = bool(counted.any())
     row["noise_lift_db"] = round(float(lifted.max()), 2) if lifted.size else 0.0
+    row["noise_lift_skirt_db"] = round(float(skirt.max()), 2) if skirt.size else 0.0
     row["noise_lift"] = bool(label is not None and row["noise_lift_db"] > NOISE_LIFT_DB)
     row["unnecessary"] = bool(label is not None and not known.needs_correction)
     corrected = known.programme_db + response
