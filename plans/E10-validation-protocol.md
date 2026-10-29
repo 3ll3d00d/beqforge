@@ -487,3 +487,103 @@ Nothing refuses a design for exceeding its evidence: the over-lift bar is measur
 (`accept.overlift_bar_db`: the higher of the goal and the material, plus the level tolerance),
 so below a floor 30-50 dB under the goal it allows that much, and `evidence_excess` is reported
 only. That is TODO 33's candidate change.
+
+## Bounding lift by the evidence: three experiments, none adopted (29 October 2026)
+
+TODO 33's candidate change was to hold the design to the evidence-priced target. Three forms of
+it were built in a worktree (branch `experiment-evidence-bound`, uncommitted) and measured on
+development seeds 1-12 at design version 8 and on the refit probe's 54 titles and variants. The
+decision was set in advance: adopt only a strong positive on balance.
+
+* **A, the fitter's one-sided bound at the licence plus 1.5 dB** (as library fix 4 bounds the
+  over-lift bar). It cleared the counted noise lifts, but moved 51 of the refit probe's 54 titles,
+  with large fit-error regressions. It also sent `parametric` through `_fit_all`, which lost
+  `natural_droop/1`'s design. Its first run was invalid: the licence reads 0 dB outside the
+  envelope range (below 4.88 Hz), which bounded lift to 1.5 dB beside a 35 dB target, so only
+  measured, unexcluded bins were bounded from then on.
+* **B, a judge check refusing a design more than 1.5 dB over the licence anywhere.** Noise lift
+  fell to 0 of 42 counted rows at every goal, but missed rose by 3 at every goal, because clean
+  `parametric` designs 2.2-2.6 dB over were refused. 20 of 54 refit titles moved, all variants.
+* **C, as B but only over an excess at least half an octave wide.** Across v8-accepted E10
+  designs, the peak excess does not separate noise lift from clean designs. Its width does:
+  the noise lifts are 0.76 octave or wider, the clean designs 0.35 or narrower. On the
+  development seeds, C took noise lift from 2 of 42 rows to 0 at every goal. Missed went
+  46 → 47 (flat), 49 → 48 (gentle) and 47 → 48 (tight): `tracking_floor/1` now declines.
+  Median shortfall improved. Overshoot was unchanged at flat (6) and tight (6) but rose 1 → 2 at
+  gentle: `breathing_floor/5` falls back to a three-shelf high-Q cascade with 5.9 dB of
+  publication drift, and that cascade makes a 3 dB bump 0.16 octave wide. That breaks the
+  decision rule's first condition. The refit probe moved 11 of 54, all variants and no real
+  title.
+
+**The library decided it.** Every v8 record stores each candidate's `evidence_excess`, so C's
+check can be applied to beqdesigner's 1,069 version 8 records without a rerun:
+
+| Excess over | at least 0.5 octave wide | 0.75 octave | 1 octave |
+|---|---|---|---|
+| 1.5 dB (C) | 96 refused / 14 newly decline | 53 / 7 | 21 / 2 |
+| 2 dB | 68 / 10 | 38 / 5 | 19 / 1 |
+| 3 dB | 34 / 5 | 16 / 2 | 9 / 0 |
+| 4 dB | 17 / 3 | 8 / 2 | 3 / 0 |
+
+C would refuse the accepted design for 96 of 1,033 designed titles (9%). 82 of them would fall
+back to another passing candidate, mostly from flatten to `counterfactual/25dB`, and 14 would
+decline. A narrower check changes fewer titles, but it also misses E10's own cases
+(`tracking_floor/1` is 1.8 dB over). None of the 11 probe titles is affected.
+
+Twelve of the 96 corrected curves were inspected: the eight largest excesses and four from the
+typical 1.5-3 dB range.
+
+* **The large excesses lift below a diagnosed tracking floor, mostly on older titles.** Whether
+  what lies below is noise is not established (see below). Wait Until Dark (1967) lifts everything below its 22 Hz noise floor by 25-30 dB, to about the
+  programme's level. White Heat (1949) lifts about 30 dB below its 40 Hz floor. The King and I
+  (1956) lifts its noise and a 9.7 Hz tone by 10 dB, and How to Marry a Millionaire (1953) its
+  floor and hum by 5 dB. Each fallback lifts less there. But in the two worst cases the licence itself
+  allows 20-25 dB below the noise floor, and the design stays inside it almost everywhere. C
+  refuses them only for a 5-6 dB excess at the 4.9 Hz edge, so a design that respected that
+  edge would pass with the whole noise lift. Flatten's target note names the mechanism:
+  "noise floor binds … held flat", so the target holds the restoration's full lift flat into
+  the noise.
+* **The typical excesses are a smooth fit against a ragged licence, on content that tracks
+  the programme.** The Little Mermaid, Underground, To Die For and Jackie Brown all have no
+  diagnosed noise floor, and their fallbacks are no better: To Die For's gives up about 10 dB of
+  restoration. Any Given Sunday (1999) is refused over a dip in the licence at 10-11 Hz and has
+  no fallback. A Few Good Men is refused over the same dip, and its fallback lifts about as much
+  there. The Parent Trap (1961) would decline over a 6 dB excess at 5-8 Hz, just above its
+  7.2 Hz floor.
+
+So excess over the licence is the wrong thing to refuse on. Most of what it catches is harmless
+mismatch between fit and licence. The library's large lifts below a diagnosed tracking floor sit
+inside a licence that permits them, and it catches those only by accident. None of A, B
+or C is adopted; the code stays on its branch. The scratch evidence is `library_gate.json`,
+`gated_titles.json` and `gated_*.png`.
+
+**How common lift below a noise floor is in the library.** For each v8 record, the accepted
+design's median lift was measured from 4.88 Hz to half an octave under the diagnosed
+`noise_floor_hz`, the same allowance E10 makes. That was compared with its median lift over the
+octave above the floor (scratch `nf_count.json`). 379 of the 1,033 designed titles have a
+diagnosed noise floor. 304 of them have measured bins under it.
+
+| Median lift below the floor over | Titles | of which another passing candidate stays under it |
+|---|---|---|
+| 3 dB | 247 | 86 |
+| 10 dB | 151 | 74 |
+| 20 dB | 34 | 25 |
+
+141 of the 151 over 10 dB are flatten. Its lift below the floor is about what it is above, which
+is the "held flat" target at work. This is not confined to old titles with high floors. The
+largest are modern films with floors at 7-12 Hz: Moana (2016) lifts 37 dB under an 8.4 Hz
+floor, and Silver Linings Playbook (2012) and Creed III (2023) lift 33 dB. They sit alongside
+White Heat, Wait Until Dark and Marnie, whose floors are at 22-40 Hz.
+
+**These are not counts of noise lift.** `noise_floor_hz` is a legacy name for the mix tracking
+boundary (`diagnose.Diagnosis`): the first band, searching down from the plateau, whose
+envelope fails to track the passband's. A band can fail that without being noise: deep-bass
+effects that move independently of the plateau, or content too sparse to correlate. A single
+failing band ends the search, even if what lies below tracks again. A band can also pass
+without being content, since event-locked leakage tracks. The contrast licence often disagrees
+with the boundary: on Wait Until Dark it allows 20 dB below it. So lifting below the boundary is
+noise lift only where the boundary is right and what lies under it is noise, and nothing yet
+shows how often that holds. No rule on lift below the floor is worth designing until the floor
+detection is validated as a noise detector, on truth (E10's synthetic families know where
+their noise is) and on real titles, against an independent test of noise. That is TODO 33's next
+step.
