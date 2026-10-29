@@ -587,3 +587,72 @@ shows how often that holds. No rule on lift below the floor is worth designing u
 detection is validated as a noise detector, on truth (E10's synthetic families know where
 their noise is) and on real titles, against an independent test of noise. That is TODO 33's next
 step.
+
+## Is the tracking boundary a noise detector? (29 October 2026)
+
+**On E10's truth.** `diagnose`'s `noise_floor_hz` was scored against each development case's
+truth arrays (seeds 1-12, all 14 families; scratch `floor_truth.json`). The truth boundary is the
+bottom of the truth band, where the programme stops standing 3 dB over the noise.
+
+| Family | Floor found | Median position against the truth | Range |
+|---|---|---|---|
+| `coloured_floor` | 12/12 | 0.30 octave low | 0.06-0.62 |
+| `tracking_floor` | 12/12 | 0.42 octave low | 0.07-1.12 |
+| `correlated_noise` | 12/12 | 0.25 octave low | 0.01-0.62 |
+| `breathing_floor` | 12/12 | 0.24 octave low | 0.02-0.50 |
+| `finite_stopband`, noise-exposed | 3/6 | 0.83 octave low | 0.67-1.06 |
+
+On every noise-exposed case where it finds a floor, the boundary sits below the truth, never above
+it. So it treats the band just above it, which is noise, as tracking content, and a restoration held
+flat from there lifts that noise. Half of `finite_stopband`'s exposed cases (−60 dB leakage onto
+noise) find no floor at all. The opposite error appears on `partial_channels`, a high-pass on the
+LFE alone with content in the mix down to 5 Hz. Three of its 12 cases get floors at 14.9, 17.0 and
+27.2 Hz, so a design held flat from there withholds a restoration the content supports. The other
+false floors sit at 4-6 Hz, at the bottom edge of the analysis band. `event_locked_floor` finds a
+floor once in 12, as the content principle intends.
+
+**An independent test, calibrated on E10.** Two statistics are measured per sixth-octave band
+below the plateau, from the mono mix in 4.1 s frames (scratch `noisestat.py`):
+* **r, loudness scaling:** the band's level rise from the 40-80th to the 95-100th percentile of
+  plateau loudness, as a fraction of the plateau's own rise. Content scales (about 1); additive
+  stationary noise does not (about 0).
+* **q, steadiness:** the band's mean frame power over its 10th-percentile frame power, in dB.
+
+On the development cases' truth (bands where the noise is 3 dB over the programme, or the
+programme 3 dB over the noise), noise bands have median r 0.02 and q 4.5 dB (90% under 6.1).
+Content bands have median r 0.93 and q 41 dB (90% over 6.2). Calling a band noise when r < 0.55
+and q < 9.5 dB catches 671 of 775 noise bands, and all of them outside `stationary_noise`, whose
+cases have no programme and whose plateau is noise too. It calls 94 of 3,073 content bands
+noise, 76 of them in `continuous_bass`, a steady drone that no statistic of this kind can tell
+from noise. Event-locked noise reads r 0.84 and q 25 dB, content by the principle.
+
+**On the library.** The test was run on the `mono.wav` of the 300 designed titles that have
+measured bins under their boundary, plus 40 titles without one as controls (scratch
+`library_noise.json`, `library_noise_summary.json`). It was read over the bins half an octave or
+more under the boundary.
+
+| Under the boundary | Titles | Median year | Median q | Steady like E10's noise (q < 9.5) |
+|---|---|---|---|---|
+| Scales with the programme (r ≥ 0.8) | 83 | 2011 | 42.5 dB | 0 |
+| Partly (0.55 ≤ r < 0.8) | 68 | 2011 | 40.4 dB | 0 |
+| Does not scale (r < 0.55) | 149 | 2000 | 27.1 dB | 10 |
+
+* **About half the boundaries (151 of 300) sit on content.** What lies under them rises with
+  the programme and is far from steady. That holds for the largest lifts in the earlier count:
+  Moana (r 1.2, q 54), Creed III (1.09, 50), Juror #2 (0.87, 46). Those designs restore content,
+  not noise. This is the `partial_channels` error, at library scale.
+* **Only 10 titles look like E10's noise**, with what is under the boundary neither scaling nor
+  steady: Mary Poppins, Night Moves, On the Waterfront, The Exorcist and others. Where both
+  statistics find the noise, the median boundary is 0.12 octave above it (28 titles; 10-90%:
+  0.47 octave below to 1.12 above).
+* **The other 139 do not scale but are not steady either**, among them Wait Until Dark (r 0.15,
+  q 16.7) and How to Marry a Millionaire (0.21-0.25, 12-24). That fits noise that varies over a
+  programme (reel changes, rumble, handling) or content that moves independently of the plateau
+  (effects in quiet scenes). These statistics cannot tell the two apart, and E10 has no such
+  noise to calibrate against.
+* None of the 40 controls has a noise boundary by this test.
+
+So the tracking boundary calls content noise on about half the library's floored titles, and
+where it is right about noise it sits too low on synthetic truth. It is not fit to gate a rule
+on lift below it. What would settle the 139 is a steadiness measured locally, over a few
+minutes rather than the whole programme, and a listen to a handful of them.
