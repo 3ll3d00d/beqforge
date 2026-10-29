@@ -656,3 +656,29 @@ So the tracking boundary calls content noise on about half the library's floored
 where it is right about noise it sits too low on synthetic truth. It is not fit to gate a rule
 on lift below it. What would settle the 139 is a steadiness measured locally, over a few
 minutes rather than the whole programme, and a listen to a handful of them.
+
+**Steadiness measured locally.** q was measured again within each 240 s stretch of a title,
+the length of an E10 case so that the calibration carries over, and the median taken across
+stretches (scratch `library_noise_local.json`). Noise that changes level between reels is steady
+within one, so the 139 undecided titles should resolve if that is what they are.
+
+| Under the boundary | Titles | Locally steady (q < 9.5) | 9.5-15 dB | Bursty (≥ 15 dB) |
+|---|---|---|---|---|
+| Scales with the programme | 83 | 4 | 13 | 66 |
+| Partly | 68 | 2 | 9 | 57 |
+| Does not scale | 149 | 27 | 37 | 85 |
+
+Only 27 of the 149 become steady noise this way: Mary Poppins, The Exorcist and Pulp Fiction's
+lower boundary, among others. 85 stay bursty within minutes (Wait Until Dark 15.5, Marnie 26.3)
+while not scaling with the plateau's loudness. That fits either content that moves
+independently of the plateau, such as effects in quiet scenes, or transient noise such as splice
+thumps and handling on an optical track. Neither statistic can separate those, and E10 has no
+transient noise to calibrate against. Where the local test finds a noise boundary (45 titles),
+the tracking boundary sits a median 0.05 octave above it, but anywhere from 0.83 below to 1.27
+above (10-90%). Four of the 40 controls have a local noise boundary the tracking test did not
+report.
+
+The tally for the 300 floored titles is: 151 with content under the boundary, 27 to 33 with
+steady noise, 37 borderline, and 85 bursty and unresolved. Listening is the next evidence, and
+the candidates are Wait Until Dark, Marnie and GoodFellas (bursty, not scaling) against Mary
+Poppins and The Exorcist (steady noise).
