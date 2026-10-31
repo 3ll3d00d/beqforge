@@ -485,7 +485,7 @@ FEATURES: tuple[Feature, ...] = (
     _judged(
         "judge.overlift",
         "lifting above anything the material or the target asks",
-        ("accept:overlift_bar_db",),
+        ("accept:overlift_bar_db", "accept:AcceptParams.bass_ceiling_hz"),
         "overlift",
         "lifts ",
     ),

@@ -101,7 +101,11 @@ def test_playback_baseline_is_fixed_before_correction_and_preserves_crossover():
     target = magnitude_db(biquad_sos(filters, 96000), DESIGN_GRID, 96000)
     verdict = assess(filters, b, float("nan"), target_db=target)
     assert not verdict.passed
-    assert any("above anything" in reason for reason in verdict.failures)
+    # the over-lift bar catches it, at the bass ceiling where the shelf rises above it
+    assert any(
+        "above anything" in reason or "bass ceiling" in reason
+        for reason in verdict.failures
+    )
 
 
 def test_pipeline_records_actual_playback_domain(monkeypatch):

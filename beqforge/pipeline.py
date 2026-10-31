@@ -819,18 +819,25 @@ def _flat_deficit(material: Material, params: "PipelineParams"):
 
 
 def _judged_top_hz(
-    anchor_hz: float, params: "PipelineParams", noise_floor_hz: float = math.nan
+    anchor_hz: float,
+    params: "PipelineParams",
+    noise_floor_hz: float = math.nan,
+    *,
+    ceiling: bool = True,
 ) -> float:
     """Upper edge of the judged band — and the pivot of the goal below the knee.
 
-    The deficit's first settled end (where the correction stops), but at least
+    The deficit's first settled end (where the correction stops), no higher than the bass
+    ceiling (`AcceptParams.bass_ceiling_hz`) unless `ceiling` is false, but at least
     `min_judge_octaves` above the band's floor, so there is always enough band to read a
-    slope over. No fixed frequency.
+    slope over.
     """
     low = params.verify_floor_hz
     if not math.isnan(noise_floor_hz):
         low = max(low, noise_floor_hz)
     widest = low * 2.0**params.accept.min_judge_octaves
+    if ceiling and params.accept.bass_ceiling_hz is not None:
+        anchor_hz = min(anchor_hz, params.accept.bass_ceiling_hz)
     return min(max(anchor_hz, widest), float(DESIGN_GRID[-1]))
 
 
@@ -1033,8 +1040,9 @@ def passband_ripple_db(
     if measured is None:
         return None
     freqs, response, _, _, _, anchor = measured
+    # the passband above the deficit's own end, wherever the bass ceiling stops the correction
     low, high = (
-        _judged_top_hz(anchor, params, noise_floor_hz),
+        _judged_top_hz(anchor, params, noise_floor_hz, ceiling=False),
         params.diagnose.band_hz[1],
     )
     bands = (*params.exclude_bands_hz, *mains_hum_notches(freqs, response, low, high))
@@ -1131,6 +1139,21 @@ def priced_by_evidence(
     — the ambition E3 found selection rewarding.
     """
     target, notes = _held_below_floor(target, diagnosis.noise_floor_hz)
+    ceiling_hz = params.accept.bass_ceiling_hz
+    if ceiling_hz is not None:
+        # tapered to nothing at the bass ceiling, over the same ratio a deficit closes over
+        capped = target * _taper(
+            DESIGN_GRID,
+            ceiling_hz / params.flatten_taper_ratio,
+            params.flatten_taper_ratio,
+        )
+        cut = int(np.argmax(target - capped))
+        if target[cut] - capped[cut] > 0.5:
+            notes.append(
+                f"bass ceiling binds: the target asks for {target[cut]:.1f} dB at "
+                f"{DESIGN_GRID[cut]:.1f} Hz, tapered to nothing by {ceiling_hz:g} Hz"
+            )
+        target = capped
     if deficit_db is not None:
         excess = target - deficit_db
         worst = int(np.argmax(excess))

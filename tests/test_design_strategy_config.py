@@ -286,7 +286,10 @@ def test_partial_parametric_intent_is_judged_without_weakening_wrong_filter_chec
         target_db=wrong_target,
     )
     assert not verdict.passed
-    assert any("above anything the material" in f for f in verdict.failures)
+    assert any(
+        "above anything the material" in f or "bass ceiling" in f
+        for f in verdict.failures
+    )
 
 
 @pytest.mark.parametrize("aligned", [True, False])

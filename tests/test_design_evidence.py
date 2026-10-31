@@ -158,7 +158,9 @@ def test_every_target_is_held_below_the_floor_and_capped_at_the_deficit():
     15.5 dB below the floor where `flatten` asked 6.4, and the parametric cascade won at
     +18.7 dB. On Send Help a parametric target reached 1.54 times the measured deficit.
     """
-    env = envelopes_with_margin(40.0)  # contrast licenses far more than either rule allows
+    env = envelopes_with_margin(
+        40.0
+    )  # contrast licenses far more than either rule allows
     diagnosis = Diagnosis(
         DESIGN_GRID, np.zeros_like(DESIGN_GRID), {}, noise_floor_hz=20.0
     )
@@ -245,3 +247,20 @@ def test_a_bass_heavy_source_has_no_low_end_deficit():
     falls = np.interp(10, freqs, response) - np.interp(80, freqs, response)
     assert falls > 10.0, "the fixture should fall well away above its bass"
     assert low_end_deficit_db(material, PipelineParams()).max() < 1.0
+
+
+def test_every_target_stops_at_the_bass_ceiling():
+    """TODO 39: bass EQ ends at the ceiling, whatever a strategy asks for above it."""
+    env = envelopes_with_margin(40.0)
+    diagnosis = Diagnosis(DESIGN_GRID, np.zeros_like(DESIGN_GRID), {})
+    wide = np.full_like(DESIGN_GRID, 6.0)
+
+    capped, notes = priced_by_evidence(wide, env, diagnosis, PipelineParams())
+    assert capped[DESIGN_GRID >= 60.0].max() <= 1e-9
+    np.testing.assert_allclose(capped[DESIGN_GRID <= 48.0], 6.0)
+    assert any("bass ceiling binds" in n for n in notes)
+
+    params = PipelineParams()
+    off = replace(params, accept=replace(params.accept, bass_ceiling_hz=None))
+    uncapped, _ = priced_by_evidence(wide, env, diagnosis, off)
+    assert uncapped[DESIGN_GRID >= 60.0].min() > 5.9

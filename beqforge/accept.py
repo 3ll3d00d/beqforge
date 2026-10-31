@@ -147,6 +147,23 @@ class AcceptParams:
     constrained by this clause, so how wide their bands are says nothing about where it should
     sit; a value chosen that way rejected a good filter whose band was perfectly measurable."""
 
+    bass_ceiling_hz: float | None = 60.0
+    """Where bass EQ stops: no target asks for lift above it and no cascade may add more than
+    `level_tolerance_db` beyond it. `None` turns it off (TODO 39).
+
+    A BEQ restores the low end a mix's filtering removed, and that low end ends at or below
+    about 60 Hz. The judged band's top used to follow the deficit's first settled end, at
+    least `min_judge_octaves` above the tracking floor, so on a mix whose floor sits high it
+    reached the midbass, and `flatten` then filled everything under it: Wait Until Dark's band
+    ran to 192 Hz and its cascade lifted 110 Hz by 7.4 dB. 12.4% of the version 8 library's
+    accepted designs lifted 3 dB or more above 60 Hz, against 0.7% of the published catalogue
+    (a check of the premise, not a calibration).
+
+    The ceiling caps the deficit's end, not the band's span: a floor high enough that less
+    than `min_judge_octaves` lies under the ceiling still gets its octave to read a slope over
+    (above the ceiling, where nothing is asked for), because a slope read over less is
+    arbitrary."""
+
     turnover_min_octaves: float = 0.5
     """How far inside the band the peak must sit before a turnover is measured.
 
@@ -414,19 +431,32 @@ def overlift_bar_db(
     band only, never on a filter, so the fitter scores against the same bar before anything is
     fitted (`overlift_allowance` in `pipeline`).
     """
-    guard = (correction.freqs >= DESIGN_GRID[0]) & (
+    in_band = (correction.freqs >= DESIGN_GRID[0]) & (
         correction.freqs <= correction.band_hz[1]
     )
     slack = spectral_roughness(correction, params.roughness_degree) / 2.0
     bar = (
         np.maximum(
-            correction.requested_db(params.target_tilt_db_per_octave)[guard],
-            correction.before_db[guard],
+            correction.requested_db(params.target_tilt_db_per_octave),
+            correction.before_db,
         )
         + params.level_tolerance_db
         + slack
     )
-    return guard, bar
+    guard = in_band
+    if params.bass_ceiling_hz is not None:
+        # Above the bass ceiling nothing is asked for, so the cascade's own lift is what is
+        # bounded: no more than the level tolerance over the material, whatever its roughness
+        # (TODO 39).
+        above = (correction.freqs > params.bass_ceiling_hz) & (
+            correction.freqs <= DESIGN_GRID[-1]
+        )
+        ceiling_bar = correction.before_db + params.level_tolerance_db
+        bar = np.where(
+            above, np.where(in_band, np.minimum(bar, ceiling_bar), ceiling_bar), bar
+        )
+        guard = in_band | above
+    return guard, bar[guard]
 
 
 def spectral_roughness(correction: Correction, degree: int = 3) -> float:
@@ -633,11 +663,18 @@ def assess(
     figures["overlift"] = float(overshoot[worst])
     if _at(float(overshoot[worst]), quantum) > 0.0:
         at_hz = float(correction.freqs[guard][worst])
-        failures.append(
-            f"lifts {at_hz:.1f} Hz to {correction.after_db[guard][worst]:+.1f} dB, "
-            f"{float(overshoot[worst]):.1f} dB above anything the material or the requested "
-            "shape supports there — boosting what is not content"
-        )
+        if params.bass_ceiling_hz is not None and at_hz > params.bass_ceiling_hz:
+            failures.append(
+                f"lifts {at_hz:.1f} Hz by "
+                f"{float(overshoot[worst]) + params.level_tolerance_db:.1f} dB, above the "
+                f"{params.bass_ceiling_hz:g} Hz bass ceiling where bass EQ stops"
+            )
+        else:
+            failures.append(
+                f"lifts {at_hz:.1f} Hz to {correction.after_db[guard][worst]:+.1f} dB, "
+                f"{float(overshoot[worst]):.1f} dB above anything the material or the "
+                "requested shape supports there — boosting what is not content"
+            )
 
     roughness = spectral_roughness(correction, params.roughness_degree)
     wobble = corrected_wobble(correction, params.roughness_degree)

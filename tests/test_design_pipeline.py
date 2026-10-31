@@ -708,3 +708,15 @@ def test_every_fit_chosen_among_is_recorded_with_what_it_scored() -> None:
         (2, False),
         (4, True),  # none passes: the fitter's answer is what is reported
     ]
+
+
+def test_the_judged_band_stops_at_the_bass_ceiling_but_keeps_its_octave() -> None:
+    """TODO 39: the deficit's end is capped at the ceiling; the one-octave span is not, since
+    a slope read over less is arbitrary (`AcceptParams.min_judge_octaves`)."""
+    from beqforge.pipeline import _judged_top_hz
+
+    params = PipelineParams()
+    assert _judged_top_hz(190.0, params, 22.0) == 60.0
+    assert _judged_top_hz(190.0, params, 22.0, ceiling=False) == 190.0
+    assert _judged_top_hz(35.0, params, 10.0) == 35.0
+    assert _judged_top_hz(190.0, params, 50.0) == 100.0

@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "1.6"
 """The version this module implements. Responses echo the request's own version instead."""
 
-DESIGN_VERSION = 8
+DESIGN_VERSION = 9
 """Which answer this code gives (1.4): bumped by any change that can alter `candidates`,
 `rejected`, a decline or a 1.3 fit figure for an unchanged request and unchanged settings.
 
@@ -103,7 +103,9 @@ tolerance in [0, 1] (a last-digit difference, not an answer change) and only ren
 the first the judge passes, fewest sections first, instead of whichever the arithmetic landed on
 (TODO 32). 0.3.0 is 8: the fit's search scores a whole generation at once, in the linear
 domain (TODO 23), which re-rolls the fit among near-equal optima as any change to its
-arithmetic does. `plans/design-version.md` has each one's build."""
+arithmetic does. 9 (unreleased) stops bass EQ at a 60 Hz ceiling: no target asks for lift
+above it, the judged band's top is capped there, and a cascade may add no more than the level
+tolerance beyond it (TODO 39). `plans/design-version.md` has each one's build."""
 
 Coverage = Literal["complete_programme", "excerpt"]
 ChannelScope = Literal["all_channels", "lfe_only", "mixed"]

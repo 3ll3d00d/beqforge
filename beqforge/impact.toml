@@ -116,3 +116,31 @@ note = "the target and ceiling reach the fit quantised as before"
 feature = "fit.choice"
 kind = "unchanged"
 note = "`_choose_fit` and the near-equal window are untouched; what they choose among is re-rolled"
+
+[[change]]
+id = "bass-ceiling"
+design_version = 9
+summary = "bass EQ stops at a 60 Hz ceiling: every priced target tapers to nothing by it, the judged band's top is capped there (its one-octave span is not), and above it a cascade may add no more than the level tolerance, a bound the fitter is given too (TODO 39)"
+evidence = "plans/bass-ceiling.md#outcome-31-october-2026"
+
+[[change.touches]]
+feature = "targets.shared"
+kind = "behaviour"
+# Measured on the library, moved by `impact.MOVED`, together with judge.overlift (one change,
+# not separable): v8 library titles designed at version 8 and 9 on one machine, from the
+# library's audio with default settings. The designed classes are 60 titles lifting 3 dB above
+# 60 Hz at version 8 (random, plus those named in review) and 20 random others; the declined
+# classes a random sample of each. The 3 declined_after_fit titles that now design are fit
+# re-rolls inside bands that end at 36-43 Hz, where the ceiling does not bind (row 32).
+basis = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [11, 15], designed_all_passed = [54, 65] }
+
+[[change.touches]]
+feature = "judge.overlift"
+kind = "behaviour"
+# The same measurement as targets.shared.
+basis = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [11, 15], designed_all_passed = [54, 65] }
+
+[[change.touches]]
+feature = "judge.assess"
+kind = "unchanged"
+note = "the over-lift failure names the bass ceiling when its worst bin lies above it; wording only"

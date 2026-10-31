@@ -609,9 +609,7 @@ def test_device_stability_is_required_even_when_the_corrected_shape_passes(
     inverse[:, :3] /= inverse[:, 3:4]
     inverse[:, 4:] /= inverse[:, 3:4]
     inverse[:, 3] = 1.0
-    samples = signal.sosfilt(
-        inverse, np.random.default_rng(42).normal(size=300000)
-    )
+    samples = signal.sosfilt(inverse, np.random.default_rng(42).normal(size=300000))
     corrected = verify(filters, samples, 1000, realisation=device)
     verdict = assess(filters, corrected, float("nan"), realisation=device)
     rounded = device.quantise(biquad_sos(filters, device.fs))
@@ -643,3 +641,27 @@ def test_a_tracking_floor_below_the_band_cannot_fail_the_extent() -> None:
     assert not any("corrected only down to" in f for f in below_band.failures), (
         below_band.failures
     )
+
+
+def test_lift_above_the_bass_ceiling_is_bounded_by_the_level_tolerance() -> None:
+    """TODO 39: above the bass ceiling nothing is asked for, so a cascade's own lift there is
+    bounded by the level tolerance, whatever the material's roughness — the roughness slack
+    let Wait Until Dark lift 110 Hz by 7.4 dB."""
+    from beqforge.accept import overlift_bar_db
+
+    freqs = np.logspace(np.log10(4.0), np.log10(400.0), 400)
+    rough = 8.0 * np.sin(
+        np.log2(freqs) * 6.0
+    )  # several dB of wobble about a flat trend
+    lifted = Correction(
+        freqs=freqs, before_db=rough, after_db=rough + 5.0, band_hz=(20.0, 200.0)
+    )
+    guard, bar = overlift_bar_db(lifted, AcceptParams())
+    above = freqs[guard] > 60.0
+    np.testing.assert_allclose(bar[above], rough[guard][above] + 3.0)
+    verdict = assess([BiquadSpec("peaking_eq", 100.0, 5.0, 0.5)], lifted, float("nan"))
+    assert any("60 Hz bass ceiling" in f for f in verdict.failures)
+
+    off = AcceptParams(bass_ceiling_hz=None)
+    guard, _ = overlift_bar_db(lifted, off)
+    assert freqs[guard].max() <= 200.0
