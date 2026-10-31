@@ -123,7 +123,7 @@ the same way: 10 that declined before any fit, and 12 that declined after fittin
   unchanged. They are fit re-rolls (row 32): the fitter's new bound above 60 Hz moves which
   near-equal fit it lands on. The new designs lift at most 1.9 dB above 60 Hz.
 
-## Adopted (31 October 2026, design version 9)
+## Adopted (31 October 2026, design version 9, released in 0.3.2)
 
 Adopted as design version 9.
 - **Impact.** `beqforge/impact.toml` declares `targets.shared` and `judge.overlift` as behaviour,

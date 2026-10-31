@@ -103,7 +103,7 @@ tolerance in [0, 1] (a last-digit difference, not an answer change) and only ren
 the first the judge passes, fewest sections first, instead of whichever the arithmetic landed on
 (TODO 32). 0.3.0 is 8: the fit's search scores a whole generation at once, in the linear
 domain (TODO 23), which re-rolls the fit among near-equal optima as any change to its
-arithmetic does. 9 (unreleased) stops bass EQ at a 60 Hz ceiling: no target asks for lift
+arithmetic does. 0.3.2 is 9: it stops bass EQ at a 60 Hz ceiling: no target asks for lift
 above it, the judged band's top is capped there, and a cascade may add no more than the level
 tolerance beyond it (TODO 39). `plans/design-version.md` has each one's build."""
 
