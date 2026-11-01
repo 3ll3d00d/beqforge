@@ -136,7 +136,12 @@ Adopted as design version 9.
   | designed_with_failures | 11 / 15 |
   | designed_all_passed | 54 / 65 |
 
-  `judge.assess` is declared unchanged: only its wording changed.
+  `judge.assess` is declared unchanged: only its wording changed. Because the sample was chosen
+  for what the ceiling reaches, these counts scored the whole library `likely`. Since 1 November
+  2026 they are split by whether a record reaches above 60 Hz: 61 of 66 above, 4 of 14 designs
+  and 3 of 9 declines below. On the v8 library that is 365 `likely` and 684 `possible`, where it
+  was 1,033 `likely`
+  ([redesign scope](redesign-scope.md#scoring-a-change-by-what-it-reaches-1-november-2026)).
 - **Golden answers:** regenerated.
 - **Tests:** the two that expected the old over-lift wording now also accept the ceiling's.
   New tests cover the bar above the ceiling, the target taper and the judged top.

@@ -249,3 +249,54 @@ Both users agreed the following, and beqforge built it before 0.2.12:
   The list is `/media/beq/triage/impact-step4-sample.json`. The person picks the cut-off for the
   rest of the library from the measured rates, and the counts are folded back into
   `impact.toml`, which changes scores but no design.
+
+### Scoring a change by what it reaches, 1 November 2026
+
+Version 9 (the bass ceiling, TODO 39) scored all 1,033 designed records in the v8 library
+`likely`, with 999 expected to move. Two separate faults produced that figure, and neither was
+in the ceiling itself.
+
+* **The basis came from a chosen sample.** The paired sample was 60 titles picked because they
+  lift 3 dB above 60 Hz, plus 20 controls. Its 54 of 65 was then applied to every design in the
+  class. In the library, 12.4% of designs lift that far.
+* **One measurement was counted twice.** `targets.shared` and `judge.overlift` were measured
+  together and declared the same basis, but `assess` combined them as independent: 0.83 became
+  0.97. A basis measures its change as a whole, as `Change.basis` already assumed. Now the
+  largest share among a change's touches stands for the change, and only changes combine as
+  independent.
+
+**Built.** A `behaviour` or `all` touch can now be confined above a frequency (`above_hz`,
+`above_lift_db`, `basis_below`). `impact.reaches_above` reads each candidate in the record. A
+record reaches above the frequency when any candidate's judged band ends above it, its priced
+target asks for any lift there, or its cascade lifts more than `above_lift_db` there, up to the
+top of the design grid. That record is scored by `basis`, and any other by `basis_below`. A
+fitted candidate that holds neither its band nor its target is `unknown` (`no_figure`). These
+are the ceiling's three mechanisms: the target taper, the judged band's capped top, and the
+over-lift bar above the ceiling, which the fitter is given too. The ceiling's own sample
+splits cleanly on them:
+
+| Outcome class | Reaches above 60 Hz | Doesn't |
+| --- | --- | --- |
+| no_fit | 0 / 0 | 0 / 10 |
+| declined_after_fit | 0 / 3 | 3 / 9 |
+| designed_with_failures | 11 / 12 | 0 / 3 |
+| designed_all_passed | 50 / 54 | 4 / 11 |
+
+The moves below the ceiling are fit re-rolls (row 32): Predator, Run Lola Run, Scarface and
+Terminator 2 among the controls, and the 3 declines that now design. Re-rolls don't depend on
+which side a record falls, so the declared basis pools them. `declined_after_fit` is 3 of 12
+on both sides. Below the ceiling, the two designed classes share 4 of 14. With 3 cases,
+`designed_with_failures` alone would have read 0 and called those records unaffected.
+
+**On the v8 library** (1,069 records at version 8, scored against version 9):
+
+| | likely | possible | unaffected | expected movers |
+| --- | --- | --- | --- | --- |
+| before | 1,033 | 16 | 20 | 999 |
+| after | 365 | 684 | 20 | 532 |
+
+The 365 `likely` records are the designs that reach above 60 Hz, at 0.92-0.93. The rest score
+0.29, or 0.25 for a decline. Most of what remains is row 32's re-roll, which only stabilising
+the fit choice will narrow. This changes scores but no design: the probe is unchanged at
+`--tol 0` (11 of 11). The response's schema is unchanged. Each `changes` item's `basis` is
+still the largest share declared per class, and of equal shares the larger measurement.

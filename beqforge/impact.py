@@ -689,9 +689,16 @@ class Touch:
     old: float | None = None
     new: float | None = None
     note: str = ""
+    above_hz: float | None = None
+    """For a behaviour or an all whose effect is confined above a frequency: a record that
+    reaches above it (`reaches_above`) is scored by `basis`, any other by `basis_below`."""
+    above_lift_db: float = 0.0
+    """How far a recorded cascade may lift above `above_hz` without reaching it."""
+    basis_below: dict[str, tuple[int, int]] | None = None
+    """As `basis`, measured on the records that reach nothing above `above_hz`."""
 
-    def share(self, kind: str) -> float:
-        moved, measured = self.basis[kind]
+    def share(self, kind: str, below: bool = False) -> float:
+        moved, measured = (self.basis_below if below else self.basis)[kind]
         return moved / measured if measured else 0.0
 
 
@@ -705,13 +712,20 @@ class Change:
 
     def basis(self) -> list[dict]:
         """The measured counts behind its scores, for `changes` (§7.1), one entry per outcome
-        class in `OUTCOMES` order: the largest share declared for it, since that is what
-        scores a record of it."""
+        class in `OUTCOMES` order: the largest share declared for it, the most that can score a
+        record of it, and of equal shares the larger measurement."""
         found: dict[str, tuple[int, int]] = {}
         for touch in self.touches:
-            for kind, (moved, measured) in (touch.basis or {}).items():
+            declared = [
+                *(touch.basis or {}).items(),
+                *(touch.basis_below or {}).items(),
+            ]
+            for kind, (moved, measured) in declared:
                 held = found.get(kind)
-                if held is None or moved * held[1] > held[0] * measured:
+                if held is None or (
+                    (moved / measured if measured else 0.0, measured)
+                    > (held[0] / held[1] if held[1] else 0.0, held[1])
+                ):
                     found[kind] = (moved, measured)
         return [
             {"class": kind, "measured": found[kind][1], "moved": found[kind][0]}
@@ -764,19 +778,30 @@ def parse(text: str) -> ImpactData:
             if t["feature"] not in _BY_ID:
                 raise ValueError(f"change {c['id']}: unknown feature {t['feature']!r}")
             basis = t.get("basis")
+            below = t.get("basis_below")
+            if ("above_hz" in t) != (below is not None):
+                raise ValueError(
+                    f"change {c['id']}: {t['feature']} needs above_hz and basis_below together"
+                )
+            if below is not None and kind not in ("behaviour", "all"):
+                raise ValueError(
+                    f"change {c['id']}: only a behaviour or an all is scored above a frequency"
+                )
             if kind in ("behaviour", "all"):
-                if not basis or set(basis) != set(OUTCOMES):
-                    raise ValueError(
-                        f"change {c['id']}: {t['feature']} needs a basis of [moved, measured] "
-                        f"for each of {OUTCOMES}"
-                    )
-                if any(
-                    len(v) != 2 or not 0 <= int(v[0]) <= int(v[1])
-                    for v in basis.values()
-                ):
-                    raise ValueError(
-                        f"change {c['id']}: a basis is [moved, measured], moved <= measured"
-                    )
+                for declared in (basis, below) if below is not None else (basis,):
+                    if not declared or set(declared) != set(OUTCOMES):
+                        raise ValueError(
+                            f"change {c['id']}: {t['feature']} needs a basis of "
+                            f"[moved, measured] for each of {OUTCOMES}"
+                        )
+                    if any(
+                        len(v) != 2 or not 0 <= int(v[0]) <= int(v[1])
+                        for v in declared.values()
+                    ):
+                        raise ValueError(
+                            f"change {c['id']}: a basis is [moved, measured], "
+                            "moved <= measured"
+                        )
             if kind == "threshold":
                 if "old" not in t or "new" not in t:
                     raise ValueError(f"change {c['id']}: a threshold needs old and new")
@@ -795,6 +820,11 @@ def parse(text: str) -> ImpactData:
                     t.get("old"),
                     t.get("new"),
                     t.get("note", ""),
+                    float(t["above_hz"]) if "above_hz" in t else None,
+                    float(t.get("above_lift_db", 0.0)),
+                    {k: (int(v[0]), int(v[1])) for k, v in below.items()}
+                    if below
+                    else None,
                 )
             )
         changes.append(
@@ -951,7 +981,7 @@ MOVED_TOLERANCE_DB = np.minimum(2.0, 20.0 / MOVED_GRID)
 boost is inaudible, the same dB near the top of the band is a change of balance."""
 
 
-def _response_db(filters: list) -> np.ndarray:
+def _response_db(filters: list, grid: np.ndarray = MOVED_GRID) -> np.ndarray:
     from beqforge import BiquadSpec
     from beqforge.filters import biquad_sos, magnitude_db
     from beqforge.pipeline import PUBLISH_FS
@@ -962,7 +992,6 @@ def _response_db(filters: list) -> np.ndarray:
         else BiquadSpec(*f)
         for f in filters
     ]
-    grid = MOVED_GRID
     if not specs:
         return np.zeros_like(grid)
     return magnitude_db(biquad_sos(specs, PUBLISH_FS), grid, PUBLISH_FS)
@@ -986,6 +1015,44 @@ def moved(before: dict, after: dict) -> tuple[bool, str]:
 
 
 # -- scoring
+
+
+def reaches_above(record: dict, hz: float, lift_db: float) -> tuple[bool | None, str]:
+    """Whether a record's design reached above `hz`, and how: a candidate's judged band ending
+    above it, its priced target asking for any lift above it, or its cascade lifting more than
+    `lift_db` above it (to the top of the design grid). None when a fitted candidate holds
+    neither its band nor its target, so the record can't say."""
+    from beqforge import DESIGN_GRID
+
+    above = DESIGN_GRID > hz
+    for c in record.get("candidates") or []:
+        label = c.get("label", "?")
+        top = ((c.get("correction") or {}).get("band_hz") or (None, None))[1]
+        target = c.get("target_db")
+        if top is None and target is None:
+            return (
+                None,
+                f"{label}'s record holds neither its judged band nor its target",
+            )
+        if top is not None and top > hz:
+            return True, f"{label}'s judged band ends at {top:.0f} Hz"
+        if target is not None and len(target) == len(DESIGN_GRID):
+            asked = np.asarray(target, dtype=float)[above]
+            if asked.max() > 0.0:
+                at = DESIGN_GRID[above][int(np.argmax(asked))]
+                return (
+                    True,
+                    f"{label}'s target asks {asked.max():.1f} dB at {at:.0f} Hz",
+                )
+        if c.get("filters"):
+            lift = _response_db(c["filters"], DESIGN_GRID[above])
+            if lift.max() > lift_db:
+                at = DESIGN_GRID[above][int(np.argmax(lift))]
+                return (
+                    True,
+                    f"{label}'s cascade lifts {lift.max():.1f} dB at {at:.0f} Hz",
+                )
+    return False, f"no candidate reaches above {hz:g} Hz"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1099,8 +1166,10 @@ def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessme
     settings digest) is to differ from the one it holds (§7.1, "Impact").
 
     The score is an estimated probability of moving: each touch's measured share for the
-    record's outcome class, 1.0 for a threshold that flips a deciding verdict, and touches
-    combined as independent, 1 - prod(1 - p)."""
+    record's outcome class (or, for one confined above a frequency, of the records that reach
+    above it or don't), 1.0 for a threshold that flips a deciding verdict; the largest share
+    among a change's touches stands for the change, and changes combine as independent,
+    1 - prod(1 - p)."""
     identity = record_identity(record, data)
     if isinstance(identity, tuple):
         return _unknown(*identity)
@@ -1137,6 +1206,9 @@ def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessme
     stays = 1.0
     certain = reaches_all = False
     for change in data.after(version, now):
+        # A basis is measured over the change as a whole, by its regression check, so the
+        # touches of one change are not independent chances: the largest stands for it.
+        largest = 0.0
         for touch in change.touches:
             if touch.kind == "unchanged":
                 continue
@@ -1158,15 +1230,30 @@ def assess(record: dict, current: tuple[int, str], data: ImpactData) -> Assessme
                 share, certain = 1.0, True
                 detail = f"{why} ({touch.old} -> {touch.new})"
             else:
-                share = touch.share(relied.kind)
-                moved_, measured = touch.basis[relied.kind]
+                below, where = False, ""
+                if touch.above_hz is not None:
+                    reached, why = reaches_above(
+                        record, touch.above_hz, touch.above_lift_db
+                    )
+                    if reached is None:
+                        return _unknown(
+                            "no_figure", why, version, change.id, touch.feature
+                        )
+                    below, where = not reached, f"; {why}"
+                share = touch.share(relied.kind, below)
+                moved_, measured = (touch.basis_below if below else touch.basis)[
+                    relied.kind
+                ]
                 if touch.kind == "all":
                     reaches_all = True
                 elif share <= 0.0:
                     continue
-                detail = f"{relied.detail}; {moved_} of {measured} such designs moved"
-            stays *= 1.0 - share
+                detail = (
+                    f"{relied.detail}{where}; {moved_} of {measured} such designs moved"
+                )
+            largest = max(largest, share)
             reasons.append(Reason(change.id, touch.feature, detail))
+        stays *= 1.0 - largest
     score = 1.0 - stays
     if certain:
         tier: Tier = "will_move"

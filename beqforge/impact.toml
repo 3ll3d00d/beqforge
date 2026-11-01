@@ -18,7 +18,13 @@
 #     is unaffected, and one that predates margins is unknown;
 #   - "all": reaches every design that relies on the feature (at least `likely`), with a basis
 #     as for a behaviour;
+#   - either of those confined above a frequency adds `above_hz`, `above_lift_db` and a
+#     `basis_below`: a record whose candidates reach above it (`impact.reaches_above`) is
+#     scored by `basis`, any other by `basis_below`;
 #   - "unchanged": the code changed but the answers it computes did not (say how that was shown).
+#
+# A basis is measured over its change as a whole, so the largest share among a change's touches
+# scores a record; changes combine as independent chances of moving.
 
 # The oldest design version this file can score a record from: every change after it is below.
 since = 6
@@ -130,15 +136,28 @@ kind = "behaviour"
 # not separable): v8 library titles designed at version 8 and 9 on one machine, from the
 # library's audio with default settings. The designed classes are 60 titles lifting 3 dB above
 # 60 Hz at version 8 (random, plus those named in review) and 20 random others; the declined
-# classes a random sample of each. The 3 declined_after_fit titles that now design are fit
-# re-rolls inside bands that end at 36-43 Hz, where the ceiling does not bind (row 32).
-basis = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [11, 15], designed_all_passed = [54, 65] }
+# classes a random sample of each. That sample is chosen for what the ceiling reaches, so it is
+# split by it: `basis` counts the records `impact.reaches_above` says reach above 60 Hz (a
+# judged band ending above it, any target lift above it, or a cascade lifting more than the
+# level tolerance above it), `basis_below` the rest. Of the v8 library's 1,033 designs, 365
+# reach above it. Below, the moves are fit re-rolls (row 32): the fitter's new bound above
+# 60 Hz moves which near-equal fit it lands on, including the 3 declined_after_fit titles that
+# now design, whose bands end at 36-43 Hz. Re-rolls don't depend on which side of the ceiling a
+# record falls, so declined_after_fit is pooled across both (0 of 3 above, 3 of 9 below), and
+# below it the two designed classes are pooled (0 of 3 and 4 of 11).
+above_hz = 60.0
+above_lift_db = 3.0
+basis = { no_fit = [0, 0], declined_after_fit = [3, 12], designed_with_failures = [11, 12], designed_all_passed = [50, 54] }
+basis_below = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [4, 14], designed_all_passed = [4, 14] }
 
 [[change.touches]]
 feature = "judge.overlift"
 kind = "behaviour"
 # The same measurement as targets.shared.
-basis = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [11, 15], designed_all_passed = [54, 65] }
+above_hz = 60.0
+above_lift_db = 3.0
+basis = { no_fit = [0, 0], declined_after_fit = [3, 12], designed_with_failures = [11, 12], designed_all_passed = [50, 54] }
+basis_below = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_failures = [4, 14], designed_all_passed = [4, 14] }
 
 [[change.touches]]
 feature = "judge.assess"

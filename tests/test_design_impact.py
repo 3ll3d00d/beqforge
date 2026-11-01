@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from beqforge import impact
+from beqforge import DESIGN_GRID, impact
 from beqforge.designer import (
     DESIGN_VERSION,
     DesignRequest,
@@ -124,6 +124,29 @@ def test_the_shipped_impact_data_loads() -> None:
             "records no margin",
         ),
         ('feature = "judge.cliff"\nkind = "threshold"\nold = 2.0', "old and new"),
+        (
+            (
+                'feature = "fit.choice"\nkind = "behaviour"\nabove_hz = 60.0\nbasis = { '
+                "no_fit = [0, 1], declined_after_fit = [0, 1], designed_with_failures = "
+                "[0, 1], designed_all_passed = [0, 1] }"
+            ),
+            "above_hz and basis_below together",
+        ),
+        (
+            (
+                'feature = "judge.cliff"\nkind = "threshold"\nold = 2.0\nnew = 2.5\n'
+                "above_hz = 60.0\nbasis_below = { no_fit = [0, 1] }"
+            ),
+            "only a behaviour or an all",
+        ),
+        (
+            (
+                'feature = "fit.choice"\nkind = "behaviour"\nabove_hz = 60.0\nbasis = { '
+                "no_fit = [0, 1], declined_after_fit = [0, 1], designed_with_failures = "
+                "[0, 1], designed_all_passed = [0, 1] }\nbasis_below = { no_fit = [0, 1] }"
+            ),
+            "needs a basis",
+        ),
     ],
 )
 def test_a_bad_declaration_is_refused(touch: str, match: str) -> None:
@@ -252,6 +275,75 @@ def test_changes_combine_as_independent_chances_of_moving() -> None:
     found = impact.assess(record, (7, SETTINGS), data)
     assert (found.tier, found.score) == ("likely", 0.75)
     assert [r.change for r in found.reasons] == ["six", "seven"]
+
+
+def test_one_changes_touches_are_one_measurement_not_independent_chances() -> None:
+    """Two features measured together by one regression check move together: the larger
+    share stands for the change, and each still gives its reason."""
+    data = _data(
+        _behaviour("targets.shared", designed_all_passed=(1, 2)),
+        _behaviour("judge.overlift", designed_all_passed=(1, 4)),
+    )
+    found = impact.assess(
+        _record([_candidate("flatten", True)], "flatten"), (7, SETTINGS), data
+    )
+    assert (found.tier, found.score) == ("likely", 0.5)
+    assert [r.feature for r in found.reasons] == ["targets.shared", "judge.overlift"]
+
+
+def _reaching(
+    band_top: float | None = 40.0,
+    target: list[float] | None = None,
+    filters: tuple[dict, ...] = (),
+) -> dict:
+    candidate = _candidate("flatten", True) | {"filters": list(filters)}
+    if band_top is not None:
+        candidate["correction"] = {"band_hz": [5.0, band_top]}
+    if target is not None:
+        candidate["target_db"] = target
+    return _record([candidate], "flatten")
+
+
+def _asking(hz: float, db: float) -> list[float]:
+    return np.where(DESIGN_GRID <= hz, db, 0.0).tolist()
+
+
+def test_what_reaches_above_a_frequency_is_read_from_the_record() -> None:
+    def reach(record: dict) -> bool | None:
+        return impact.reaches_above(record, 60.0, 3.0)[0]
+
+    assert reach(_reaching(band_top=190.0)) is True
+    assert reach(_reaching(target=_asking(80.0, 0.5))) is True
+    assert reach(_reaching(target=_asking(55.0, 12.0))) is False
+    # a shelf's skirt lifts 10 dB at 30 Hz but under 3 dB above 60 Hz; at 60 Hz it lifts more
+    assert reach(_reaching(filters=(SHELF,))) is False
+    assert reach(_reaching(filters=(SHELF | {"freq_hz": 60.0},))) is True
+    assert reach(_reaching(band_top=None)) is None
+
+
+def _confined(**counts: tuple[int, int]) -> impact.Touch:
+    return dataclasses.replace(
+        _behaviour("targets.shared", designed_all_passed=(9, 10)),
+        above_hz=60.0,
+        above_lift_db=3.0,
+        basis_below={k: counts.get(k, (0, 1)) for k in impact.OUTCOMES},
+    )
+
+
+def test_a_change_confined_above_a_frequency_scores_by_which_side_a_record_falls() -> (
+    None
+):
+    """A sample chosen for what a change reaches would otherwise score the whole library by
+    the designs it was chosen for."""
+    data = _data(_confined(designed_all_passed=(1, 4)))
+    above = impact.assess(_reaching(band_top=190.0), (7, SETTINGS), data)
+    assert (above.tier, above.score) == ("likely", 0.9)
+    assert "judged band ends at 190 Hz; 9 of 10" in above.reasons[0].detail
+    below = impact.assess(_reaching(), (7, SETTINGS), data)
+    assert (below.tier, below.score) == ("possible", 0.25)
+    assert "no candidate reaches above 60 Hz; 1 of 4" in below.reasons[0].detail
+    unread = impact.assess(_reaching(band_top=None), (7, SETTINGS), data)
+    assert (unread.tier, unread.unknown_reason) == ("unknown", "no_figure")
 
 
 def test_a_design_declined_before_the_fit_does_not_rely_on_it() -> None:
