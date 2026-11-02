@@ -575,3 +575,64 @@ one the judge passes rather than one it happens to fail.
   declines: both candidates introduce cliffs (45 and 38 dB/oct against 31.5 in the input) and
   no near-equal fit avoids them. All 17 titles that went from declined to designed in v6 still
   design.
+
+### A stable tie-break (2 November 2026, `DESIGN_VERSION` 10)
+
+**The measurement first.** `refit_probe.py`'s perturbation had two faults, fixed in edf7b53.
+It wrapped the previous title's wrapper, so a worker that ran several titles offset their
+targets by a multiple of `REFIT_PERTURB_DB` that depended on scheduling. And the stage cache's
+key cannot see the offset, so a perturbed snapshot read its proposals (the parametric fit
+among them) from whichever run last wrote each title's slot: another offset, or another tree.
+Every flip count above, and the 14 and 19 in TODO row 32, was measured with both faults, so
+read them as indicative. The tool now perturbs once and bypasses the cache under any offset,
+keeps each title's fits (`snapshot --state`) and judges again from them (`rejudge`), so a
+selection change costs seconds, not a refit.
+
+**Stability, measured again.** 32 titles: the 11 baseline titles and the 21 variants whose
+winner had moved under any earlier snapshot, at offsets +0.004, −0.003 and +0.002 dB against
+0, 93 title-runs (Dossier 137 declines). Winner flips, default mode and `--content-edge`:
+
+| Rule | default | content edge |
+| --- | --- | --- |
+| fewest sections in a tie (version 9) | 14 (11 verdict, 3 ranking) | 28 (14, 14) |
+| A: search the outranked fit again from seeds 1 and 2 before a worse strategy wins | 14 (9, 5) | 24 (10, 14) |
+| C: departure weighted per octave, not per linear bin | 14 (11, 3) | n/a |
+| **strategy order in a tie, `STRATEGIES` first to last** | **8 (8, 0)** | **18 (11, 7)** |
+| strategy order, last to first | 15 (12, 3) | 23 (12, 11) |
+
+Measured cleanly, real titles flip too, which the faulty snapshots hid: 28 Years Later and
+Send Help move between parametric and flatten under every offset, their departures under
+0.1 dB apart, because the tie went to the fewest sections and a near-equal fit comes back with
+one, two or three by the last digits of the arithmetic. A (built, then removed: it changed
+little and costs a fit per re-roll) and C are not adopted.
+
+**What changed.** `Report.accepted` breaks a flatness tie (`ranking_tie_db`, 0.25 dB) by the
+strategy's place in `STRATEGIES` (`pipeline._strategy_rank`), flatten before counterfactual
+before parametric, and the counterfactual's depths in the order proposed. The fewest-sections
+rule (R3's parsimony) goes: what a fit produced can't break a tie stably, a fixed order can.
+The order is the registry's, not the request's, so listing strategies differently can't move
+an answer.
+
+**Evidence** (scratch `r32/`):
+
+* Rejudge probe, both modes: 28 Years Later and Send Help, parametric to flatten; nothing
+  else moves. The corrected curves are the same answer: within 0.6 and 0.44 dB, 0.39 and
+  0.29 dB RMS, on cascades of the same shape (Send Help one shelf, 9.3 Hz +16.3 dB against
+  9.4 Hz +15.5 dB).
+* Protocol: seed 101's `varying_filtered` goes from counterfactual/25dB to flatten, recovery
+  25.8 to 18.3 dB RMS, no false acceptance; seed 947 unchanged.
+* Corpus, seeds 1-9: gate PASS as before (gated negatives 0/45, upper bound 0.079), every
+  count unchanged; `filtered/7` goes from counterfactual/25dB to flatten, 0.48 to 0.74 dB RMS
+  recovery. The committed reference is refreshed.
+* The v8 library (1,069 records), each record's candidates selected again under both rules
+  from their recorded verdicts and corrected curves: the old rule reproduces 1,068 recorded
+  winners, the other an exact tie. 80 winners change: 70 of 762 designs where every candidate
+  passed, 10 of 271 with a failing one; 44 parametric to flatten, 30 counterfactual to
+  flatten, 6 between counterfactual depths. That is `impact.toml`'s basis.
+* Golden: the version number only.
+
+**Left.** Verdict flips are what remains: a candidate on the edge of a shape check (cliff,
+wobble, tilt) passes under one offset and fails under the next, and the winner goes with it.
+The next step is a margin around those checks, so that a fit close to an edge counts the same
+whichever side it lands. `--content-edge`'s 7 ranking flips are candidates crossing the tie
+band's edge.

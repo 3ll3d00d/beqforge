@@ -1,5 +1,5 @@
 {
- "design_version": 9,
+ "design_version": 10,
  "answers": {
   "no-channels": {
    "decline_reason": "channel_evidence_unavailable"

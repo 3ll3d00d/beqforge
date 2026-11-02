@@ -557,6 +557,7 @@ FEATURES: tuple[Feature, ...] = (
         (
             "pipeline:run",
             "pipeline:Report*",
+            "pipeline:_strategy_rank",
             "pipeline:Candidate*",
             "pipeline:TargetFit*",
             "pipeline:target_fit",

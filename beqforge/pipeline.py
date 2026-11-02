@@ -650,10 +650,10 @@ class Report:
     ranking_tie_db: float = 0.25
     """Flatness difference below which two candidates are the same answer (`accepted`).
 
-    Inside it, the one with fewer sections wins — R3's parsimony, applied where it belongs.
-    Candidates whose departures differ by a few hundredths of a dB are genuinely tied, since
-    the measure's own scatter is far larger, and preferring the lower number would be
-    preferring noise. Candidates that differ by a clear margin are not a tie at all."""
+    Inside it, the strategy listed first in `STRATEGIES` wins (TODO 32). Candidates whose
+    departures differ by a few hundredths of a dB are genuinely tied, since the measure's own
+    scatter is far larger, and preferring the lower number would be preferring noise.
+    Candidates that differ by a clear margin are not a tie at all."""
 
     mix_reference_db: float = math.nan
     """Median level of the mix's own plateau: what every deficit is measured against."""
@@ -677,8 +677,8 @@ class Report:
         defeat. This only orders candidates already through it.
 
         Ranked on `Correction.departure_db` against the shape that was *requested* — so a run
-        asking for a house curve is not handed the flattest candidate — then on section count
-        within `ranking_tie_db`. It was ranked on `wobble_db`, which is the statistic the
+        asking for a house curve is not handed the flattest candidate — then, within
+        `ranking_tie_db`, on the strategy's place in `STRATEGIES` (`_strategy_rank`). It was ranked on `wobble_db`, which is the statistic the
         flatness clause judges but the wrong one to choose *between* passing candidates: it is
         blind to level and tilt, which acceptance admits across a wide range, and the margins it
         decided on were a fraction of a dB in a quantity whose own scatter is several dB. That
@@ -690,16 +690,31 @@ class Report:
             return None
         wanted = self.accept.target_tilt_db_per_octave
         flattest = min(c.correction.departure_db(wanted) for c in passing)
-        # every candidate indistinguishable from the flattest, then the cheapest of those.
-        # Flatness breaks the remaining tie so the result does not depend on candidate order.
+        # every candidate indistinguishable from the flattest, then the first strategy's
         tied = [
             c
             for c in passing
             if c.correction.departure_db(wanted) <= flattest + self.ranking_tie_db
         ]
-        return min(
-            tied, key=lambda c: (len(c.filters), c.correction.departure_db(wanted))
-        )
+        return min(tied, key=lambda c: _strategy_rank(c.label))
+
+
+def _strategy_rank(label: str) -> int:
+    """Where a candidate's strategy stands in `STRATEGIES`; an unknown one last.
+
+    `Report.accepted` breaks a flatness tie on this, a fixed order, and not on anything the fit
+    produced (TODO 32). The tie used to go to the fewest sections (R3's parsimony), but how
+    many sections a near-equal fit comes back with turns on the last digits of the arithmetic:
+    a few thousandths of a dB on every target moved 28 Years Later between its parametric and
+    flatten candidates, under 0.1 dB apart, as one came back with two sections or three. Over
+    the steep injected variants and the real titles at three such offsets, this order flipped
+    8 winners in 93 where the section count flipped 14 (18 and 28 with `--content-edge`), and
+    in the default mode every flip left is a verdict's, not the ranking's. The reverse order
+    flipped 15 (23). Within one strategy (the counterfactual's depths) `min` keeps
+    the order its proposals were made in."""
+    names = list(STRATEGIES)
+    name = label.split("/", 1)[0]
+    return names.index(name) if name in names else len(names)
 
 
 @dataclass(frozen=True, slots=True)

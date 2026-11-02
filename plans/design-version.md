@@ -129,6 +129,8 @@ by the judge, fewest sections first (TODO 32, [outcome](library-review-improveme
 8 (0.3.0) scores the fit's search a generation at a time in the linear domain
 (TODO 23, [outcome](fit-kernel.md#outcome)).
 9 (0.3.2) stops bass EQ at a 60 Hz ceiling (TODO 39, [outcome](bass-ceiling.md#outcome-31-october-2026)).
+10 (unreleased) breaks a flatness tie by the strategy's place in `STRATEGIES`, not by section
+count (TODO 32, [outcome](library-review-improvements.md#a-stable-tie-break-2-november-2026-design_version-10)).
 
 ### Correction after the v0.2.6 release tests
 

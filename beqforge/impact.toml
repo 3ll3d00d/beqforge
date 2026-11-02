@@ -163,3 +163,20 @@ basis_below = { no_fit = [0, 10], declined_after_fit = [3, 12], designed_with_fa
 feature = "judge.assess"
 kind = "unchanged"
 note = "the over-lift failure names the bass ceiling when its worst bin lies above it; wording only"
+
+[[change]]
+id = "tie-by-strategy"
+design_version = 10
+summary = "a flatness tie between passing candidates goes to the strategy listed first in `STRATEGIES`, not to the fewest sections, whose count a near-equal fit re-rolls with the arithmetic (TODO 32)"
+evidence = "plans/library-review-improvements.md#a-stable-tie-break-2-november-2026-design_version-10"
+
+[[change.touches]]
+feature = "selection"
+kind = "behaviour"
+# Measured on the whole v8 library, not a sample, moved by `impact.MOVED` (another strategy
+# wins, or another counterfactual cap): each record's candidates re-selected under both rules
+# from their recorded verdicts and corrected curves. The old rule reproduces 1,068 of the 1,069
+# recorded winners; the other is an exact tie (flatten and parametric 0.9355 dB, two sections
+# each) that the new rule moves, counted here. A record with no passing candidate has no
+# winner to move.
+basis = { no_fit = [0, 20], declined_after_fit = [0, 16], designed_with_failures = [10, 271], designed_all_passed = [70, 762] }

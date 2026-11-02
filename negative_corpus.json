@@ -1,6 +1,6 @@
 {
  "protocol": "negative-corpus-v1",
- "revision": "v0.3.1-7-g3d4e7de1c543-dirty+src:98d06cad274e",
+ "revision": "v0.3.3-1-gedf7b53f4850-dirty+src:7486f95a46a1",
  "params": "PipelineParams(diagnose=DiagnoseParams(band_hz=(4.0, 200.0), exclude_bands_hz=(), reference_percentile=90.0, reference_tolerance_db=3.0, reference_min_octaves=0.3333333333333333, reference_max_slope_db_per_octave=3.0, knee_slope_db_per_octave=14.0, strata=((40.0, 80.0), (80.0, 99.0), (99.0, 100.0)), level_tolerance_db=6.0, tracking_window_s=4.0, tracking_floor=0.5), extraction=ExtractionParams(exclude_bands_hz=(), frame_samples=1024, overlap=0.5, band_hz=(4.0, 470.0), scene_band_hz=(10.0, 60.0), floor_percentile=10.0, scene_margin_db=45.0, quiet_margin_db=3.0, envelope_percentile=95.0, reference_band_hz=(60.0, 120.0), confidence_bins=None, confidence_bootstraps=200), identify=IdentifyParams(fit_band_hz=(5.0, 60.0), exclude_bands_hz=(), envelope_order=1, null_envelope_margin=1, min_improvement_db=0.1, min_coherence=0.1, corner_bounds_hz=(4.0, 120.0)), accept=AcceptParams(target_tilt_db_per_octave=0.0, tilt_tolerance_db_per_octave=2.0, goal_tolerance_db=1.5, level_tolerance_db=3.0, decision_quantum_db=0.1, spread_margin_db=2.0, roughness_degree=3, extent_smoothing_bins=9, min_judge_octaves=1.0, bass_ceiling_hz=60.0, turnover_min_octaves=0.5, cliff_window_octaves=0.25, cliff_tolerance_db_per_octave=2.0, min_section_contribution_db=1.0, max_drift_db=3.0), realisation=Realisation(fs=96000.0, coefficient_bits=28, integer_bits=5, drift_samples=48, publication_precision=(0.005, 0.005, 0.0005)), playback=PlaybackParams(crossover_hz=80.0, mains_lowpass_hz='crossover', sub_lowpass_hz='crossover', main_gain_db=-20.2, lfe_gain_db=-10.2, sub_gain_db=0.0), strategies=('flatten', 'counterfactual', 'parametric'), flatten_settled_octaves=0.33, flatten_deficit_floor_db=0.5, flatten_taper_ratio=1.25, restore_caps_db=(25.0, 35.0, 45.0, 50.0), max_sections=4, max_target_boost_db=None, parametric_max_boost_db=20.0, residual_target_db=0.5, max_gain_db=26.0, confidence_z=1.645, fit_seeds=(0,), lowest_frequency_hz=5.0, residual_band_hz=(5.0, 200.0), fit_tolerance_db=0.5, verify_floor_hz=5.0, judge_from_content_edge=False, exclude_bands_hz=())",
  "seeds": "1-9",
  "duration_s": 240.0,
@@ -106,7 +106,7 @@
    "shape": "broadband",
    "seed": 1,
    "injected": null,
-   "seconds": 4.9
+   "seconds": 4.4
   },
   {
    "name": "sparse_dialogue/1",
@@ -126,7 +126,7 @@
    "shape": "sparse_dialogue",
    "seed": 1,
    "injected": null,
-   "seconds": 1.5
+   "seconds": 1.8
   },
   {
    "name": "varying_source/1",
@@ -146,7 +146,7 @@
    "shape": "varying_source",
    "seed": 1,
    "injected": null,
-   "seconds": 4.3
+   "seconds": 4.6
   },
   {
    "name": "rumble/1",
@@ -218,7 +218,7 @@
    "shape": "natural_droop",
    "seed": 1,
    "injected": null,
-   "seconds": 61.9
+   "seconds": 81.7
   },
   {
    "name": "filtered/1",
@@ -266,7 +266,7 @@
    "shape": "filtered",
    "seed": 1,
    "injected": "LR4@24.8999Hz",
-   "seconds": 77.7
+   "seconds": 98.8
   },
   {
    "name": "broadband/2",
@@ -286,7 +286,7 @@
    "shape": "broadband",
    "seed": 2,
    "injected": null,
-   "seconds": 4.3
+   "seconds": 3.6
   },
   {
    "name": "sparse_dialogue/2",
@@ -306,7 +306,7 @@
    "shape": "sparse_dialogue",
    "seed": 2,
    "injected": null,
-   "seconds": 1.5
+   "seconds": 1.7
   },
   {
    "name": "varying_source/2",
@@ -326,7 +326,7 @@
    "shape": "varying_source",
    "seed": 2,
    "injected": null,
-   "seconds": 4.0
+   "seconds": 4.3
   },
   {
    "name": "rumble/2",
@@ -366,7 +366,7 @@
    "shape": "stationary_noise",
    "seed": 2,
    "injected": null,
-   "seconds": 1.2
+   "seconds": 1.1
   },
   {
    "name": "natural_droop/2",
@@ -397,7 +397,7 @@
    "shape": "natural_droop",
    "seed": 2,
    "injected": null,
-   "seconds": 56.2
+   "seconds": 76.8
   },
   {
    "name": "filtered/2",
@@ -427,7 +427,7 @@
    "shape": "filtered",
    "seed": 2,
    "injected": "LR2@36.9366Hz",
-   "seconds": 59.4
+   "seconds": 78.1
   },
   {
    "name": "broadband/3",
@@ -447,7 +447,7 @@
    "shape": "broadband",
    "seed": 3,
    "injected": null,
-   "seconds": 6.9
+   "seconds": 7.7
   },
   {
    "name": "sparse_dialogue/3",
@@ -467,7 +467,7 @@
    "shape": "sparse_dialogue",
    "seed": 3,
    "injected": null,
-   "seconds": 1.6
+   "seconds": 1.3
   },
   {
    "name": "varying_source/3",
@@ -487,7 +487,7 @@
    "shape": "varying_source",
    "seed": 3,
    "injected": null,
-   "seconds": 6.5
+   "seconds": 5.6
   },
   {
    "name": "rumble/3",
@@ -507,7 +507,7 @@
    "shape": "rumble",
    "seed": 3,
    "injected": null,
-   "seconds": 3.3
+   "seconds": 3.4
   },
   {
    "name": "stationary_noise/3",
@@ -527,7 +527,7 @@
    "shape": "stationary_noise",
    "seed": 3,
    "injected": null,
-   "seconds": 1.0
+   "seconds": 1.1
   },
   {
    "name": "natural_droop/3",
@@ -561,7 +561,7 @@
    "shape": "natural_droop",
    "seed": 3,
    "injected": null,
-   "seconds": 62.9
+   "seconds": 85.4
   },
   {
    "name": "filtered/3",
@@ -585,7 +585,7 @@
    "shape": "filtered",
    "seed": 3,
    "injected": "BW2@19.0097Hz",
-   "seconds": 57.5
+   "seconds": 71.7
   },
   {
    "name": "broadband/4",
@@ -605,7 +605,7 @@
    "shape": "broadband",
    "seed": 4,
    "injected": null,
-   "seconds": 4.1
+   "seconds": 4.4
   },
   {
    "name": "sparse_dialogue/4",
@@ -625,7 +625,7 @@
    "shape": "sparse_dialogue",
    "seed": 4,
    "injected": null,
-   "seconds": 2.9
+   "seconds": 2.6
   },
   {
    "name": "varying_source/4",
@@ -645,7 +645,7 @@
    "shape": "varying_source",
    "seed": 4,
    "injected": null,
-   "seconds": 5.9
+   "seconds": 5.8
   },
   {
    "name": "rumble/4",
@@ -665,7 +665,7 @@
    "shape": "rumble",
    "seed": 4,
    "injected": null,
-   "seconds": 2.5
+   "seconds": 2.3
   },
   {
    "name": "stationary_noise/4",
@@ -685,7 +685,7 @@
    "shape": "stationary_noise",
    "seed": 4,
    "injected": null,
-   "seconds": 0.8
+   "seconds": 1.0
   },
   {
    "name": "natural_droop/4",
@@ -709,7 +709,7 @@
    "shape": "natural_droop",
    "seed": 4,
    "injected": null,
-   "seconds": 54.9
+   "seconds": 70.9
   },
   {
    "name": "filtered/4",
@@ -749,7 +749,7 @@
    "shape": "filtered",
    "seed": 4,
    "injected": "LR4@21.8569Hz",
-   "seconds": 65.7
+   "seconds": 83.7
   },
   {
    "name": "broadband/5",
@@ -769,7 +769,7 @@
    "shape": "broadband",
    "seed": 5,
    "injected": null,
-   "seconds": 7.3
+   "seconds": 10.5
   },
   {
    "name": "sparse_dialogue/5",
@@ -789,7 +789,7 @@
    "shape": "sparse_dialogue",
    "seed": 5,
    "injected": null,
-   "seconds": 0.9
+   "seconds": 1.0
   },
   {
    "name": "varying_source/5",
@@ -809,7 +809,7 @@
    "shape": "varying_source",
    "seed": 5,
    "injected": null,
-   "seconds": 3.7
+   "seconds": 5.9
   },
   {
    "name": "rumble/5",
@@ -829,7 +829,7 @@
    "shape": "rumble",
    "seed": 5,
    "injected": null,
-   "seconds": 1.7
+   "seconds": 2.1
   },
   {
    "name": "stationary_noise/5",
@@ -849,7 +849,7 @@
    "shape": "stationary_noise",
    "seed": 5,
    "injected": null,
-   "seconds": 0.9
+   "seconds": 0.8
   },
   {
    "name": "natural_droop/5",
@@ -884,7 +884,7 @@
    "shape": "natural_droop",
    "seed": 5,
    "injected": null,
-   "seconds": 54.2
+   "seconds": 73.8
   },
   {
    "name": "filtered/5",
@@ -922,7 +922,7 @@
    "shape": "filtered",
    "seed": 5,
    "injected": "LR4@22.0426Hz",
-   "seconds": 60.4
+   "seconds": 74.3
   },
   {
    "name": "broadband/6",
@@ -942,7 +942,7 @@
    "shape": "broadband",
    "seed": 6,
    "injected": null,
-   "seconds": 3.0
+   "seconds": 5.7
   },
   {
    "name": "sparse_dialogue/6",
@@ -962,7 +962,7 @@
    "shape": "sparse_dialogue",
    "seed": 6,
    "injected": null,
-   "seconds": 1.2
+   "seconds": 1.6
   },
   {
    "name": "varying_source/6",
@@ -982,7 +982,7 @@
    "shape": "varying_source",
    "seed": 6,
    "injected": null,
-   "seconds": 3.0
+   "seconds": 6.6
   },
   {
    "name": "rumble/6",
@@ -1002,7 +1002,7 @@
    "shape": "rumble",
    "seed": 6,
    "injected": null,
-   "seconds": 2.8
+   "seconds": 3.1
   },
   {
    "name": "stationary_noise/6",
@@ -1022,7 +1022,7 @@
    "shape": "stationary_noise",
    "seed": 6,
    "injected": null,
-   "seconds": 0.8
+   "seconds": 1.1
   },
   {
    "name": "natural_droop/6",
@@ -1061,7 +1061,7 @@
    "shape": "natural_droop",
    "seed": 6,
    "injected": null,
-   "seconds": 60.3
+   "seconds": 77.1
   },
   {
    "name": "filtered/6",
@@ -1085,7 +1085,7 @@
    "shape": "filtered",
    "seed": 6,
    "injected": "BW2@18.7117Hz",
-   "seconds": 55.6
+   "seconds": 71.2
   },
   {
    "name": "broadband/7",
@@ -1105,7 +1105,7 @@
    "shape": "broadband",
    "seed": 7,
    "injected": null,
-   "seconds": 3.5
+   "seconds": 5.9
   },
   {
    "name": "sparse_dialogue/7",
@@ -1125,7 +1125,7 @@
    "shape": "sparse_dialogue",
    "seed": 7,
    "injected": null,
-   "seconds": 1.1
+   "seconds": 2.4
   },
   {
    "name": "varying_source/7",
@@ -1145,7 +1145,7 @@
    "shape": "varying_source",
    "seed": 7,
    "injected": null,
-   "seconds": 3.1
+   "seconds": 5.6
   },
   {
    "name": "rumble/7",
@@ -1165,7 +1165,7 @@
    "shape": "rumble",
    "seed": 7,
    "injected": null,
-   "seconds": 3.2
+   "seconds": 4.0
   },
   {
    "name": "stationary_noise/7",
@@ -1185,7 +1185,7 @@
    "shape": "stationary_noise",
    "seed": 7,
    "injected": null,
-   "seconds": 0.7
+   "seconds": 0.8
   },
   {
    "name": "natural_droop/7",
@@ -1217,30 +1217,30 @@
    "shape": "natural_droop",
    "seed": 7,
    "injected": null,
-   "seconds": 52.3
+   "seconds": 64.1
   },
   {
    "name": "filtered/7",
    "negative": false,
    "excerpt": false,
-   "selected": "counterfactual/25dB",
+   "selected": "flatten",
    "false_acceptance": false,
    "abstained": false,
-   "recovery_rms_db": 0.4844079050427772,
+   "recovery_rms_db": 0.7355204189490283,
    "max_boost_noise_dominated_db": 0.0,
-   "evidence_score": 0.9316254435132969,
+   "evidence_score": 0.9325161318723445,
    "candidate_failures": {
     "flatten": [],
     "counterfactual/25dB": []
    },
-   "peak_boost_db": 21.03,
-   "evidence_excess_db": -19.7,
+   "peak_boost_db": 21.86,
+   "evidence_excess_db": -18.55,
    "evidence_excess_width_octaves": 0.0,
-   "sections": 1,
+   "sections": 2,
    "shape": "filtered",
    "seed": 7,
    "injected": "LR2@15.7045Hz",
-   "seconds": 32.7
+   "seconds": 49.4
   },
   {
    "name": "broadband/8",
@@ -1260,7 +1260,7 @@
    "shape": "broadband",
    "seed": 8,
    "injected": null,
-   "seconds": 2.8
+   "seconds": 4.9
   },
   {
    "name": "sparse_dialogue/8",
@@ -1280,7 +1280,7 @@
    "shape": "sparse_dialogue",
    "seed": 8,
    "injected": null,
-   "seconds": 1.0
+   "seconds": 1.6
   },
   {
    "name": "varying_source/8",
@@ -1300,7 +1300,7 @@
    "shape": "varying_source",
    "seed": 8,
    "injected": null,
-   "seconds": 3.1
+   "seconds": 4.1
   },
   {
    "name": "rumble/8",
@@ -1320,7 +1320,7 @@
    "shape": "rumble",
    "seed": 8,
    "injected": null,
-   "seconds": 1.7
+   "seconds": 2.5
   },
   {
    "name": "stationary_noise/8",
@@ -1340,7 +1340,7 @@
    "shape": "stationary_noise",
    "seed": 8,
    "injected": null,
-   "seconds": 0.5
+   "seconds": 1.5
   },
   {
    "name": "natural_droop/8",
@@ -1381,7 +1381,7 @@
    "shape": "natural_droop",
    "seed": 8,
    "injected": null,
-   "seconds": 39.4
+   "seconds": 40.5
   },
   {
    "name": "filtered/8",
@@ -1405,7 +1405,7 @@
    "shape": "filtered",
    "seed": 8,
    "injected": "LR2@16.0264Hz",
-   "seconds": 27.3
+   "seconds": 25.6
   },
   {
    "name": "broadband/9",
@@ -1425,7 +1425,7 @@
    "shape": "broadband",
    "seed": 9,
    "injected": null,
-   "seconds": 3.2
+   "seconds": 3.9
   },
   {
    "name": "sparse_dialogue/9",
@@ -1445,7 +1445,7 @@
    "shape": "sparse_dialogue",
    "seed": 9,
    "injected": null,
-   "seconds": 3.3
+   "seconds": 3.7
   },
   {
    "name": "varying_source/9",
@@ -1465,7 +1465,7 @@
    "shape": "varying_source",
    "seed": 9,
    "injected": null,
-   "seconds": 3.5
+   "seconds": 3.6
   },
   {
    "name": "rumble/9",
@@ -1485,7 +1485,7 @@
    "shape": "rumble",
    "seed": 9,
    "injected": null,
-   "seconds": 1.7
+   "seconds": 1.9
   },
   {
    "name": "stationary_noise/9",
@@ -1505,7 +1505,7 @@
    "shape": "stationary_noise",
    "seed": 9,
    "injected": null,
-   "seconds": 0.7
+   "seconds": 0.9
   },
   {
    "name": "natural_droop/9",
@@ -1564,7 +1564,7 @@
    "shape": "filtered",
    "seed": 9,
    "injected": "LR2@18.7647Hz",
-   "seconds": 30.4
+   "seconds": 29.7
   }
  ]
 }

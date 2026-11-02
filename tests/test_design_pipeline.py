@@ -720,3 +720,48 @@ def test_the_judged_band_stops_at_the_bass_ceiling_but_keeps_its_octave() -> Non
     assert _judged_top_hz(190.0, params, 22.0, ceiling=False) == 190.0
     assert _judged_top_hz(35.0, params, 10.0) == 35.0
     assert _judged_top_hz(190.0, params, 50.0) == 100.0
+
+
+def _ranked(*candidates: tuple[str, int, float]) -> str | None:
+    """`Report.accepted` over passing stand-ins: (label, sections, departure dB)."""
+    from beqforge.pipeline import Report
+
+    report = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                label=label,
+                filters=[None] * sections,
+                verdict=SimpleNamespace(passed=True),
+                correction=SimpleNamespace(departure_db=lambda _tilt, d=departure: d),
+            )
+            for label, sections, departure in candidates
+        ],
+        accept=PipelineParams().accept,
+        ranking_tie_db=0.25,
+    )
+    chosen = Report.accepted.fget(report)
+    return None if chosen is None else chosen.label
+
+
+def test_a_flatness_tie_goes_to_the_strategy_listed_first() -> None:
+    """TODO 32: a near-equal fit's section count re-rolls with the arithmetic, so a tie went
+    one way or the other on the last digits. The registry's order does not move."""
+    assert next(iter(STRATEGIES)) == "flatten"
+    for order in (
+        [("parametric", 1, 1.20), ("flatten", 2, 1.28)],
+        [("flatten", 2, 1.28), ("parametric", 1, 1.20)],
+    ):
+        assert _ranked(*order) == "flatten"
+    # depths of one strategy keep the order they were proposed in
+    assert (
+        _ranked(
+            ("counterfactual/25dB", 3, 4.9),
+            ("counterfactual/35dB", 1, 4.8),
+            ("parametric", 1, 4.7),
+        )
+        == "counterfactual/25dB"
+    )
+
+
+def test_outside_the_tie_the_flatter_candidate_wins_whatever_its_strategy() -> None:
+    assert _ranked(("flatten", 1, 1.6), ("parametric", 3, 1.2)) == "parametric"
