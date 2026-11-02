@@ -21,6 +21,22 @@ flipped in either mode, and every change of winner, and exits 1 when anything mo
 writes minimal run records (the accepted label and each candidate's correction and verdict) so
 `score_injected.py --records DIR` can score a changed winner against an injection's truth.
 
+A selection or judging change need not refit at all. `snapshot --state DIR` keeps each title's
+analysis, proposals and fits, and `rejudge` judges and chooses again from them with the current
+code, writing the same snapshot format. The judgements are kept in the state too, so a change
+to selection alone rejudges a title in about a second; set REFIT_REJUDGE_FRESH=1 when the
+judge itself changed. A change to analysis, to a strategy or to the fitter needs a snapshot.
+
+    uv run python tools/experiments/refit_probe.py snapshot ... --state DIR --out before.json.gz
+    ... change selection or the judge ...
+    uv run python tools/experiments/refit_probe.py rejudge ... --state DIR --out after.json.gz
+
+REFIT_PERTURB_DB=0.004 (say) offsets every fit target by that much before it is quantised:
+another machine's arithmetic, in effect, so the winners' spread across a few such snapshots is
+the design's stability (TODO 32). A perturbation run, its zero included, bypasses the stage
+cache, whose key cannot see the offset. The titles whose winner has ever moved under it are
+few and steep; listing them slowest first keeps the last worker from setting the wall time.
+
 Snapshots are only comparable with snapshots: fitting serially rather than in a pool, and
 without headroom, they are not byte-for-byte a `design_beq.py` record. A snapshot of committed
 code is reusable for every change made on top of it until something that decides anything
@@ -32,6 +48,7 @@ import gzip
 import json
 import logging
 import os
+import pickle
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -60,6 +77,7 @@ from beqforge.pipeline import (  # noqa: E402
 )
 
 MODES = {"default": False, "content_edge": True}
+_QUANTISED = filters._quantised
 
 
 def _no_headroom(material, filters, params, **_) -> Headroom:
@@ -99,26 +117,79 @@ def _accepted(candidates: list[dict], mode: str, accept) -> str | None:
     return None if chosen is None else chosen.label
 
 
-def snapshot_title(path: str) -> dict:
+def _perturbed(perturb: float) -> None:
+    if perturb:
+        # another machine's arithmetic, in effect: every target a few thousandths of a dB off
+        # before it is quantised, so the spread under it is the fit's stability (TODO 32);
+        # wrap the original, not the last title's wrapper: a worker runs several titles
+        filters._quantised = lambda values: _QUANTISED(np.asarray(values) + perturb)
+    else:
+        filters._quantised = _QUANTISED
+
+
+def _worker_setup() -> None:
+    logging.disable(logging.WARNING)
+    filters.PARALLEL_FITS = False
+    pipeline.measure_headroom = _no_headroom
+
+
+def snapshot_title(path: str, state_dir: str | None) -> dict:
     started = time.perf_counter()
     try:
-        return _snapshot_title(Path(path))
+        _worker_setup()
+        material_path = Path(path)
+        state = _fit_state(material_path)
+        result = _judge_state(load(material_path), state)
+        if state_dir is not None:
+            _save_state(Path(state_dir), material_path, state)
+        return result
     finally:
         print(f"  {Path(path).stem}: {time.perf_counter() - started:.1f} s", flush=True)
 
 
-def _snapshot_title(material_path: Path) -> dict:
-    logging.disable(logging.WARNING)
-    filters.PARALLEL_FITS = False
+def rejudge_title(path: str, state_dir: str) -> dict:
+    started = time.perf_counter()
+    try:
+        _worker_setup()
+        material_path = Path(path)
+        state = _load_state(Path(state_dir), material_path)
+        known = len(state.get("judged", {}))
+        result = _judge_state(load(material_path), state)
+        if len(state.get("judged", {})) != known:
+            # keep the judgements made here, so the next rejudge reuses them
+            _save_state(Path(state_dir), material_path, state)
+        return result
+    finally:
+        print(f"  {Path(path).stem}: {time.perf_counter() - started:.1f} s", flush=True)
+
+
+def _state_path(state_dir: Path, material_path: Path) -> Path:
+    return state_dir / f"{material_path.stem}.pickle.gz"
+
+
+def _save_state(state_dir: Path, material_path: Path, state: dict) -> None:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with gzip.open(_state_path(state_dir, material_path), "wb") as handle:
+        pickle.dump(state, handle)
+
+
+def _load_state(state_dir: Path, material_path: Path) -> dict:
+    with gzip.open(_state_path(state_dir, material_path), "rb") as handle:
+        return pickle.load(handle)
+
+
+def _fit_state(material_path: Path) -> dict:
+    """Everything a title's judging needs that costs a fit: analysis, proposals, first fits."""
     perturb = float(os.environ.get("REFIT_PERTURB_DB", "0"))
-    if perturb:
-        # another machine's arithmetic, in effect: every target a few thousandths of a dB off
-        # before it is quantised, so the spread under it is the fit's stability (TODO 32)
-        quantised = filters._quantised
-        filters._quantised = lambda values: quantised(np.asarray(values) + perturb)
-    pipeline.measure_headroom = _no_headroom
+    _perturbed(perturb)
     material = load(material_path)
-    cache_path = material_path.with_suffix(".cache.json.gz")
+    # the stage cache's key does not see the perturbation: a cached proposal is whichever run
+    # wrote it last, so a perturbation study (its zero included) reads and writes nothing
+    cache_path = (
+        None
+        if "REFIT_PERTURB_DB" in os.environ
+        else material_path.with_suffix(".cache.json.gz")
+    )
     analysed = {
         mode: analyse(
             material, PipelineParams(judge_from_content_edge=edge), cache_path
@@ -126,35 +197,56 @@ def _snapshot_title(material_path: Path) -> dict:
         for mode, edge in MODES.items()
     }
     base = analysed["default"]
+    state = {"perturb": perturb, "analysed": analysed}
     if base.blockers:
-        return {"blockers": list(base.blockers), "candidates": [], "accepted": {}}
+        return state
     proposals = propose(material, base, cache_path)
     needs_fitting = [p for p in proposals if p.filters is None]
-    fitted = dict(
-        zip(
-            [p.label for p in needs_fitting],
-            _fit_all(
-                needs_fitting,
-                base.params,
-                overlift_allowance(material, base.params, base.judged_band_hz),
+    allowance = overlift_allowance(material, base.params, base.judged_band_hz)
+    state |= {
+        "proposals": proposals,
+        "fitted": dict(
+            zip(
+                [p.label for p in needs_fitting],
+                _fit_all(needs_fitting, base.params, allowance)
+                if needs_fitting
+                else [],
+                strict=True,
             )
-            if needs_fitting
-            else [],
-            strict=True,
-        )
-    )
-    candidates = []
-    for proposal in proposals:
-        if proposal.filters is not None:
-            answer = (proposal.filters, proposal.residual_db)
-            options = [answer]
-        else:
-            answer, options = fitted[proposal.label]
-        entry = {"label": proposal.label}
-        for mode in MODES:
-            run = analysed[mode]
+        ),
+    }
+    return state
 
-            def judge(cascade, error, measured, run=run, proposal=proposal):
+
+def _judge_state(material, state: dict) -> dict:
+    """Judge each fit and choose among them with the current code; no fitting."""
+    analysed = state["analysed"]
+    base = analysed["default"]
+    if base.blockers:
+        return {"blockers": list(base.blockers), "candidates": [], "accepted": {}}
+    proposals, fitted = state["proposals"], state["fitted"]
+    # a selection change reuses every judgement; REFIT_REJUDGE_FRESH=1 when the judge changed
+    if os.environ.get("REFIT_REJUDGE_FRESH") or "judged" not in state:
+        state["judged"] = {}
+    judged: dict[tuple, object] = state["judged"]
+    chosen: dict[str, list] = {}
+    for mode in MODES:
+        run = analysed[mode]
+
+        def finish(proposal, answer, options, run=run):
+            def judge(cascade, error, measured):
+                key = (
+                    run.params.judge_from_content_edge,
+                    proposal.label,
+                    tuple(tuple(_spec(s)) for s in cascade),
+                    float(error),
+                    bool(measured),
+                )
+                if key not in judged:
+                    judged[key] = judged_afresh(cascade, error, measured)
+                return judged[key]
+
+            def judged_afresh(cascade, error, measured):
                 return _judge(
                     proposal.label,
                     cascade,
@@ -176,12 +268,28 @@ def _snapshot_title(material_path: Path) -> dict:
                 )
 
             # the pipeline's choice among near-equal fits, which the judging mode can change
-            candidate = _choose_fit(
+            return _choose_fit(
                 answer,
                 options,
                 judge,
-                lambda c, run=run: _lifts_beyond_goal(c, run.params),
+                lambda c: _lifts_beyond_goal(c, run.params),
             )
+
+        chosen[mode] = [
+            finish(
+                proposal, answer := (proposal.filters, proposal.residual_db), [answer]
+            )
+            if proposal.filters is not None
+            else finish(proposal, *fitted[proposal.label])
+            for proposal in proposals
+        ]
+
+    candidates = []
+    for index, proposal in enumerate(proposals):
+        entry = {"label": proposal.label}
+        for mode in MODES:
+            run = analysed[mode]
+            candidate = chosen[mode][index]
             if mode == "default":
                 entry["filters"] = [_spec(s) for s in candidate.filters]
                 entry["fit_error_db"] = candidate.fit_error_db
@@ -193,7 +301,7 @@ def _snapshot_title(material_path: Path) -> dict:
                 ),
             }
             if mode == "default":
-                # the curves do not depend on the mode; kept once, for `records`
+                # the curves are the default mode's, kept once, for `records`
                 entry["record"] = record._candidate(candidate)
         candidates.append(entry)
     return {
@@ -206,21 +314,43 @@ def _snapshot_title(material_path: Path) -> dict:
     }
 
 
-def snapshot(args: argparse.Namespace) -> int:
-    paths = [str(p) for p in args.material]
-    workers = args.workers or min(len(paths), max(1, (os.cpu_count() or 2) - 2))
+def _run(paths: list[str], work, extra, workers: int | None, out: str) -> int:
+    workers = workers or min(len(paths), max(1, (os.cpu_count() or 2) - 2))
     started = time.perf_counter()
     with ProcessPoolExecutor(max_workers=workers) as pool:
         results = dict(
-            zip((Path(p).stem for p in paths), pool.map(snapshot_title, paths))
+            zip(
+                (Path(p).stem for p in paths),
+                pool.map(work, paths, [extra] * len(paths)),
+            )
         )
-    with gzip.open(args.out, "wt", encoding="utf-8") as handle:
+    with gzip.open(out, "wt", encoding="utf-8") as handle:
         json.dump(results, handle)
     print(
-        f"wrote {args.out} ({len(results)} titles, {workers} workers, "
+        f"wrote {out} ({len(results)} titles, {workers} workers, "
         f"{time.perf_counter() - started:.0f} s)"
     )
     return 0
+
+
+def snapshot(args: argparse.Namespace) -> int:
+    return _run(
+        [str(p) for p in args.material],
+        snapshot_title,
+        None if args.state is None else str(args.state),
+        args.workers,
+        args.out,
+    )
+
+
+def rejudge(args: argparse.Namespace) -> int:
+    return _run(
+        [str(p) for p in args.material],
+        rejudge_title,
+        str(args.state),
+        args.workers,
+        args.out,
+    )
 
 
 def _load(path: str) -> dict:
@@ -308,6 +438,21 @@ def main() -> int:
     snap.add_argument(
         "--workers", type=int, default=None, help="titles at once (default: cores - 2)"
     )
+    snap.add_argument(
+        "--state",
+        type=Path,
+        default=None,
+        help="keep each title's fits here for rejudge",
+    )
+    again = sub.add_parser(
+        "rejudge", help="judge and choose again from a snapshot's kept fits; no refit"
+    )
+    again.add_argument("material", nargs="+", type=Path)
+    again.add_argument("--state", type=Path, required=True)
+    again.add_argument("--out", required=True)
+    again.add_argument(
+        "--workers", type=int, default=None, help="titles at once (default: cores - 2)"
+    )
     comp = sub.add_parser("compare", help="list what moved between two snapshots")
     comp.add_argument("old")
     comp.add_argument("new")
@@ -316,9 +461,12 @@ def main() -> int:
     rec.add_argument("directory")
     rec.add_argument("--content-edge", action="store_true")
     args = parser.parse_args()
-    return {"snapshot": snapshot, "compare": compare, "records": records}[args.command](
-        args
-    )
+    return {
+        "snapshot": snapshot,
+        "rejudge": rejudge,
+        "compare": compare,
+        "records": records,
+    }[args.command](args)
 
 
 if __name__ == "__main__":

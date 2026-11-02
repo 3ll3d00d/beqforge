@@ -151,6 +151,14 @@ something that decides anything is committed. The synthetic protocol and corpus 
 a decision-changing fitter change; run the two protocol seeds in parallel. `probe.py snapshot
 --content-edge --records DIR` likewise rejudges any scratch record set with the option on.
 
+A change to fit selection or the judge alone does not need refitting: take "before" with
+`snapshot --state <scratch>/state`, and `refit_probe.py rejudge ... --state <scratch>/state`
+judges and chooses again from the kept fits in seconds (`REFIT_REJUDGE_FRESH=1` when the judge
+itself changed, about seven minutes over the steep variants). In a worktree, run the tool with
+the main checkout's `.venv/bin/python`: `uv run` there builds an environment without the
+extras. Stability under another machine's arithmetic (TODO 32) is `REFIT_PERTURB_DB`; see the
+tool's docstring.
+
 **3. Act on what moved:**
 
 * **Nothing** → the change reaches no decision on this material. The test suite is still
