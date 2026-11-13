@@ -63,27 +63,39 @@ def device_error_db(
     return np.interp(freqs, DESIGN_GRID, rounded - exact)
 
 
-def device_waveform(
+@dataclass(frozen=True, slots=True)
+class DeviceTransfer:
+    """`device_waveform`'s half that depends on the cascade, not the signal.
+
+    The published device's complex transfer on the FFT grid of `samples` long input, with
+    the padding it was built for: 0.09 s of the 0.25 s a 6.4M-sample signal takes, the same
+    for every signal of that length run through one cascade. Keeps what it was built for, so
+    `device_waveform` can refuse one built for something else.
+    """
+
+    samples: int
+    fs: float
+    realisation: Realisation
+    guard: int
+    size: int
+    transfer: np.ndarray
+
+
+def device_transfer(
     filters: list[BiquadSpec],
-    samples: np.ndarray,
+    samples: int,
     fs: float,
     realisation: Realisation | None = None,
-    *,
-    include_tail: bool = False,
-) -> np.ndarray:
-    """Apply the published device's complex transfer to band-limited analysis samples.
+) -> DeviceTransfer | None:
+    """The device's transfer for `samples` long input, as `device_waveform` builds it.
 
-    Zero-padded Fourier convolution evaluates H_device(f) at physical frequencies, including
-    phase and coefficient quantisation. No analysis-rate biquad is substituted. The input is
-    the band-limited reconstruction of the extraction, zero-extended outside the programme;
-    this does not recover content removed during extraction. Padding covers at least eight
-    seconds and twelve decades of pole decay per section. `include_tail` retains ring-out
-    for peak measurement. Unstable devices have no finite waveform and are refused.
+    `None` when the cascade is empty, which `device_waveform` returns the input for. Refuses
+    what it refuses: a device rate below the analysis rate, an unstable device.
     """
     device = realisation or Realisation()
     filters = publication_filters(filters)
     if not filters:
-        return np.asarray(samples, dtype=float).copy()
+        return None
     if device.fs < fs:
         raise ValueError("device rate must cover the analysis bandwidth")
     if unstable_sections(filters, device):
@@ -96,12 +108,49 @@ def device_waveform(
     guard = max(
         int(math.ceil(8 * fs)), int(math.ceil(decay * len(sos) * fs / device.fs))
     )
-    size = fft.next_fast_len(len(samples) + 2 * guard)
-    padded = np.zeros(size)
-    padded[guard : guard + len(samples)] = samples
+    size = fft.next_fast_len(samples + 2 * guard)
     freqs = fft.rfftfreq(size, 1 / fs)
     _, transfer = signal.freqz_sos(sos, worN=freqs, fs=device.fs)
-    corrected = fft.irfft(fft.rfft(padded) * transfer, n=size)
+    return DeviceTransfer(samples, fs, device, guard, size, transfer)
+
+
+def device_waveform(
+    filters: list[BiquadSpec],
+    samples: np.ndarray,
+    fs: float,
+    realisation: Realisation | None = None,
+    *,
+    include_tail: bool = False,
+    transfer: DeviceTransfer | None = None,
+) -> np.ndarray:
+    """Apply the published device's complex transfer to band-limited analysis samples.
+
+    Zero-padded Fourier convolution evaluates H_device(f) at physical frequencies, including
+    phase and coefficient quantisation. No analysis-rate biquad is substituted. The input is
+    the band-limited reconstruction of the extraction, zero-extended outside the programme;
+    this does not recover content removed during extraction. Padding covers at least eight
+    seconds and twelve decades of pole decay per section. `include_tail` retains ring-out
+    for peak measurement. Unstable devices have no finite waveform and are refused.
+
+    `transfer` is `device_transfer(filters, len(samples), fs, realisation)` when the caller
+    has run other signals of the same length through the same cascade; one built for
+    something else is refused.
+    """
+    device = realisation or Realisation()
+    if transfer is None:
+        transfer = device_transfer(filters, len(samples), fs, device)
+        if transfer is None:
+            return np.asarray(samples, dtype=float).copy()
+    elif (transfer.samples, transfer.fs, transfer.realisation) != (
+        len(samples),
+        fs,
+        device,
+    ):
+        raise ValueError("transfer was built for another signal length, rate or device")
+    guard = transfer.guard
+    padded = np.zeros(transfer.size)
+    padded[guard : guard + len(samples)] = samples
+    corrected = fft.irfft(fft.rfft(padded) * transfer.transfer, n=transfer.size)
     end = guard + len(samples) + (guard if include_tail else 0)
     return corrected[guard:end].copy()
 

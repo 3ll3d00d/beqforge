@@ -239,3 +239,95 @@ def test_unfiltered_spectra_of_other_signals_are_refused():
         kwargs = {"samples": sub, "reference_samples": subject.mono_mix} | changed
         with pytest.raises(ValueError, match="different signals"):
             verify([], fs=1000, band_hz=(5, 140), unfiltered=shared, **kwargs)
+
+
+@pytest.mark.parametrize("tail", [False, True])
+def test_a_cascades_transfer_built_once_filters_as_if_built_per_signal(tail):
+    """`device_transfer` is `device_waveform`'s cascade half: sharing it changes no sample."""
+    from beqforge.verify import device_transfer
+
+    subject = material()
+    device = Realisation(fs=48000)
+    for filters in (
+        [BiquadSpec("low_shelf", 20, 12, 0.707)],
+        [BiquadSpec("low_shelf", 8, 9, 0.707), BiquadSpec("peaking_eq", 30, 6, 2.0)],
+    ):
+        shared = device_transfer(filters, len(subject.mono_mix), 1000, device)
+        for samples in (subject.mono_mix, *subject.channels.values()):
+            np.testing.assert_array_equal(
+                device_waveform(filters, samples, 1000, device, include_tail=tail),
+                device_waveform(
+                    filters, samples, 1000, device, include_tail=tail, transfer=shared
+                ),
+            )
+
+
+def test_a_transfer_built_for_something_else_is_refused():
+    from beqforge.verify import device_transfer
+
+    subject = material()
+    n = len(subject.mono_mix)
+    filters = [BiquadSpec("low_shelf", 20, 12, 0.707)]
+    device = Realisation(fs=48000)
+    shared = device_transfer(filters, n, 1000, device)
+    for samples, fs, realisation in (
+        (subject.mono_mix[:-1], 1000, device),
+        (subject.mono_mix, 500, device),
+        (subject.mono_mix, 1000, Realisation(fs=96000)),
+    ):
+        with pytest.raises(ValueError, match="another signal length"):
+            device_waveform(filters, samples, fs, realisation, transfer=shared)
+    # an empty cascade has no transfer and passes the signal through, as it did
+    assert device_transfer([], n, 1000, device) is None
+    np.testing.assert_array_equal(
+        device_waveform([], subject.mono_mix, 1000, device), subject.mono_mix
+    )
+    with pytest.raises(ValueError, match="device rate must cover"):
+        device_transfer(filters, n, 1000, Realisation(fs=500))
+    fragile = [
+        BiquadSpec(
+            "low_shelf", 6.137080501313293, 20.453528341353397, 1.7655313695442572
+        )
+    ]
+    with pytest.raises(ValueError, match="unstable"):
+        device_transfer(fragile, n, 1000, Realisation())
+
+
+def test_record_curves_build_each_cascades_transfer_once_for_all_its_signals(
+    monkeypatch,
+):
+    """`curves_from` filters every charted signal through one transfer a candidate."""
+    from beqforge import verify
+    from beqforge.charts import programme_levels_db
+
+    subject = material()
+    cascades = {
+        "a": [BiquadSpec("low_shelf", 20, 12, 0.707)],
+        "none": [],
+        "b": [BiquadSpec("peaking_eq", 30, 6, 2.0)],
+    }
+    built = []
+    real = verify.device_transfer
+
+    def counted(filters, *args, **kwargs):
+        built.append(len(filters))  # an empty cascade has no transfer to share
+        return real(filters, *args, **kwargs)
+
+    monkeypatch.setattr(verify, "device_transfer", counted)
+    curves = record.curves_from(subject, cascades, ["L", "LFE"], Realisation())
+    assert sum(1 for n in built if n) == 2
+    monkeypatch.undo()
+    signals = {"mono": subject.mono_mix, **subject.channels}
+    for label, specs in cascades.items():
+        for name, samples in signals.items():
+            levels = programme_levels_db(
+                device_waveform(specs, samples, 1000.0, Realisation()),
+                1000.0,
+                frame_index=curves["unfiltered"][name]["loudest_index"],
+            )
+            got = curves["filtered"][label][name]
+            for key in ("peak", "average", "loudest_second"):
+                assert got[key] == record._arr(getattr(levels, key)), (
+                    label,
+                    name,
+                )

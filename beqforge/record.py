@@ -518,7 +518,7 @@ def curves_from(
     """
     from beqforge.charts import programme_levels_db
     from beqforge.filters import unstable_sections
-    from beqforge.verify import device_waveform
+    from beqforge.verify import DeviceTransfer, device_transfer, device_waveform
 
     device = realisation or Realisation()
     fs = float(material.fs)
@@ -544,9 +544,17 @@ def curves_from(
             unavailable[label] = "unstable publication: no finite waveform"
             continue
         filtered[label] = {}
+        # the cascade's transfer is the same for every signal of one length: built once
+        transfers: dict[int, DeviceTransfer | None] = {}
         for name, samples in signals.items():
+            if len(samples) not in transfers:
+                transfers[len(samples)] = device_transfer(
+                    specs, len(samples), fs, device
+                )
             levels = programme_levels_db(
-                device_waveform(specs, samples, fs, device),
+                device_waveform(
+                    specs, samples, fs, device, transfer=transfers[len(samples)]
+                ),
                 fs,
                 frame_index=unfiltered[name]["loudest_index"],
             )
