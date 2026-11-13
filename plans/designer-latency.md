@@ -126,3 +126,50 @@ equal by either path (`test_design_extraction`).
 * Outside the pipeline, about 9.5 s a run: the record's chart curves filter the mix and
   the charted channels through every candidate (`record.py`'s `device_waveform` calls), on
   top of loading and imports.
+
+## Follow-up, 13 November 2026: the four points left alone
+
+Same bar (probe `--tol 0` unchanged, real-run records identical apart from fingerprint and
+timings, chart curves equal as JSON, no design version bump). Two were repeated work, two
+were documentation.
+
+* **The mix's `_flat_deficit` (`53a45f8`).** Measured on warm runs (a wrapper timing each
+  call): 13 calls on Caught Stealing, 11 on Black Bag, 0.11-0.13 s each; five of them on the
+  mix (three in `analyse`, one each in `flatten_targets` and `counterfactual_targets`; a warm
+  run's parametric is cached) and one a channel, which is needed. Mix total 0.65 s and 0.58 s.
+  `analyse` now measures once and `propose` once (when the first strategy that derives needs
+  it), each handing the result on through an optional `measured`: three fewer passes, about
+  0.35-0.4 s a run, below what a single run's noise shows. `pipeline.py` is outside
+  `cache.ANALYSIS_MODULES`, so no analysis cache was invalidated (the parametric stage's was).
+  Probe unchanged, also with `--content-edge` (before taken in a worktree of the previous
+  commit). `analyse`'s own `mean_spectrum` of the mix is the same Welch pass again; left.
+* **Outside the pipeline.** Unprofiled wall-clock timers on a warm Caught Stealing run
+  (22.2 s in process, 13.5 s of it `run`): `material.load` 1.54 s, imports 0.83 s,
+  `record.curves_from` 5.78 s (`device_waveform` 4.49 s, `programme_levels_db` 1.27 s),
+  `record.write` 0.62 s. The 1.8 s join of the fit pool seen under cProfile is not there:
+  leaving the pool's `with` takes 0.01-0.02 s, so it was the profiler. The run's own filtered
+  waveforms are of the sub feed, not of the mix and channels the record charts, so there is
+  nothing from the run to reuse. What is shared is the cascade's half of `device_waveform`:
+  its complex transfer (`freqz_sos` over the 6.4M-sample FFT grid, 0.09 of 0.25 s a call) is
+  the same for every signal of one length, so `device_transfer` builds it once a candidate
+  (`27f7039`). 180 waveforms (every recorded candidate of the 11 titles, mix and two
+  channels, with and without ring-out) are bit-identical to the previous code's. Left alone:
+  the npz decompression (the on-disk format is the owner's decision), imports, the record
+  write, and sharing each signal's forward FFT across candidates (about 1.2 s more, but a
+  51 MB spectrum held per signal).
+* **Documentation.** `CLAUDE.md` and `beqforge/AGENTS.md` pointed at a section "Waiting on a
+  long run" that does not exist; both now name the root `AGENTS.md`'s "Long-running jobs and
+  timing" (`1470795`). The baseline table in `done-baseline-evidence.md` is a dated
+  observation, so it was left and a dated note lists the entries the version 10 records no
+  longer match (`3167695`).
+
+Interleaved warm runs, `7868a50` (a worktree) and the tip, each with its own cache file, sleep
+inhibited, two repeats (pipeline is the record's `elapsed_s`, wall includes imports, loading
+and the record), every record identical between the two:
+
+| | before, pipeline | after, pipeline | before, wall | after, wall |
+| --- | --- | --- | --- | --- |
+| Caught Stealing, warm | 13.5 s | 13.2 s | 22.3 s | 20.6 s |
+| Black Bag, warm | 7.2 s | 6.9 s | 14.2 s | 12.3 s |
+
+The pipeline's 0.3 s and the wall's 1.7-1.9 s a run are the two changes respectively.
