@@ -540,7 +540,7 @@ least `min_judge_octaves` above the floor — no fixed top (historical review T6
 
 * A run is ~40-80 s a title (down from ~100-490 s, 7.18x, every accepted filter's verdict
   preserved); the test suite is ~2 minutes. Run both in the background regardless — see
-  "Waiting on a long run" above. Measured 2026-10-25 on 0.2.12 (warm cache, 10 designing
+  the root AGENTS.md's "Long-running jobs and timing". Measured 2026-10-25 on 0.2.12 (warm cache, 10 designing
   titles, 70 s and 190 CPU-s a title on average): `fit` is 41% of wall time and 70% of CPU,
   `parametric`'s own fit inside its target stage another ~10% and ~12%, the rest of target
   construction ~12%, judging 17% (verify, headroom, sub feed) and ~13 s a title falls outside

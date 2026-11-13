@@ -12,8 +12,8 @@
   protocol for anything that can change a decision, and the outcome written into
   `TODO.md` and the completed evidence under `plans/`. Don't substitute a full nine-title rerun, and don't skip it.
 * Don't run `uv run python tools/design_beq.py` casually against real material — a run is
-  40-80 s a title. Wrap any timed run in `systemd-inhibit` (see AGENTS.md's "Waiting on a long
-  run") and use the background-task workflow rather than a foreground `sleep` loop.
+  40-80 s a title. Wrap any timed run in `systemd-inhibit` (see AGENTS.md's "Long-running jobs and
+  timing") and use the background-task workflow rather than a foreground `sleep` loop.
 * The stage cache (`beqforge/cache.py`) is on by default and keyed per stage; `--fresh` forces a
   recompute, `--no-cache` uses neither. Don't assume a change took effect without one of these if
   you're re-running against the same material.
