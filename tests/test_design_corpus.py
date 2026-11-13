@@ -95,3 +95,35 @@ def test_a_channel_is_restored_for_a_missing_low_end_not_a_steep_slope() -> None
     unfiltered = corpus_case("broadband", 4).material()
     assert diagnose(unfiltered).channels["LFE"].is_filtered  # the slope flagged it
     assert channels_missing_low_end(unfiltered, params) == []
+
+
+def test_each_channel_is_measured_once_for_its_deficit_and_its_texture(
+    monkeypatch,
+) -> None:
+    """Both rules read one `_flat_deficit` a channel, and read it as they would alone."""
+    from beqforge import pipeline
+    from beqforge.material import Material
+
+    params = pipeline.PipelineParams()
+    material = corpus_case("filtered", 3).material()
+    for name, samples in material.channels.items():
+        solo = Material(name, material.fs, samples, {}, material.coverage)
+        measured = pipeline._flat_deficit(solo, params)
+        np.testing.assert_array_equal(
+            pipeline.low_end_deficit_db(solo, params),
+            pipeline.low_end_deficit_db(solo, params, measured=measured),
+        )
+        assert pipeline.passband_ripple_db(solo, params) == (
+            pipeline.passband_ripple_db(solo, params, measured=measured)
+        )
+    alone = pipeline.channels_missing_low_end(material, params)
+    calls = []
+    real = pipeline._flat_deficit
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "_flat_deficit", counted)
+    assert pipeline.channels_missing_low_end(material, params) == alone
+    assert len(calls) == len(material.channels)

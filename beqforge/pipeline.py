@@ -859,7 +859,11 @@ def _judged_top_hz(
 
 
 def low_end_deficit_db(
-    material: Material, params: "PipelineParams", noise_floor_hz: float = math.nan
+    material: Material,
+    params: "PipelineParams",
+    noise_floor_hz: float = math.nan,
+    *,
+    measured=None,
 ) -> np.ndarray | None:
     """What the mix's low end is missing: the most any strategy may ask a filter to restore.
 
@@ -875,9 +879,11 @@ def low_end_deficit_db(
     +18.7 dB parametric boost at 88 Hz on a never-filtered corpus title (E2).
 
     This is `flatten`'s unpriced target; every strategy's target is capped by it in
-    `priced_by_evidence`. `None` when the mix has no usable plateau.
+    `priced_by_evidence`. `None` when the mix has no usable plateau. `measured` is
+    `_flat_deficit(material, params)` when the caller already has it.
     """
-    measured = _flat_deficit(material, params)
+    if measured is None:
+        measured = _flat_deficit(material, params)
     if measured is None:
         return None
     freqs, response, level, plateau_hz, on_grid, anchor = measured
@@ -1025,6 +1031,7 @@ def passband_ripple_db(
     noise_floor_hz: float = math.nan,
     *,
     trend_degree: int = 1,
+    measured=None,
 ) -> tuple[float, tuple[float, float]] | None:
     """The programme's own texture where nothing is missing: crest-to-trough, dB, and where.
 
@@ -1051,9 +1058,11 @@ def passband_ripple_db(
     50 or 60 Hz is a repair, not texture, and on Glory its 12-13 dB troughs read as 15.4 dB of
     ripple on a passband that otherwise swings 7.
 
-    `None` when there is no passband left above the correction to measure.
+    `None` when there is no passband left above the correction to measure. `measured` is
+    `_flat_deficit(material, params)` when the caller already has it.
     """
-    measured = _flat_deficit(material, params)
+    if measured is None:
+        measured = _flat_deficit(material, params)
     if measured is None:
         return None
     freqs, response, _, _, _, anchor = measured
@@ -1089,8 +1098,12 @@ def channels_missing_low_end(material: Material, params: "PipelineParams") -> li
     names = []
     for name, samples in material.channels.items():
         solo = Material(name, material.fs, samples, {}, material.coverage)
-        deficit = low_end_deficit_db(solo, flat)
-        texture = passband_ripple_db(solo, flat)
+        # both rules read the same measurement: one Welch pass a channel, not two
+        measured = _flat_deficit(solo, flat)
+        if measured is None:
+            continue
+        deficit = low_end_deficit_db(solo, flat, measured=measured)
+        texture = passband_ripple_db(solo, flat, measured=measured)
         if deficit is not None and texture is not None and deficit.max() > texture[0]:
             names.append(name)
     return names
