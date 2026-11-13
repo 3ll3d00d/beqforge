@@ -476,6 +476,7 @@ def verify(
     playback_model: str | None = None,
     log: bool = True,
     unfiltered: Unfiltered | None = None,
+    corrected: np.ndarray | None = None,
 ) -> Correction:
     """Apply the published device response and measure the corrected sub spectrum.
 
@@ -483,7 +484,10 @@ def verify(
     before and after against one programme plateau and an unchanged playback
     baseline. The resulting curve feeds the independent acceptance checks.
     `unfiltered` is `measure_unfiltered` of these same arguments, when a caller verifying
-    many candidates has it.
+    many candidates has it. `corrected` is `device_waveform(filters, samples, fs,
+    realisation)`, when the caller has already filtered the waveform — the head of the
+    one headroom measures (`include_tail`), which is the same samples; an unstable cascade
+    ignores it.
     """
     if any(a <= band_hz[1] and b >= band_hz[0] for a, b in exclude_bands_hz):
         raise ValueError(
@@ -517,7 +521,10 @@ def verify(
             device.quantise(biquad_sos(filters, device.fs)), freqs, device.fs
         )
     else:
-        corrected = device_waveform(filters, samples, fs, device)
+        if corrected is None:
+            corrected = device_waveform(filters, samples, fs, device)
+        elif len(corrected) != len(samples):
+            raise ValueError("corrected waveform must align with the samples")
         _, after = _mean_db(corrected, fs)
     source = unfiltered.source_db
     baseline = np.zeros_like(before) if reference_samples is None else before - source

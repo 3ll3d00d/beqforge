@@ -2229,11 +2229,14 @@ def measure_headroom(
     params: PipelineParams,
     *,
     sub_samples: np.ndarray | None = None,
+    waveform: np.ndarray | None = None,
 ) -> Headroom:
     """Measure peak clipping after the published cascade on the sub feed.
 
     Apply the quantised device transfer to the bass-managed waveform and
     report the non-positive gain offset needed to keep its peak below full scale.
+    `waveform` is that transfer already applied, ring-out included (`device_waveform(...,
+    include_tail=True)` on the same feed), when the caller has it.
     """
     sub = (
         sub_samples
@@ -2249,8 +2252,16 @@ def measure_headroom(
         reason = "non-finite sub-feed samples"
     else:
         try:
-            filtered = device_waveform(
-                filters, sub, float(material.fs), params.realisation, include_tail=True
+            filtered = (
+                waveform
+                if waveform is not None
+                else device_waveform(
+                    filters,
+                    sub,
+                    float(material.fs),
+                    params.realisation,
+                    include_tail=True,
+                )
             )
             if not np.isfinite(filtered).all():
                 raise ValueError("non-finite device waveform")
@@ -2519,6 +2530,21 @@ def _judge(
     if sub is None:
         raise ValueError("playback verification unavailable: no channel decomposition")
     with timings.detail("judge.verify"):
+        # One filtered waveform for verify and headroom: the head of the ring-out one is the
+        # same samples verify would filter for itself. Left to each when there is none to be
+        # had (an unstable cascade), so their own reasons stand.
+        tailed = None
+        if measured:
+            try:
+                tailed = device_waveform(
+                    filters,
+                    sub,
+                    float(material.fs),
+                    params.realisation,
+                    include_tail=True,
+                )
+            except ValueError:
+                tailed = None
         correction = verify(
             filters,
             sub,
@@ -2533,10 +2559,13 @@ def _judge(
             reference_samples=material.mono_mix,
             playback_model=params.playback.description(),
             unfiltered=unfiltered,
+            corrected=None if tailed is None else tailed[: len(sub)],
         )
     if measured:
         with timings.detail("judge.headroom"):
-            headroom = measure_headroom(material, filters, params, sub_samples=sub)
+            headroom = measure_headroom(
+                material, filters, params, sub_samples=sub, waveform=tailed
+            )
     else:
         headroom = Headroom(
             0.0,

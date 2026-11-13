@@ -298,3 +298,68 @@ def test_cli_forwards_playback_and_device_settings(monkeypatch):
         sub_gain_db=4,
     )
     assert seen[0].realisation == Realisation(fs=48000, coefficient_bits=24)
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        FILTERS,
+        # unstable at the published coefficients: no waveform, each falls back to its own path
+        [BiquadSpec("low_shelf", 6.137080501313293, 20.453528341353397, 1.77)],
+    ],
+)
+def test_one_filtered_waveform_serves_verify_and_headroom(monkeypatch, filters):
+    """A measured judge filters the feed once, with ring-out, for both measurements."""
+    from beqforge.diagnose import Diagnosis
+    from beqforge.verify import verify
+    from tests.test_design_playback import material
+
+    monkeypatch.setattr(pipeline, "judged_band_hz", lambda *args: (5, 200))
+    programme_ = material()
+    params = pipeline.PipelineParams()
+    sub = bass_managed_sum(programme_, playback=params.playback)
+    candidate = pipeline._judge(
+        "once",
+        filters,
+        None,
+        0,
+        programme_,
+        Diagnosis(DESIGN_GRID, np.zeros_like(DESIGN_GRID), {}),
+        params,
+        sub_samples=sub,
+    )
+    alone = verify(
+        candidate.filters,
+        sub,
+        1000.0,
+        band_hz=(5, 200),
+        diagnose_params=params.diagnose,
+        accept_params=params.accept,
+        realisation=params.realisation,
+        reference_samples=programme_.mono_mix,
+        playback_model=params.playback.description(),
+    )
+    np.testing.assert_array_equal(candidate.correction.after_db, alone.after_db)
+    np.testing.assert_array_equal(candidate.correction.before_db, alone.before_db)
+    # repr, so an unavailable measurement's NaN offset compares equal to itself
+    assert repr(candidate.headroom) == repr(
+        pipeline.measure_headroom(
+            programme_, candidate.filters, params, sub_samples=sub
+        )
+    )
+
+
+def test_a_corrected_waveform_must_align_with_the_samples():
+    from beqforge.verify import device_waveform, verify
+
+    sub = bass_managed_sum(subject())
+    tailed = device_waveform(FILTERS, sub, 1000.0, include_tail=True)
+    assert len(tailed) > len(sub)
+    np.testing.assert_array_equal(
+        verify(FILTERS, sub, 1000.0, band_hz=(5, 200)).after_db,
+        verify(
+            FILTERS, sub, 1000.0, band_hz=(5, 200), corrected=tailed[: len(sub)]
+        ).after_db,
+    )
+    with pytest.raises(ValueError, match="align"):
+        verify(FILTERS, sub, 1000.0, band_hz=(5, 200), corrected=tailed)
