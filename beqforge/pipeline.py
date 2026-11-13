@@ -1223,13 +1223,18 @@ def flatten_targets(
     envelopes,
     identification: "Identification | None",
     params: "PipelineParams",
+    *,
+    measured=None,
 ) -> list[Proposal]:
     """Request enough boost to reach the mix's own spectral plateau.
 
     The plateau-relative deficit, tapered where it closes, then priced — held below the
     tracking floor and clipped to measured contrast — like every other strategy's target.
+    `measured` is `_flat_deficit(material, params)` when the caller already has it.
     """
-    unpriced = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    unpriced = low_end_deficit_db(
+        material, params, diagnosis.noise_floor_hz, measured=measured
+    )
     if unpriced is None:
         return []
     target, notes = priced_by_evidence(unpriced, envelopes, diagnosis, params, unpriced)
@@ -1248,18 +1253,23 @@ def counterfactual_targets(
     envelopes,
     identification: "Identification | None",
     params: "PipelineParams",
+    *,
+    measured=None,
 ) -> list[Proposal]:
     """Build priced mix targets from individually restored channels.
 
     Try each restoration cap, re-sum the channels, price the resulting mix
-    deficit by contrast, and deduplicate targets before fitting.
+    deficit by contrast, and deduplicate targets before fitting. `measured` is
+    `_flat_deficit(material, params)` when the caller already has it.
     """
     names = channels_missing_low_end(material, params)
     if not names:
         return []
     # Reuse channel spectra across restoration caps.
     restoration = _Restoration(material, diagnosis, params.playback, names)
-    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    deficit = low_end_deficit_db(
+        material, params, diagnosis.noise_floor_hz, measured=measured
+    )
     proposals: list[Proposal] = []
     # A cap reaches the restoration only through each channel's boost curve, so a cap whose
     # curves equal an earlier cap's restores the same mix: a cap that binds nowhere (45 and
@@ -1368,11 +1378,18 @@ def parametric_targets(
     envelopes,
     identification: "Identification | None",
     params: "PipelineParams",
+    *,
+    measured=None,
 ) -> list[Proposal]:
-    """Propose the identified rolloff's protected and evidence-priced inverse."""
+    """Propose the identified rolloff's protected and evidence-priced inverse.
+
+    `measured` is `_flat_deficit(material, params)` when the caller already has it.
+    """
     if identification is None or not identification.detected:
         return []
-    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    deficit = low_end_deficit_db(
+        material, params, diagnosis.noise_floor_hz, measured=measured
+    )
     result = design(
         identification,
         envelopes,
@@ -1900,6 +1917,7 @@ def analyse(
     if not np.any(envelopes.boost_ceiling(params.confidence_z) > 0):
         blockers.append("no bins support a positive correction; restoration withheld")
     judged = None
+    flat = None
     if math.isfinite(mix_level):
         limitations.append(
             f"mix reference: contiguous plateau {region[0]:.3f}-{region[1]:.3f} Hz, "
@@ -1954,6 +1972,9 @@ def analyse(
         bottomed = infrasonic and (
             region[1] < lowest_reference * 2.0**params.accept.min_judge_octaves
         )
+        # the texture check, the deficit and the judged band all read the mix against its own
+        # plateau: one Welch pass over the mix, not three
+        flat = _flat_deficit(material, params)
         texture = (
             None
             if bottomed
@@ -1962,12 +1983,15 @@ def analyse(
                 params,
                 diagnosis.noise_floor_hz,
                 trend_degree=MIX_TEXTURE_TREND_DEGREE,
+                measured=flat,
             )
         )
         low_end = (
             None
             if bottomed
-            else low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+            else low_end_deficit_db(
+                material, params, diagnosis.noise_floor_hz, measured=flat
+            )
         )
         if infrasonic and not bottomed:
             bottomed = (
@@ -1994,7 +2018,7 @@ def analyse(
                     "so it is texture, not a missing low end; restoration withheld"
                 )
     if math.isfinite(mix_level):
-        judged = judged_band_hz(material, diagnosis, params, envelopes)
+        judged = judged_band_hz(material, diagnosis, params, envelopes, measured=flat)
         if any(a <= judged[1] and b >= judged[0] for a, b in bands):
             blockers.append(
                 "exclusions fragment the judged band; contiguous verification unavailable"
@@ -2045,6 +2069,10 @@ def propose(
     logger.info("=" * 80)
     logger.info(f"Strategies: {', '.join(params.strategies)}")
     proposals: list[Proposal] = []
+    # every strategy that derives (a cached one does not) reads the mix against its own plateau;
+    # measured the first time one needs it, then handed to each
+    flat: tuple | None = None
+    flat_measured = False
     for name in params.strategies:
         strategy = STRATEGIES.get(name)
         if strategy is None:
@@ -2070,8 +2098,15 @@ def propose(
                 produced = cache.proposals_from_json(held, Proposal)
         else:
             with timings.stage(f"target/{name}"):
+                if not flat_measured:
+                    flat, flat_measured = _flat_deficit(material, params), True
                 produced = strategy.derive(
-                    material, diagnosis, envelopes, identification, params
+                    material,
+                    diagnosis,
+                    envelopes,
+                    identification,
+                    params,
+                    measured=flat,
                 )
                 produced = [
                     dataclasses.replace(
@@ -2349,24 +2384,30 @@ def judged_band_hz(
     diagnosis: Diagnosis,
     params: PipelineParams,
     envelopes=None,
+    *,
+    measured=None,
 ) -> tuple[float, float]:
     """Set one verification band from mix evidence for all candidates.
 
     Start no lower than the mix tracking floor; extend the upper edge to the
     first settled end of its plateau-relative deficit. A shared band keeps
     candidate shape measurements comparable. With `judge_from_content_edge` and the
-    envelopes to measure it from, start no lower than the content edge either.
+    envelopes to measure it from, start no lower than the content edge either. `measured` is
+    `_flat_deficit(material, params)` when the caller already has it.
     """
     low = params.verify_floor_hz
     floor = diagnosis.noise_floor_hz
     if not math.isnan(floor):
         low = max(low, floor)
-    measured = _flat_deficit(material, params)
+    if measured is None:
+        measured = _flat_deficit(material, params)
     if measured is None:
         raise ValueError("no usable contiguous mix plateau")
     top = _judged_top_hz(measured[-1], params, floor)
     if params.judge_from_content_edge and envelopes is not None:
-        edge = content_edge_hz(material, diagnosis, envelopes, params, (low, top))
+        edge = content_edge_hz(
+            material, diagnosis, envelopes, params, (low, top), measured=measured
+        )
         if edge > low:
             low = edge
             top = min(
@@ -2398,15 +2439,20 @@ def content_edge_hz(
     envelopes,
     params: PipelineParams,
     band_hz: tuple[float, float],
+    *,
+    measured=None,
 ) -> float:
     """Lowest frequency, down from the top of the band, where contrast licenses the deficit.
 
     Below it the correction is bounded by contrast rather than by what is missing: the
     programme is drowning in the quiet floor, and a correct correction falls into that floor
     with it, however steeply. The band's own lower edge when contrast licenses the deficit
-    all the way down to it.
+    all the way down to it. `measured` is `_flat_deficit(material, params)` when the caller
+    already has it.
     """
-    deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
+    deficit = low_end_deficit_db(
+        material, params, diagnosis.noise_floor_hz, measured=measured
+    )
     if deficit is None:
         return band_hz[0]
     held, _ = _held_below_floor(deficit, diagnosis.noise_floor_hz)

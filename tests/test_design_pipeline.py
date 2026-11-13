@@ -4,6 +4,7 @@ Each derives a target its own way; all are fitted and judged identically, so the
 comparable and the acceptance model rather than a preference decides between them.
 """
 
+import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
@@ -265,6 +266,76 @@ def test_a_cap_that_restores_what_another_did_is_not_restored_again(
     for cap, target in zip(params.restore_caps_db, unpriced, strict=True):
         alone = pipeline.counterfactual_target(walled, diagnosis, cap, params)
         assert np.array_equal(alone, target), f"cap {cap}"
+
+
+def test_the_mix_is_measured_once_in_analyse_and_once_for_every_strategy(
+    walled, monkeypatch
+) -> None:
+    """One `_flat_deficit` of the mix in `analyse` and one in `propose`, not one per reader.
+
+    Each reader is handed the measurement as it would have taken it, so what comes out is the
+    same: the targets, the judged band (and the content edge it reads) and the blockers.
+    """
+    from beqforge import pipeline
+
+    real = pipeline._flat_deficit
+    mixes = []
+
+    def counted(material, params):
+        if material is walled:
+            mixes.append(1)
+        return real(material, params)
+
+    monkeypatch.setattr(pipeline, "_flat_deficit", counted)
+    params = PipelineParams(strategies=("flatten", "counterfactual"))
+    analysed = pipeline.analyse(walled, params)
+    assert not analysed.blockers and analysed.judged_band_hz is not None
+    assert len(mixes) == 1
+    mixes.clear()
+    proposals = pipeline.propose(walled, analysed)
+    assert proposals and len(mixes) == 1
+    monkeypatch.undo()
+
+    params = analysed.params
+    measured = real(walled, params)
+    for name in ("flatten", "counterfactual", "parametric"):
+        alone = STRATEGIES[name].derive(
+            walled,
+            analysed.diagnosis,
+            analysed.envelopes,
+            analysed.identification,
+            params,
+        )
+        shared = STRATEGIES[name].derive(
+            walled,
+            analysed.diagnosis,
+            analysed.envelopes,
+            analysed.identification,
+            params,
+            measured=measured,
+        )
+        assert len(alone) == len(shared), name
+        for a, b in zip(alone, shared, strict=True):
+            assert a.label == b.label
+            assert np.array_equal(a.target_db, b.target_db), name
+            assert np.array_equal(a.unpriced_target_db, b.unpriced_target_db), name
+    for edge in (False, True):
+        at_edge = dataclasses.replace(params, judge_from_content_edge=edge)
+        assert pipeline.judged_band_hz(
+            walled, analysed.diagnosis, at_edge, analysed.envelopes
+        ) == pipeline.judged_band_hz(
+            walled, analysed.diagnosis, at_edge, analysed.envelopes, measured=measured
+        )
+        assert pipeline.content_edge_hz(
+            walled, analysed.diagnosis, analysed.envelopes, at_edge, (5.0, 40.0)
+        ) == pipeline.content_edge_hz(
+            walled,
+            analysed.diagnosis,
+            analysed.envelopes,
+            at_edge,
+            (5.0, 40.0),
+            measured=measured,
+        )
 
 
 def test_counterfactual_re_sums_under_the_playback_model(walled) -> None:
