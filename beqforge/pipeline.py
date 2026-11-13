@@ -1248,8 +1248,24 @@ def counterfactual_targets(
     restoration = _Restoration(material, diagnosis, params.playback, names)
     deficit = low_end_deficit_db(material, params, diagnosis.noise_floor_hz)
     proposals: list[Proposal] = []
+    # A cap reaches the restoration only through each channel's boost curve, so a cap whose
+    # curves equal an earlier cap's restores the same mix: a cap that binds nowhere (45 and
+    # 50 dB beside 35 on Caught Stealing; every cap past 25 on Black Bag). Comparing the
+    # curves costs nothing; the restoration they spare is two transforms a channel.
+    restored: list[tuple[dict[str, np.ndarray], np.ndarray]] = []
     for cap in params.restore_caps_db:
-        unpriced = counterfactual_target(material, diagnosis, cap, params, restoration)
+        boosts = _restoration_boosts(diagnosis, cap, params, restoration)
+        for earlier, earlier_target in restored:
+            if earlier.keys() == boosts.keys() and all(
+                np.array_equal(earlier[name], boost) for name, boost in boosts.items()
+            ):
+                unpriced = earlier_target
+                break
+        else:
+            unpriced = _restored_target(
+                material, diagnosis.freqs, boosts, params, restoration
+            )
+            restored.append((boosts, unpriced))
         target, capped = priced_by_evidence(
             unpriced, envelopes, diagnosis, params, deficit
         )
@@ -1538,10 +1554,29 @@ def counterfactual_target(
     a target computed on the channel alone would not know that.
     """
     restoration = restoration or _Restoration(material, diagnosis, params.playback)
+    return _restored_target(
+        material,
+        diagnosis.freqs,
+        _restoration_boosts(diagnosis, restore_cap_db, params, restoration),
+        params,
+        restoration,
+    )
+
+
+def _restoration_boosts(
+    diagnosis: Diagnosis,
+    restore_cap_db: float,
+    params: PipelineParams,
+    restoration: _Restoration,
+) -> dict[str, np.ndarray]:
+    """Each restored channel's boost at `restore_cap_db`, on `diagnosis.freqs`.
+
+    The only part of a restoration the cap reaches. A channel with nothing to restore is
+    left out, as `_restored_target` would skip it.
+    """
     freqs = diagnosis.freqs
-    restored = restoration.mix.copy()
+    boosts: dict[str, np.ndarray] = {}
     for name in restoration.names:
-        samples = material.channels[name]
         response = diagnosis.channels[name].response_db
         boost = np.where(
             unexcluded(freqs, params.exclude_bands_hz) & np.isfinite(response),
@@ -1562,7 +1597,21 @@ def counterfactual_target(
         # was referenced to — a common cutoff would restore one channel into its passband
         # while stopping another short of its knee
         knee = freqs > diagnosis.channels[name].plateau_hz[0]
-        boost = np.where(knee, 0.0, boost)
+        boosts[name] = np.where(knee, 0.0, boost)
+    return boosts
+
+
+def _restored_target(
+    material: Material,
+    freqs: np.ndarray,
+    boosts: dict[str, np.ndarray],
+    params: PipelineParams,
+    restoration: _Restoration,
+) -> np.ndarray:
+    """The mix deficit once each channel in `boosts` (on `freqs`) is lifted and re-summed."""
+    restored = restoration.mix.copy()
+    for name, boost in boosts.items():
+        samples = material.channels[name]
         spectrum = restoration.spectra[name]
         gain = np.interp(restoration.bins, freqs, boost, left=boost[0], right=0.0)
         gain[~unexcluded(restoration.bins, params.exclude_bands_hz)] = 0.0

@@ -210,6 +210,63 @@ def test_the_restore_caps_share_what_does_not_depend_on_the_cap(walled) -> None:
         assert np.array_equal(alone, pooled), f"cap {cap}"
 
 
+def test_a_cap_that_restores_what_another_did_is_not_restored_again(
+    walled, monkeypatch
+) -> None:
+    """A cap reaches the restoration only through each channel's boost curve.
+
+    Where a cap's curves equal an earlier cap's (it binds nowhere), `counterfactual_targets`
+    reuses that restoration rather than rebuilding it, and every cap's unpriced target is
+    still the one `counterfactual_target` builds for it alone.
+    """
+    from beqforge import pipeline
+    from beqforge.diagnose import diagnose
+    from beqforge.extraction import extract
+
+    diagnosis = diagnose(walled)
+    names = pipeline.channels_missing_low_end(walled, PipelineParams())
+    if not names:
+        pytest.skip("no channel is missing its low end, so there is nothing to restore")
+    # caps far above any deficit bind nowhere, so all but the first repeat it
+    params = PipelineParams(restore_caps_db=(25.0, 200.0, 300.0, 400.0))
+    restoration = pipeline._Restoration(walled, diagnosis, params.playback, names)
+    boosts = [
+        pipeline._restoration_boosts(diagnosis, cap, params, restoration)
+        for cap in params.restore_caps_db
+    ]
+    distinct = sum(
+        not any(
+            b.keys() == earlier.keys()
+            and all(np.array_equal(b[n], earlier[n]) for n in b)
+            for earlier in boosts[:i]
+        )
+        for i, b in enumerate(boosts)
+    )
+    assert distinct < len(boosts), "the test needs a cap that binds nowhere"
+
+    built, unpriced = [], []
+    real_restored, real_priced = pipeline._restored_target, pipeline.priced_by_evidence
+
+    def counted(*args, **kwargs):
+        built.append(1)
+        return real_restored(*args, **kwargs)
+
+    def priced(target, *args, **kwargs):
+        unpriced.append(target)
+        return real_priced(target, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "_restored_target", counted)
+    monkeypatch.setattr(pipeline, "priced_by_evidence", priced)
+    envelopes = extract(walled.mono_mix, float(walled.fs))
+    pipeline.counterfactual_targets(walled, diagnosis, envelopes, None, params)
+    assert len(built) == distinct
+    assert len(unpriced) == len(params.restore_caps_db)
+    monkeypatch.undo()
+    for cap, target in zip(params.restore_caps_db, unpriced, strict=True):
+        alone = pipeline.counterfactual_target(walled, diagnosis, cap, params)
+        assert np.array_equal(alone, target), f"cap {cap}"
+
+
 def test_counterfactual_re_sums_under_the_playback_model(walled) -> None:
     """T1: the restored mix is weighted the way the sub feed is judged.
 

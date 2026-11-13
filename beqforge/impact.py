@@ -284,6 +284,8 @@ FEATURES: tuple[Feature, ...] = (
             "pipeline:counterfactual_targets",
             "pipeline:_Restoration*",
             "pipeline:_restoration_mix",
+            "pipeline:_restoration_boosts",
+            "pipeline:_restored_target",
             "pipeline:PipelineParams.restore_caps_db",
         ),
         _strategy("counterfactual"),
