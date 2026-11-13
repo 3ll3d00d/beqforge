@@ -39,6 +39,19 @@ see Progress). The next refresh is due when a change is accepted that
 moves targets. **The Incredible Hulk** (5.1, 112 min, fairly full bandwidth) joined the set as a
 tenth title at 0431bbc, the source for the injection experiments.
 
+**Note, 13 November 2026: the table still describes 4858a45.** It is a dated observation and is
+left as it was. The `data/*.run.json.gz` records now on disk (written at `bc0cd3c`, design
+version 10) accept `flatten` on every title except Dossier 137, which abstains. Against the
+Winner column above: Black Bag is no longer a decline (`flatten`, 2 sections, +8.9 dB; the
+"decline" in its Server and HEAD columns is superseded); 28 Years Later's winner is `flatten` 2,
++7.5 dB, not `parametric` (the "Current winners" list above has the same entry; `parametric`
+still passes there, 2 sections, +6.9 dB); Caught Stealing is `flatten` 1, +11.4 dB (not 2,
++12.2; `parametric`'s 2 sections reach +12.2); Send Help is `flatten` 1, +18.4 dB (not 2,
++13.1); Alto Knights is `flatten` 2, +20.0 dB (not 3, +20.2); Ballad of Wallis Island is
+`flatten` 2, +8.8 dB (not 3, +8.6); Obsession is `flatten` 3, +27.9 dB (not +28.2). Bugonia
+(`flatten` 1, +5.4 dB) and Dossier 137 (abstains) still match. The Recovered / shaping figures
+have moved on the titles above too; this note does not restate them.
+
 **Dossier 137 should not have been declined.** *(Superseded — see "Dossier 137 — decided" in
 Progress: abstaining is right; the original reason was wrong.)* Every main channel is steeply rolled off (L 48.5
 dB/oct at 41.7 Hz, R 51.2 at 28.1 Hz, C 33.2 at 39.3 Hz); the mean spectrum falls about 40 dB
