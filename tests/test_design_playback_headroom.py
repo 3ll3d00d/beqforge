@@ -143,6 +143,47 @@ def test_missing_unstable_and_nonfinite_measurements_report_the_actual_reason():
     assert "non-finite" in bad.unavailable_reason
 
 
+def assert_same_candidate(a, b):
+    """Two judgements of one cascade agree in everything the judge measured."""
+    for name in ("freqs", "before_db", "after_db", "playback_baseline_db"):
+        np.testing.assert_array_equal(
+            getattr(a.correction, name), getattr(b.correction, name)
+        )
+    assert a.correction.reference_level_db == b.correction.reference_level_db
+    assert a.headroom == b.headroom
+    assert a.verdict.passed == b.verdict.passed
+    assert a.verdict.failures == b.verdict.failures
+    assert a.verdict.margins == b.verdict.margins
+    assert a.verdict.notes == b.verdict.notes
+
+
+def test_a_judge_handed_the_sub_feed_judges_as_if_it_had_built_it(monkeypatch):
+    """`run` builds the feed once and hands it to every judge (and the over-lift bar)."""
+    from beqforge.diagnose import Diagnosis
+    from tests.test_design_playback import material
+
+    monkeypatch.setattr(pipeline, "judged_band_hz", lambda *args: (5, 200))
+    programme_ = material()
+    params = pipeline.PipelineParams()
+    args = (
+        "handed",
+        FILTERS,
+        None,
+        0,
+        programme_,
+        Diagnosis(DESIGN_GRID, np.zeros_like(DESIGN_GRID), {}),
+        params,
+    )
+    sub = bass_managed_sum(programme_, playback=params.playback)
+    assert_same_candidate(
+        pipeline._judge(*args), pipeline._judge(*args, sub_samples=sub)
+    )
+    built = pipeline.overlift_allowance(programme_, params, (5, 200))
+    given = pipeline.overlift_allowance(programme_, params, (5, 200), sub_samples=sub)
+    for x, y in zip(built, given, strict=True):
+        np.testing.assert_array_equal(x, y)
+
+
 def test_zero_cost_is_qualified_in_cli_and_legacy_output():
     material = subject()
     silence = replace(material, channels={"LFE": np.zeros_like(material.mono_mix)})

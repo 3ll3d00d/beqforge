@@ -1608,16 +1608,25 @@ def _fit_band_hz(
 
 
 def overlift_allowance(
-    material: Material, params: PipelineParams, judged_band: tuple[float, float]
+    material: Material,
+    params: PipelineParams,
+    judged_band: tuple[float, float],
+    *,
+    sub_samples: np.ndarray | None = None,
 ) -> Ceiling | None:
     """The most a cascade may lift each bin the judge's over-lift bar guards, before fitting.
 
     `accept.overlift_bar_db` on the unfiltered sub feed, less the material there: the bar
     depends on the material and the judged band, never on a filter, so it can be handed to the
     fitter as a one-sided bound and the fit and the verdict guard the same region the same way.
-    `None` when there is no sub feed to measure (the judge cannot run either).
+    `None` when there is no sub feed to measure (the judge cannot run either). `sub_samples`
+    is that feed when the caller already has it (`run` builds it once).
     """
-    sub = bass_managed_sum(material, playback=params.playback)
+    sub = (
+        sub_samples
+        if sub_samples is not None
+        else bass_managed_sum(material, playback=params.playback)
+    )
     if sub is None or not np.any(sub):
         return None
     unfiltered = verify(
@@ -2070,13 +2079,20 @@ def run(
             blockers=(within,),
         )
 
+    # the same waveform for the over-lift bar and every judge, so built once here; `analyse`
+    # builds its own only to see it is not silent, and does not keep it: `Analysed` is
+    # pickled whole by the refit probe's state
+    with timings.stage("sub_feed"):
+        sub = bass_managed_sum(material, playback=params.playback)
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
         results = (
             _fit_all(
                 needs_fitting,
                 params,
-                overlift_allowance(material, params, analysed.judged_band_hz),
+                overlift_allowance(
+                    material, params, analysed.judged_band_hz, sub_samples=sub
+                ),
             )
             if needs_fitting
             else []
@@ -2123,6 +2139,7 @@ def run(
                 ceiling_db=ceiling,
                 timings=timings,
                 measured=measured,
+                sub_samples=sub,
             )
 
         with timings.stage(f"judge/{proposal.label}"):
@@ -2455,6 +2472,7 @@ def _judge(
     ceiling_db: np.ndarray | None = None,
     timings: Timings | None = None,
     measured: bool = True,
+    sub_samples: np.ndarray | None = None,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
@@ -2462,12 +2480,18 @@ def _judge(
     measure headroom, then test the corrected curve against both the priced
     target and material-based safeguards. Unless `measured`, the clipping figure is skipped:
     it is never gated, so the verdict is the same, and it is most of a judge's cost.
+    `sub_samples` is the sub feed when the caller already has it: the same for every
+    candidate, so `run` builds it once rather than once a judge.
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
     timings = timings or Timings()
     with timings.detail("judge.sub_feed"):
-        sub = bass_managed_sum(material, playback=params.playback)
+        sub = (
+            sub_samples
+            if sub_samples is not None
+            else bass_managed_sum(material, playback=params.playback)
+        )
     if sub is None:
         raise ValueError("playback verification unavailable: no channel decomposition")
     with timings.detail("judge.verify"):
