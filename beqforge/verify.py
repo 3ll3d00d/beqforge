@@ -121,8 +121,16 @@ def waveform_peak(samples: np.ndarray) -> float:
     polyphase gain. Taking blocks loudest first, a block whose bound is already below the peak
     found is skipped. The answer is bit-identical to interpolating everything: the same
     per-block computation, and a maximum does not depend on order. It was 82% of judging.
+
+    Blocks are about a second long. The bound is loose — the kernel's polyphase gain is 3.02,
+    so any block holding a sample within 9.6 dB of the peak must be interpolated — and over a
+    65,536-sample block nearly every loud passage has one: 1.84M samples interpolated on
+    Caught Stealing against 0.15M at 1,024, and 1.4 s against 0.15 s. Shorter blocks lose
+    it again to per-call cost and the kernel overlap each one carries. The block length
+    cannot change the answer: each retained sample sees exactly the inputs within the
+    kernel's reach, whatever block it falls in.
     """
-    factor, half_width, block = 16, 48, 65536
+    factor, half_width, block = 16, 48, 1024
     kernel = signal.firwin(
         2 * half_width * factor + 1, 1 / factor, window=("kaiser", 10)
     )

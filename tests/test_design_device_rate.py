@@ -179,10 +179,12 @@ def _peak_of_everything(samples: np.ndarray) -> float:
     return peak
 
 
-@pytest.mark.parametrize("case", range(6))
+@pytest.mark.parametrize("case", range(7))
 def test_skipping_blocks_that_cannot_hold_the_peak_changes_nothing(case):
     """C4: bit-identical to interpolating the whole signal, including where it is hardest —
-    a peak straddling a block edge, intersample overshoot near Nyquist, equal blocks."""
+    a peak straddling a block edge, intersample overshoot near Nyquist, equal blocks. The
+    reference interpolates in 65,536-sample blocks, so this also pins that `waveform_peak`'s
+    own block length cannot change the answer."""
     rng = np.random.default_rng(case)
     n = 5 * 65536 + 1234
     if case == 0:  # programme-like: noise with sparse loud transients
@@ -202,6 +204,15 @@ def test_skipping_blocks_that_cannot_hold_the_peak_changes_nothing(case):
         samples = 0.001 * rng.normal(size=n)
         samples[3 * 65536 + 100 : 3 * 65536 + 104] = [0.5, -0.5, 0.5, -0.5]
         samples[10] = 0.52
+    elif case == 5:  # many near-equal transients, some across 1,024-sample block edges
+        samples = 0.01 * rng.normal(size=n)
+        for at in (
+            *rng.integers(100, n - 100, 60),
+            *(1024 * k - 3 for k in (7, 90, 301)),
+        ):
+            samples[at : at + 6] += rng.uniform(0.45, 0.5) * np.array(
+                [0.3, -0.8, 1.0, -0.9, 0.5, -0.2]
+            )
     else:  # silence
         samples = np.zeros(n)
     assert waveform_peak(samples) == _peak_of_everything(samples)
