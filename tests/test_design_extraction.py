@@ -183,6 +183,73 @@ def test_chunking_the_bootstrap_cannot_change_what_it_returns() -> None:
     assert np.array_equal(whole.margin_se_db, chunked.margin_se_db)
 
 
+def _replicates(mask: np.ndarray, n_boot: int, seed: int) -> np.ndarray:
+    """Block-bootstrap replicate indices, drawn as `_block_bootstrap_se` draws them."""
+    from beqforge import extraction
+
+    rng = np.random.default_rng(seed)
+    runs = extraction._runs(mask)
+    n = int(mask.sum())
+    out = np.empty((n_boot, n), dtype=np.int64)
+    for b in range(n_boot):
+        drawn = np.concatenate([runs[i] for i in rng.integers(0, len(runs), 4 * n)])
+        out[b] = drawn[:n]
+    return out
+
+
+@pytest.mark.parametrize("percentile", [95.0, 97.5, 50.0, 99.9, 0.0, 100.0])
+@pytest.mark.parametrize("case", ["programme", "ties", "non-finite", "short tail"])
+def test_the_bootstrap_percentile_from_draw_counts_is_the_gathered_one(
+    percentile, case, monkeypatch
+) -> None:
+    """Every replicate's percentile, read off the frames in order by how often each was drawn,
+    is `np.percentile` of the gathered replicate to the bit: the same order statistics, the
+    same interpolation — whichever side of half `gamma` falls, with ties, with non-finite
+    power (which takes the gather) and where a replicate's rank lies past the frames searched
+    (which falls back to the gather)."""
+    from beqforge import extraction
+
+    rng = np.random.default_rng(7)
+    frames = 900
+    power = rng.lognormal(sigma=2.0, size=(37, frames))
+    mask = rng.random(frames) < 0.6
+    mask[::23] = False  # break the mask into runs
+    if case == "ties":
+        power = np.round(power, 0)
+    elif case == "non-finite":
+        power[5, np.flatnonzero(mask)[3]] = np.inf
+    elif case == "short tail":
+        monkeypatch.setattr(extraction, "_TOP_SHARE", 0.0)
+    bins = np.arange(power.shape[0])
+    replicates = _replicates(mask, 60, seed=3)
+    expected = extraction._gathered_percentiles(power, bins, replicates, percentile)
+    got = extraction._bootstrap_percentiles(power, bins, mask, replicates, percentile)
+    assert np.array_equal(expected, got, equal_nan=True)
+    # and the replicate-by-bin layout `std` reads is C order, as the gather's was
+    assert np.ascontiguousarray(got).strides == expected.strides
+
+
+def test_extract_prices_the_same_errors_by_draw_counts_as_by_gathering(
+    monkeypatch,
+) -> None:
+    from beqforge import extraction
+
+    samples = synthesise(
+        SyntheticProfile(duration_s=300.0, event_rate_hz=0.08), FS, seed=11
+    )
+    counted = extract(samples, FS)
+    monkeypatch.setattr(
+        extraction,
+        "_bootstrap_percentiles",
+        lambda power, bins, mask, replicates, percentile: (
+            extraction._gathered_percentiles(power, bins, replicates, percentile)
+        ),
+    )
+    gathered = extract(samples, FS)
+    assert np.isfinite(counted.margin_se_db).any()
+    assert np.array_equal(counted.margin_se_db, gathered.margin_se_db)
+
+
 def test_digital_silence_is_absent_programme_not_a_quiet_scene() -> None:
     """E8: an LFE that is exact zeros two-thirds of the time.
 

@@ -168,8 +168,15 @@ def _block_bootstrap_se(
     their own isolated instant (wide) — a flat constant cannot see that difference.
 
     Vectorised across every bin in `bins` at once: the resampled *frame indices* are the same
-    for every bin in a given replicate, so one `(n_boot, n_frames)` index matrix drives one
-    gather and one `percentile` call rather than one per bin.
+    for every bin in a given replicate, so one `(n_boot, n_frames)` index matrix serves every
+    bin.
+
+    A replicate is a multiset of the masked frames, so its percentile needs only how often
+    each frame was drawn and the frames in order of value (`_bootstrap_percentiles`), not the
+    resampled values gathered and partitioned per replicate. That was 90% of `extract`, and
+    the LFE of a two-hour title (12 s) set a cold run's wall time; this takes about a sixth of
+    it and returns the same bits, which `tests/test_design_extraction.py` pins against the
+    gather.
     """
     runs = _runs(mask)
     if len(runs) < 2 or n_boot < 2:
@@ -195,21 +202,90 @@ def _block_bootstrap_se(
                 if filled >= n_frames:
                     break
             batch *= 2
-    # Chunked over bins, because the gather below is the one large allocation here and it is
-    # proportional to bins x replicates x frames: every bin of a two-hour title at 200
-    # replicates is some 400 MB in one array. The arithmetic is identical either way — the
-    # replicate indices are shared across bins by construction — so this only bounds peak
-    # memory, and it is what lets the caller price every bin rather than a band of them.
+    percentiles = _bootstrap_percentiles(power, bins, mask, replicate_idx, percentile)
+    # C order, so `std` sums each bin's replicates in the order the gather's result did
+    percentiles_db = 10.0 * np.log10(np.ascontiguousarray(percentiles) + 1e-300)
+    return np.std(percentiles_db, axis=1)
+
+
+_TOP_SHARE = 4.0
+"""How far down the values a replicate's percentile is sought, in multiples of its rank.
+
+The 95th percentile of `n` frames is about the `0.05 n`-th largest, and a replicate draws each
+frame about once, so the frames ranked within four times that hold it in all but freak draws.
+A bin where some replicate needs more is sorted in full, so this sets only the speed."""
+
+
+def _bootstrap_percentiles(
+    power: np.ndarray,
+    bins: np.ndarray,
+    mask: np.ndarray,
+    replicate_idx: np.ndarray,
+    percentile: float,
+) -> np.ndarray:
+    """Each replicate's `percentile` of each bin's power, `(bins, replicates)`.
+
+    `np.percentile`'s linear method over each replicate, without forming the replicate: the
+    order statistics it interpolates are read off the masked frames in descending order of
+    value, by how many draws each one carries, and interpolated as `np.percentile` does it
+    (`numpy.lib._function_base_impl._lerp`). The same values, the same arithmetic, so the same
+    bits. Non-finite power, which `np.percentile` treats its own way, takes the gather.
+
+    Chunked over bins to bound memory (`_BOOTSTRAP_ELEMENTS`): the counts gathered in sorted
+    order are replicates x bins x the frames searched.
+    """
+    n_boot, n_frames = replicate_idx.shape
+    frames = np.flatnonzero(mask)
+    position = np.zeros(mask.shape[0], dtype=np.int64)
+    position[frames] = np.arange(n_frames)
+    counts = np.zeros((n_boot, n_frames), dtype=np.int64)
+    np.add.at(counts, (np.arange(n_boot)[:, None], position[replicate_idx]), 1)
+    virtual = (n_frames - 1) * (percentile / 100.0)
+    lower = math.floor(virtual)
+    upper = n_frames - 1 if virtual >= n_frames - 1 else lower + 1
+    lower = min(lower, upper)
+    gamma = virtual - lower
+    # descending, the ascending order statistic j is where the draws passed exceed n - 1 - j
+    need_lower, need_upper = n_frames - 1 - lower, n_frames - 1 - upper
+    searched = min(n_frames, math.ceil(_TOP_SHARE * (need_lower + 1)) + 16)
+    chunk = max(1, _BOOTSTRAP_ELEMENTS // max(n_boot * searched, 1))
+    out = np.empty((bins.shape[0], n_boot))
+    for start in range(0, bins.shape[0], chunk):
+        taken = bins[start : start + chunk]
+        values = power[taken][:, frames]
+        order = np.argsort(-values, axis=1, kind="stable")[:, :searched]
+        passed = np.cumsum(counts[:, order], axis=2)
+        if not np.isfinite(values).all() or not (passed[:, :, -1] > need_lower).all():
+            out[start : start + taken.size] = _gathered_percentiles(
+                power, taken, replicate_idx, percentile
+            )
+            continue
+        top = np.take_along_axis(values, order, axis=1)
+        low = np.take_along_axis(top, (passed > need_lower).argmax(axis=2).T, axis=1)
+        high = np.take_along_axis(top, (passed > need_upper).argmax(axis=2).T, axis=1)
+        diff = high - low
+        out[start : start + taken.size] = (
+            high - diff * (1 - gamma) if gamma >= 0.5 else low + diff * gamma
+        )
+    return out
+
+
+def _gathered_percentiles(
+    power: np.ndarray, bins: np.ndarray, replicate_idx: np.ndarray, percentile: float
+) -> np.ndarray:
+    """`_bootstrap_percentiles` the direct way: gather every replicate, `np.percentile` it.
+
+    Chunked over bins, because the gather is proportional to bins x replicates x frames:
+    every bin of a two-hour title at 200 replicates is some 400 MB in one array.
+    """
+    n_boot, n_frames = replicate_idx.shape
     flat_idx = replicate_idx.reshape(-1)
     chunk = max(1, _BOOTSTRAP_ELEMENTS // max(n_boot * n_frames, 1))
-    out = np.empty(bins.shape[0])
+    out = np.empty((bins.shape[0], n_boot))
     for start in range(0, bins.shape[0], chunk):
         taken = bins[start : start + chunk]
         resampled = power[taken][:, flat_idx].reshape(taken.size, n_boot, n_frames)
-        percentiles_db = 10.0 * np.log10(
-            np.percentile(resampled, percentile, axis=2) + 1e-300
-        )
-        out[start : start + chunk] = np.std(percentiles_db, axis=1)
+        out[start : start + taken.size] = np.percentile(resampled, percentile, axis=2)
     return out
 
 
