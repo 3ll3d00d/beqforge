@@ -83,8 +83,10 @@ from beqforge.material import (
 )
 from beqforge.verify import (
     Correction,
+    Unfiltered,
     device_waveform,
     house_curve_db,
+    measure_unfiltered,
     verify,
     waveform_peak,
 )
@@ -1613,6 +1615,7 @@ def overlift_allowance(
     judged_band: tuple[float, float],
     *,
     sub_samples: np.ndarray | None = None,
+    unfiltered: Unfiltered | None = None,
 ) -> Ceiling | None:
     """The most a cascade may lift each bin the judge's over-lift bar guards, before fitting.
 
@@ -1620,7 +1623,8 @@ def overlift_allowance(
     depends on the material and the judged band, never on a filter, so it can be handed to the
     fitter as a one-sided bound and the fit and the verdict guard the same region the same way.
     `None` when there is no sub feed to measure (the judge cannot run either). `sub_samples`
-    is that feed when the caller already has it (`run` builds it once).
+    is that feed and `unfiltered` its `measure_unfiltered`, when the caller already has them
+    (`run` builds both once).
     """
     sub = (
         sub_samples
@@ -1641,6 +1645,7 @@ def overlift_allowance(
         reference_samples=material.mono_mix,
         playback_model=params.playback.description(),
         log=False,
+        unfiltered=unfiltered,
     )
     guard, bar = overlift_bar_db(unfiltered, params.accept)
     return unfiltered.freqs[guard], bar - unfiltered.before_db[guard]
@@ -2084,6 +2089,18 @@ def run(
     # pickled whole by the refit probe's state
     with timings.stage("sub_feed"):
         sub = bass_managed_sum(material, playback=params.playback)
+        # and so is what verification measures of it before any filter
+        unfiltered = (
+            None
+            if sub is None
+            else measure_unfiltered(
+                sub,
+                float(material.fs),
+                params.diagnose,
+                params.exclude_bands_hz,
+                material.mono_mix,
+            )
+        )
     needs_fitting = [p for p in proposals if p.filters is None]
     with timings.stage("fit"):
         results = (
@@ -2091,7 +2108,11 @@ def run(
                 needs_fitting,
                 params,
                 overlift_allowance(
-                    material, params, analysed.judged_band_hz, sub_samples=sub
+                    material,
+                    params,
+                    analysed.judged_band_hz,
+                    sub_samples=sub,
+                    unfiltered=unfiltered,
                 ),
             )
             if needs_fitting
@@ -2140,6 +2161,7 @@ def run(
                 timings=timings,
                 measured=measured,
                 sub_samples=sub,
+                unfiltered=unfiltered,
             )
 
         with timings.stage(f"judge/{proposal.label}"):
@@ -2473,6 +2495,7 @@ def _judge(
     timings: Timings | None = None,
     measured: bool = True,
     sub_samples: np.ndarray | None = None,
+    unfiltered: Unfiltered | None = None,
 ) -> Candidate:
     """Publish, verify and assess one proposed cascade.
 
@@ -2480,8 +2503,9 @@ def _judge(
     measure headroom, then test the corrected curve against both the priced
     target and material-based safeguards. Unless `measured`, the clipping figure is skipped:
     it is never gated, so the verdict is the same, and it is most of a judge's cost.
-    `sub_samples` is the sub feed when the caller already has it: the same for every
-    candidate, so `run` builds it once rather than once a judge.
+    `sub_samples` is the sub feed and `unfiltered` its `measure_unfiltered`, when the caller
+    already has them: the same for every candidate, so `run` builds them once rather than
+    once a judge.
     """
     optimiser_filters = filters
     filters = publication_filters(filters)
@@ -2508,6 +2532,7 @@ def _judge(
             priced_target_db=target,
             reference_samples=material.mono_mix,
             playback_model=params.playback.description(),
+            unfiltered=unfiltered,
         )
     if measured:
         with timings.detail("judge.headroom"):

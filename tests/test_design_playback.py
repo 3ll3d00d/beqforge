@@ -176,3 +176,66 @@ def test_no_lowpass_at_all_is_the_weighted_sum():
         "LFE"
     ] * 10 ** (-10.2 / 20)
     np.testing.assert_allclose(bass_managed_sum(subject, playback=model), expected)
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        [],
+        [BiquadSpec("low_shelf", 20, 12, 0.707)],
+        # unstable at the published coefficients: the magnitude path, not a waveform
+        [BiquadSpec("low_shelf", 6.137080501313293, 20.453528341353397, 1.77)],
+    ],
+)
+@pytest.mark.parametrize("reference", [True, False])
+def test_unfiltered_spectra_measured_once_verify_as_if_remeasured(filters, reference):
+    """`run` measures the candidate-independent spectra once (`measure_unfiltered`)."""
+    from beqforge.verify import measure_unfiltered
+
+    subject = material()
+    sub = bass_managed_sum(subject)
+    kwargs = {
+        "band_hz": (5, 140),
+        "diagnose_params": DiagnoseParams(),
+        "exclude_bands_hz": ((150.0, 160.0),),
+        "reference_samples": subject.mono_mix if reference else None,
+    }
+    shared = measure_unfiltered(
+        sub,
+        1000,
+        kwargs["diagnose_params"],
+        kwargs["exclude_bands_hz"],
+        kwargs["reference_samples"],
+    )
+    alone = verify(filters, sub, 1000, **kwargs)
+    given = verify(filters, sub, 1000, **kwargs, unfiltered=shared)
+    for name in (
+        "freqs",
+        "before_db",
+        "after_db",
+        "playback_before_db",
+        "playback_after_db",
+        "playback_baseline_db",
+    ):
+        a, b = getattr(alone, name), getattr(given, name)
+        assert (a is None) == (b is None), name
+        if a is not None:
+            np.testing.assert_array_equal(a, b)
+    assert alone.reference_level_db == given.reference_level_db
+
+
+def test_unfiltered_spectra_of_other_signals_are_refused():
+    from beqforge.verify import measure_unfiltered
+
+    subject = material()
+    sub = bass_managed_sum(subject)
+    shared = measure_unfiltered(sub, 1000, reference_samples=subject.mono_mix)
+    for changed in (
+        {"samples": sub.copy()},
+        {"reference_samples": None},
+        {"exclude_bands_hz": ((150.0, 160.0),)},
+        {"diagnose_params": DiagnoseParams(reference_percentile=80.0)},
+    ):
+        kwargs = {"samples": sub, "reference_samples": subject.mono_mix} | changed
+        with pytest.raises(ValueError, match="different signals"):
+            verify([], fs=1000, band_hz=(5, 140), unfiltered=shared, **kwargs)

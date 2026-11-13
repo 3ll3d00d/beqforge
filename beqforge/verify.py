@@ -414,6 +414,54 @@ class Correction:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Unfiltered:
+    """What `verify` measures before any filter is applied: the same for every candidate.
+
+    The spectrum of the signal being corrected, the spectrum of the reference programme and
+    the plateau level read from it — a third of each `verify` call when it was remeasured per
+    candidate. Keeps the inputs it was measured from, so `verify` can refuse one measured
+    for something else.
+    """
+
+    samples: np.ndarray
+    fs: float
+    diagnose_params: DiagnoseParams
+    exclude_bands_hz: tuple[tuple[float, float], ...]
+    reference_samples: np.ndarray | None
+    freqs: np.ndarray
+    before_db: np.ndarray
+    source_db: np.ndarray
+    reference_db: float
+
+
+def measure_unfiltered(
+    samples: np.ndarray,
+    fs: float,
+    diagnose_params: DiagnoseParams | None = None,
+    exclude_bands_hz: tuple[tuple[float, float], ...] = (),
+    reference_samples: np.ndarray | None = None,
+) -> Unfiltered:
+    """Measure once what every `verify` call on these signals would measure for itself."""
+    diagnose_params = diagnose_params or DiagnoseParams()
+    freqs, before = _mean_db(samples, fs)
+    source = before if reference_samples is None else _mean_db(reference_samples, fs)[1]
+    reference_db, _ = plateau_reference(
+        source, freqs, diagnose_params, exclude_bands_hz
+    )
+    return Unfiltered(
+        samples,
+        fs,
+        diagnose_params,
+        exclude_bands_hz,
+        reference_samples,
+        freqs,
+        before,
+        source,
+        reference_db,
+    )
+
+
 def verify(
     filters: list[BiquadSpec],
     samples: np.ndarray,
@@ -427,12 +475,15 @@ def verify(
     reference_samples: np.ndarray | None = None,
     playback_model: str | None = None,
     log: bool = True,
+    unfiltered: Unfiltered | None = None,
 ) -> Correction:
     """Apply the published device response and measure the corrected sub spectrum.
 
     Use the quantised complex transfer on the extracted waveform, then compare
     before and after against one programme plateau and an unchanged playback
     baseline. The resulting curve feeds the independent acceptance checks.
+    `unfiltered` is `measure_unfiltered` of these same arguments, when a caller verifying
+    many candidates has it.
     """
     if any(a <= band_hz[1] and b >= band_hz[0] for a, b in exclude_bands_hz):
         raise ValueError(
@@ -447,7 +498,19 @@ def verify(
             raise ValueError("playback verification unavailable: silent sub feed")
     filters = publication_filters(filters)
     device = realisation or Realisation()
-    freqs, before = _mean_db(samples, fs)
+    if unfiltered is None:
+        unfiltered = measure_unfiltered(
+            samples, fs, diagnose_params, exclude_bands_hz, reference_samples
+        )
+    elif not (
+        unfiltered.samples is samples
+        and unfiltered.reference_samples is reference_samples
+        and unfiltered.fs == fs
+        and unfiltered.diagnose_params == (diagnose_params or DiagnoseParams())
+        and unfiltered.exclude_bands_hz == exclude_bands_hz
+    ):
+        raise ValueError("unfiltered spectra were measured for different signals")
+    freqs, before = unfiltered.freqs, unfiltered.before_db
     if filters and unstable_sections(filters, device):
         # Keep the fitter's unstable fallback reviewable; assess rejects exact Jury failure.
         after = before + magnitude_db(
@@ -456,11 +519,9 @@ def verify(
     else:
         corrected = device_waveform(filters, samples, fs, device)
         _, after = _mean_db(corrected, fs)
-    source = before if reference_samples is None else _mean_db(reference_samples, fs)[1]
+    source = unfiltered.source_db
     baseline = np.zeros_like(before) if reference_samples is None else before - source
-    reference_db, _ = plateau_reference(
-        source, freqs, diagnose_params or DiagnoseParams(), exclude_bands_hz
-    )
+    reference_db = unfiltered.reference_db
 
     if not np.isfinite(reference_db):
         raise ValueError("no usable contiguous mix plateau")

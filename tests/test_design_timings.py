@@ -32,7 +32,7 @@ def test_elapsed_covers_the_stages_and_the_remainder_is_explicit(monkeypatch):
     assert sum(timings.details.values()) <= judged + 1e-6
 
 
-def test_a_run_builds_the_sub_feed_once_for_all_its_judges(monkeypatch):
+def test_a_run_builds_the_sub_feed_and_its_spectra_once_for_all_its_judges(monkeypatch):
     built, handed = [], []
     real_sum, real_judge = P.bass_managed_sum, P._judge
 
@@ -41,14 +41,16 @@ def test_a_run_builds_the_sub_feed_once_for_all_its_judges(monkeypatch):
         return real_sum(*args, **kwargs)
 
     def judge(*args, **kwargs):
-        handed.append(kwargs.get("sub_samples"))
+        handed.append((kwargs.get("sub_samples"), kwargs.get("unfiltered")))
         return real_judge(*args, **kwargs)
 
     monkeypatch.setattr(P, "bass_managed_sum", counted)
     monkeypatch.setattr(P, "_judge", judge)
     report = _run(monkeypatch)
     assert report.candidates and handed
-    assert handed[0] is not None and all(s is handed[0] for s in handed)
+    sub, unfiltered = handed[0]
+    assert sub is not None and unfiltered is not None and unfiltered.samples is sub
+    assert all(s is sub and u is unfiltered for s, u in handed)
     # once in `analyse` to see it is not silent, once in `run` for everything after it
     assert len(built) == 2
 

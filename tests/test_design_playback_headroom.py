@@ -160,6 +160,7 @@ def assert_same_candidate(a, b):
 def test_a_judge_handed_the_sub_feed_judges_as_if_it_had_built_it(monkeypatch):
     """`run` builds the feed once and hands it to every judge (and the over-lift bar)."""
     from beqforge.diagnose import Diagnosis
+    from beqforge.verify import measure_unfiltered
     from tests.test_design_playback import material
 
     monkeypatch.setattr(pipeline, "judged_band_hz", lambda *args: (5, 200))
@@ -175,11 +176,18 @@ def test_a_judge_handed_the_sub_feed_judges_as_if_it_had_built_it(monkeypatch):
         params,
     )
     sub = bass_managed_sum(programme_, playback=params.playback)
+    unfiltered = measure_unfiltered(
+        sub, 1000.0, params.diagnose, params.exclude_bands_hz, programme_.mono_mix
+    )
+    alone = pipeline._judge(*args)
+    assert_same_candidate(alone, pipeline._judge(*args, sub_samples=sub))
     assert_same_candidate(
-        pipeline._judge(*args), pipeline._judge(*args, sub_samples=sub)
+        alone, pipeline._judge(*args, sub_samples=sub, unfiltered=unfiltered)
     )
     built = pipeline.overlift_allowance(programme_, params, (5, 200))
-    given = pipeline.overlift_allowance(programme_, params, (5, 200), sub_samples=sub)
+    given = pipeline.overlift_allowance(
+        programme_, params, (5, 200), sub_samples=sub, unfiltered=unfiltered
+    )
     for x, y in zip(built, given, strict=True):
         np.testing.assert_array_equal(x, y)
 
