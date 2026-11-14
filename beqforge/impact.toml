@@ -180,3 +180,54 @@ kind = "behaviour"
 # each) that the new rule moves, counted here. A record with no passing candidate has no
 # winner to move.
 basis = { no_fit = [0, 20], declined_after_fit = [0, 16], designed_with_failures = [10, 271], designed_all_passed = [70, 762] }
+
+[[change]]
+id = "designer-latency"
+design_version = 10
+summary = "the designer computes what a run reuses once: the sub feed, the unfiltered spectra, each candidate's filtered waveform and device transfer, each channel's flat deficit and restored boosts, and the bootstrap percentiles off draw counts; no answer moves (TODO 23)"
+evidence = "plans/designer-latency.md#validation-per-commit"
+
+[[change.touches]]
+feature = "analysis.blockers"
+kind = "unchanged"
+note = "`analyse` measures the mix's flat deficit once and `channels_missing_low_end` each channel's once; probe unchanged at --tol 0"
+
+[[change.touches]]
+feature = "analysis.extraction"
+kind = "unchanged"
+note = "bootstrap percentiles read off draw counts are bit-identical to the gathered ones; probe recomputing every analysis unchanged at --tol 0"
+
+[[change.touches]]
+feature = "fit.input"
+kind = "unchanged"
+note = "the over-lift allowance takes the run's sub feed and unfiltered spectra instead of rebuilding them; probe unchanged at --tol 0"
+
+[[change.touches]]
+feature = "judge.headroom"
+kind = "unchanged"
+note = "the headroom peak is interpolated in one-second blocks from the waveform verify filtered; real-run records identical, headroom peaks included"
+
+[[change.touches]]
+feature = "judge.verification"
+kind = "unchanged"
+note = "verify takes the run's sub feed, unfiltered spectra and one device transfer a candidate; probe unchanged at --tol 0, real-run records identical"
+
+[[change.touches]]
+feature = "targets.counterfactual"
+kind = "unchanged"
+note = "each distinct set of channel boosts is restored once across the caps, each channel's flat deficit measured once; probe unchanged at --tol 0"
+
+[[change.touches]]
+feature = "targets.flatten"
+kind = "unchanged"
+note = "the mix's flat deficit is measured once for the strategies; probe unchanged at --tol 0"
+
+[[change.touches]]
+feature = "targets.parametric"
+kind = "unchanged"
+note = "the mix's flat deficit is measured once for the strategies; probe unchanged at --tol 0"
+
+[[change.touches]]
+feature = "targets.shared"
+kind = "unchanged"
+note = "`propose`, the judged band and the passband ripple take the flat deficit measured once; probe unchanged at --tol 0"
