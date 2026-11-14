@@ -296,6 +296,7 @@ def _judge_state(material, state: dict) -> dict:
             entry[mode] = {
                 "passed": bool(candidate.verdict.passed),
                 "failures": list(candidate.verdict.failures),
+                "margins": dict(candidate.verdict.margins),
                 "departure_db": candidate.correction.departure_db(
                     run.params.accept.target_tilt_db_per_octave
                 ),
