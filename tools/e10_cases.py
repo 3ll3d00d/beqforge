@@ -36,8 +36,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge import Alignment, HighPass, e10, record  # noqa: E402
-from beqforge.harness import apply_high_pass  # noqa: E402
+from beqforge import Alignment, HighPass, e10, record
+from beqforge.harness import apply_high_pass
 
 ROOT = Path(__file__).resolve().parent.parent
 LIBRARY = Path("/media/beq/work")

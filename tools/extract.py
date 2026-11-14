@@ -33,7 +33,7 @@ import numpy as np
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
+from beqforge.material import LFE_GAIN, MAIN_GAIN
 
 logger = logging.getLogger("extract")
 
@@ -107,7 +107,9 @@ def _soxr_available() -> bool:
     there.
     """
     try:
-        out = subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, text=True)
+        out = subprocess.run(
+            ["ffmpeg", "-version"], capture_output=True, check=True, text=True
+        )
     except (OSError, subprocess.CalledProcessError):
         return False
     return "--enable-libsoxr" in out.stdout

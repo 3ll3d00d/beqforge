@@ -43,7 +43,10 @@ def test_exact_inversion_is_used_only_when_the_evidence_licenses_it(ceiling, met
     result = design(identified_rolloff(), envelopes_with_margin(ceiling), params)
     assert result.method == method
     assert result.noise_ceiling_binds == (method == "fitted")
-    assert result.mv_adjust_db <= min(ceiling, params.max_boost_db) + params.residual_target_db
+    assert (
+        result.mv_adjust_db
+        <= min(ceiling, params.max_boost_db) + params.residual_target_db
+    )
     assert result.residual_db <= params.residual_target_db
 
 

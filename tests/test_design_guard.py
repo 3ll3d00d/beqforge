@@ -175,9 +175,7 @@ def test_an_unmeasurable_band_terminates_the_search() -> None:
     expensive direction to be wrong in.
     """
     material = material_from({"C": masked_knee(-26.0), "LFE": masked_knee(-26.0, 60)})
-    with mock.patch(
-        "beqforge.diagnose.band_tracking", return_value=float("nan")
-    ):
+    with mock.patch("beqforge.diagnose.band_tracking", return_value=float("nan")):
         result = diagnose(material)
     assert not np.isnan(result.noise_floor_hz), (
         "an unmeasurable band was read as content"

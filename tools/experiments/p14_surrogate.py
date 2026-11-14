@@ -32,11 +32,11 @@ import math
 import time
 
 import numpy as np
+from p14_jacobian import coefficient_sensitivity, magnitude_jacobian
 from scipy import optimize
 
 from beqforge import BiquadSpec
 from beqforge.filters import biquad_sos, magnitude_db
-from p14_jacobian import coefficient_sensitivity, magnitude_jacobian
 
 LAWSON_ROUNDS = 8
 LS_MAX_NFEV = 1200

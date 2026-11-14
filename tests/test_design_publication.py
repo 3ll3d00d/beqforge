@@ -1,26 +1,25 @@
 """Exact publication precision, distinct from hypothetical drift samples."""
 
-import math
-
-from dataclasses import asdict
 import gzip
 import json
+import math
+from dataclasses import asdict
 
 import numpy as np
 import pytest
 
-from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge.accept import assess
 from beqforge.beqd import _section, export
 from beqforge.filters import (
+    FitRequest,
     Realisation,
+    _Escalation,
+    _publishable,
     biquad_sos,
     magnitude_db,
     publication_filters,
     unstable_sections,
-    _publishable,
-    _Escalation,
-    FitRequest,
 )
 from beqforge.verify import Correction, verify
 

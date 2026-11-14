@@ -46,7 +46,12 @@ from typing import override
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge.designer import (  # noqa: E402
+from beq_common import __version__
+from beqforge import filters, impact, record
+from beqforge.accept import AcceptParams
+from beqforge.adjustments import kinds_for
+from beqforge.cache import DirStore, Store
+from beqforge.designer import (
     CONTRACT_VERSION,
     DESIGN_VERSION,
     ContractViolation,
@@ -57,14 +62,9 @@ from beqforge.designer import (  # noqa: E402
     response_to_json,
     validate_response,
 )
-from beq_common import __version__
-from beqforge import filters, impact, record  # noqa: E402
-from beqforge.adjustments import kinds_for  # noqa: E402
-from beqforge.accept import AcceptParams  # noqa: E402
-from beqforge.cache import DirStore, Store  # noqa: E402
-from beqforge.reference import UnusableReference  # noqa: E402
-from beqforge.filters import Realisation  # noqa: E402
-from beqforge.pipeline import STRATEGIES, PipelineParams  # noqa: E402
+from beqforge.filters import Realisation
+from beqforge.pipeline import STRATEGIES, PipelineParams
+from beqforge.reference import UnusableReference
 
 logger = logging.getLogger(__name__)
 
@@ -492,7 +492,7 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/health":
             # 1.2: what a caller registering a by-reference designer checks first, so a
             # server without a shared root shows up at registration, not on its first title.
@@ -527,7 +527,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._respond(404, {"error": f"unknown path {self.path!r}"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         if self.path == IMPACT_PATH:
             self._impact()
             return

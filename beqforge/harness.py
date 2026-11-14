@@ -20,8 +20,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import signal
 
-from beqforge.biquad import PeakingEQ
 from beqforge import Alignment, HighPass
+from beqforge.biquad import PeakingEQ
 from beqforge.filters import high_pass_sos
 
 logger = logging.getLogger(__name__)
@@ -97,13 +97,13 @@ def synthesise(profile: SyntheticProfile, fs: float, seed: int = 0) -> np.ndarra
     can be reproduced from its profile and seed alone.
     """
     rng = np.random.default_rng(seed)
-    n = int(round(profile.duration_s * fs))
+    n = round(profile.duration_s * fs)
     out = rng.standard_normal(n) * 10.0 ** (profile.floor_db / 20.0)
 
-    count = max(1, int(round(profile.duration_s * profile.event_rate_hz)))
+    count = max(1, round(profile.duration_s * profile.event_rate_hz))
     starts = rng.integers(0, n, size=count)
     levels = 10.0 ** (-rng.uniform(0.0, profile.event_level_spread_db, count) / 20.0)
-    decay_len = int(round(profile.event_decay_s * 6.0 * fs))
+    decay_len = round(profile.event_decay_s * 6.0 * fs)
     envelope = np.exp(-np.arange(decay_len) / (profile.event_decay_s * fs))
     nyquist = fs / 2.0
     for start, level in zip(starts, levels, strict=True):

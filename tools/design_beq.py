@@ -24,11 +24,11 @@ import numpy as np
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge import explain  # noqa: E402
-from beqforge.material import load  # noqa: E402
-from beqforge.accept import AcceptParams  # noqa: E402
-from beqforge.filters import Realisation  # noqa: E402
-from beqforge.pipeline import (  # noqa: E402
+from beqforge import explain
+from beqforge.accept import AcceptParams
+from beqforge.filters import Realisation
+from beqforge.material import load
+from beqforge.pipeline import (
     STRATEGIES,
     PipelineParams,
     Report,
@@ -235,7 +235,7 @@ def show_cost(report: Report) -> None:
     print(f"\n  {report.timings.total_s:.1f} s total\n")
     for label, seconds in report.timings.stages:
         share = 100.0 * seconds / total if total else 0.0
-        bar = "#" * int(round(share / 2.0))
+        bar = "#" * round(share / 2.0)
         print(f"  {label:<18s}{seconds:8.1f} s {share:5.1f}%  {bar}")
     print(
         f"\n  {report.timings.elapsed_s:.1f} s elapsed, "

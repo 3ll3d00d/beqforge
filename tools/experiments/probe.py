@@ -45,12 +45,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from beqforge import DESIGN_GRID, BiquadSpec  # noqa: E402
-from beqforge.diagnose import mean_spectrum, plateau_reference  # noqa: E402
-from beqforge.filters import correction_band_hz  # noqa: E402
-from beqforge.material import load  # noqa: E402
-from beqforge import pipeline  # noqa: E402
-from beqforge.pipeline import (  # noqa: E402
+from beqforge import (
+    DESIGN_GRID,
+    BiquadSpec,
+    pipeline,
+)
+from beqforge.diagnose import mean_spectrum, plateau_reference
+from beqforge.filters import correction_band_hz
+from beqforge.material import load
+from beqforge.pipeline import (
     FIT_STATS,
     Headroom,
     PipelineParams,

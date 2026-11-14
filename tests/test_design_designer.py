@@ -353,12 +353,14 @@ def test_to_design_candidate_output_satisfies_the_response_validator() -> None:
 
 
 def _valid_candidate(**overrides) -> DesignCandidate:
-    kwargs = dict(
-        filters=[BiquadSpec(type="low_shelf", freq_hz=15.81, gain_db=15.918, q=0.7071)],
-        confidence=0.8,
-        mv_adjust_db=15.918,
-        method="fitted",
-    )
+    kwargs = {
+        "filters": [
+            BiquadSpec(type="low_shelf", freq_hz=15.81, gain_db=15.918, q=0.7071)
+        ],
+        "confidence": 0.8,
+        "mv_adjust_db": 15.918,
+        "method": "fitted",
+    }
     kwargs.update(overrides)
     return DesignCandidate(**kwargs)
 
@@ -437,15 +439,15 @@ def test_validate_response_rejects_a_positive_gain_reduction() -> None:
         )
 
 
-_MEASURED_FIT = dict(
-    residual_db=1.1,
-    residual_band_hz=(5.0, 212.0),
-    residual_at_hz=9.0,
-    residual_direction="under",
-    residual_rms_db=0.3,
-    residual_within_tolerance=0.96,
-    residual_tolerance_db=0.5,
-)
+_MEASURED_FIT = {
+    "residual_db": 1.1,
+    "residual_band_hz": (5.0, 212.0),
+    "residual_at_hz": 9.0,
+    "residual_direction": "under",
+    "residual_rms_db": 0.3,
+    "residual_within_tolerance": 0.96,
+    "residual_tolerance_db": 0.5,
+}
 
 
 def test_validate_response_accepts_a_measured_fit() -> None:
@@ -842,14 +844,17 @@ def test_the_response_names_its_record_relative_to_the_shared_root(tmp_path) -> 
     assert response_to_json(response)["run_record"] == response.run_record
     validate_response(response)
 
-    outside = design(request, record_dir=tmp_path / "records", shared_root=tmp_path / "audio")
+    outside = design(
+        request, record_dir=tmp_path / "records", shared_root=tmp_path / "audio"
+    )
     assert outside.run_record is None
     assert "run_record" not in response_to_json(outside)
     assert design(request, record_dir=tmp_path / "records").run_record is None
 
 
 @pytest.mark.parametrize(
-    "path", ["", "/work/records/r.gz", "records\\r.gz", "../records/r.gz", "a/../../r.gz"]
+    "path",
+    ["", "/work/records/r.gz", "records\\r.gz", "../records/r.gz", "a/../../r.gz"],
 )
 def test_a_run_record_off_the_shared_root_is_refused(path) -> None:
     with pytest.raises(ContractViolation, match="run_record"):
@@ -1055,8 +1060,8 @@ def test_rejected_designs_reach_the_wire_and_a_1_0_body_is_unchanged() -> None:
 )
 def test_validate_response_rejects_a_malformed_rejected_list(rejected, message) -> None:
     for shape in (
-        dict(candidates=[_valid_candidate()]),
-        dict(decline_reason="no_publishable_candidate"),
+        {"candidates": [_valid_candidate()]},
+        {"decline_reason": "no_publishable_candidate"},
     ):
         with pytest.raises(ContractViolation, match=message):
             validate_response(

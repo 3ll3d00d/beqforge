@@ -10,7 +10,6 @@ import pytest
 from beqforge.material import LFE_GAIN, MAIN_GAIN, load
 from tools.extract import channel_names, main
 
-
 # Independent ffmpeg speaker identities, in native order (ffmpeg -layouts).
 LAYOUTS = {
     "mono": "FC",
@@ -39,19 +38,19 @@ LAYOUTS = {
     "7.1(wide)": "FL FR FC LFE BL BR FLC FRC",
     "7.1(wide-side)": "FL FR FC LFE FLC FRC SL SR",
 }
-ALIASES = dict(
-    FL="L",
-    FR="R",
-    FC="C",
-    LFE="LFE",
-    BL="Lb",
-    BR="Rb",
-    BC="Cb",
-    SL="Ls",
-    SR="Rs",
-    FLC="Lc",
-    FRC="Rc",
-)
+ALIASES = {
+    "FL": "L",
+    "FR": "R",
+    "FC": "C",
+    "LFE": "LFE",
+    "BL": "Lb",
+    "BR": "Rb",
+    "BC": "Cb",
+    "SL": "Ls",
+    "SR": "Rs",
+    "FLC": "Lc",
+    "FRC": "Rc",
+}
 
 
 @pytest.mark.parametrize("layout,identities", LAYOUTS.items())

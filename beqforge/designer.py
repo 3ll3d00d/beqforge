@@ -968,14 +968,14 @@ def _validate_candidate(
     for i, spec in enumerate(candidate.filters):
         _validate_biquad_spec(spec, i, index, where)
     _validate_fit(candidate, f"{where}[{index}]")
-    if candidate.commentary is not None:
-        if not isinstance(candidate.commentary, dict) or not all(
+    if candidate.commentary is not None and (
+        not isinstance(candidate.commentary, dict)
+        or not all(
             isinstance(k, str) and isinstance(v, str)
             for k, v in candidate.commentary.items()
-        ):
-            raise ContractViolation(
-                f"{where}[{index}].commentary must be a dict[str, str]"
-            )
+        )
+    ):
+        raise ContractViolation(f"{where}[{index}].commentary must be a dict[str, str]")
 
 
 def _validate_fit(candidate: DesignCandidate, prefix: str) -> None:

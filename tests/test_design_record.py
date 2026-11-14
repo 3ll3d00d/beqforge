@@ -260,7 +260,9 @@ def test_ledger_entry_for_no_candidate_is_strict_json(a_record):
     a_record["material"]["duration_s"] = 60.0
     a_record["accepted"] = None
     a_record["candidates"] = []
-    a_record["evidence_notes"] = ["no usable contiguous mix plateau; restoration withheld"]
+    a_record["evidence_notes"] = [
+        "no usable contiguous mix plateau; restoration withheld"
+    ]
 
     entry = title_entry(a_record)
     assert entry["status"] == "abstained"
@@ -324,7 +326,9 @@ def test_replay_uses_recorded_parameters_but_still_checks_provenance(
 
     if reader == "replay":
         monkeypatch.setattr(replay, "render_cached", render)
-        monkeypatch.setattr(replay.sys, "argv", ["replay", str(path), "--charts", str(charts)])
+        monkeypatch.setattr(
+            replay.sys, "argv", ["replay", str(path), "--charts", str(charts)]
+        )
         assert replay.main() == (0 if changed is None else 2)
     else:
         monkeypatch.setattr(render_ledger, "render_cached", render)

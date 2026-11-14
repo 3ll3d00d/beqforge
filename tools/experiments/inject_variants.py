@@ -30,10 +30,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from beqforge import Alignment, HighPass  # noqa: E402
-from beqforge.diagnose import DiagnoseParams, mean_spectrum, plateau_reference  # noqa: E402
-from beqforge.harness import apply_high_pass  # noqa: E402
-from beqforge.material import LFE_GAIN, MAIN_GAIN  # noqa: E402
+from beqforge import Alignment, HighPass
+from beqforge.diagnose import DiagnoseParams, mean_spectrum, plateau_reference
+from beqforge.harness import apply_high_pass
+from beqforge.material import LFE_GAIN, MAIN_GAIN
 
 DEFAULT_SPECS = (
     # moderate: lifting to where the content ends is the right answer

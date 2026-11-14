@@ -2,12 +2,14 @@ import math
 import os
 import sys
 import time
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import structure
+
 import beqforge.filters as F
 from beqforge.filters import Realisation
-import structure
 
 GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
 FS, REAL = 96000.0, Realisation()

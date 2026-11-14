@@ -34,13 +34,13 @@ import matplotlib
 
 matplotlib.use("Agg")  # written to file, never shown; plt.show() blocks a headless run
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
 
-from beqforge import BiquadSpec  # noqa: E402
-from beqforge.filters import Realisation, unstable_sections  # noqa: E402
-from beqforge.verify import device_waveform  # noqa: E402
-from beqforge.material import Material  # noqa: E402
+from beqforge import BiquadSpec
+from beqforge.filters import Realisation, unstable_sections
+from beqforge.material import Material
+from beqforge.verify import device_waveform
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def programme_levels_db(
 
     index = int(power.sum(axis=1).argmax()) if frame_index is None else frame_index
     anchor = int(coarse[index])
-    half = int(round(LOUDEST_SPAN_S * fs / 2.0))
+    half = round(LOUDEST_SPAN_S * fs / 2.0)
     fine = np.arange(
         max(0, anchor - half),
         min(len(samples) - NPERSEG, anchor + half) + 1,

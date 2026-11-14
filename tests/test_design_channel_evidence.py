@@ -22,7 +22,7 @@ from beqforge.pipeline import (
     counterfactual_target,
 )
 from tests.test_design_design import envelopes_with_margin
-from tests.test_design_diagnose import material_from, scened_noise, high_passed
+from tests.test_design_diagnose import high_passed, material_from, scened_noise
 
 
 def test_coherent_cancellation_has_signed_contributions_and_uncertainty():
@@ -142,8 +142,8 @@ def test_level_invariance_cannot_distinguish_natural_colouring_from_mastering():
 
 
 def test_actual_noisy_channel_has_no_allowance_despite_clean_mix_events():
-    from beqforge.harness import evidence_cases
     from beqforge.extraction import extract
+    from beqforge.harness import evidence_cases
 
     case = next(evidence_cases(101))
     rng = np.random.default_rng(237)

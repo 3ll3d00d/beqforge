@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge import e10, record  # noqa: E402
+from beqforge import e10, record
 
 
 def _seeds(text: str) -> list[int]:

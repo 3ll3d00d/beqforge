@@ -150,8 +150,10 @@ def correction(candidate: Candidate, report: Report | None = None) -> str:
         for f in candidate.filters
     )
     parts = [
-        f"{candidate.label}: {len(candidate.filters)} section(s) — {sections}; "
-        f"peak boost {candidate.mv_adjust_db:+.1f} dB"
+        (
+            f"{candidate.label}: {len(candidate.filters)} section(s) — {sections}; "
+            f"peak boost {candidate.mv_adjust_db:+.1f} dB"
+        )
     ]
     recovered = candidate.verdict.recovered_fraction
     if math.isfinite(recovered):

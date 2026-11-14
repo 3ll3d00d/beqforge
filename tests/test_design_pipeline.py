@@ -24,6 +24,8 @@ from tests.test_design_diagnose import (
     FS,
     high_passed,
     material_from,
+)
+from tests.test_design_diagnose import (
     scened_noise as _scened_noise,
 )
 
@@ -446,7 +448,6 @@ def test_the_judged_band_starts_at_the_measured_noise_floor() -> None:
 
     from beqforge.diagnose import Diagnosis
     from beqforge.pipeline import judged_band_hz
-
     from tests.test_design_diagnose import FS, material_from, scened_noise
 
     params = PipelineParams()

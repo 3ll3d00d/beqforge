@@ -18,9 +18,9 @@ get fitted.
 
 import time
 
+import greedy as greedy_module
 
 import beqforge.filters as F
-import greedy as greedy_module
 
 
 def structure_fit(

@@ -24,11 +24,11 @@ import numpy as np
 from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge.filters import (
     Realisation,
-    publication_filters,
-    unstable_sections,
     biquad_sos,
     drift_distribution,
     magnitude_db,
+    publication_filters,
+    unstable_sections,
 )
 from beqforge.verify import Correction
 
@@ -603,9 +603,11 @@ def assess(
         return Verdict(
             passed=False,
             failures=[
-                f"only {octaves:.2f} octaves left to judge "
-                f"({correction.band_hz[0]:.1f}-{correction.band_hz[1]:.1f} Hz); a slope read "
-                f"over less than {params.min_judge_octaves:g} is set by where the band stops"
+                (
+                    f"only {octaves:.2f} octaves left to judge "
+                    f"({correction.band_hz[0]:.1f}-{correction.band_hz[1]:.1f} Hz); a slope read "
+                    f"over less than {params.min_judge_octaves:g} is set by where the band stops"
+                )
             ],
             notes=[],
             worst_gradient_before=math.nan,

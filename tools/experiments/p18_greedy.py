@@ -164,7 +164,7 @@ def greedy_fit(
         fixed = list(specs)
         kinds = [proposed.type]
 
-        def one(p):
+        def one(p, fixed=fixed, kinds=kinds):
             return cost_of(fixed + unpack(p, kinds))
 
         seeded = np.array([proposed.freq_hz, proposed.q, proposed.gain_db])

@@ -39,8 +39,7 @@ from pathlib import Path
 import numpy as np
 import scipy.fft
 
-from beqforge import DESIGN_GRID, BiquadSpec
-from beqforge import cache
+from beqforge import DESIGN_GRID, BiquadSpec, cache
 from beqforge.accept import (
     AcceptParams,
     Verdict,
@@ -50,8 +49,8 @@ from beqforge.accept import (
 from beqforge.dc_offset import dc_steps
 from beqforge.design import DesignMethod, DesignParams, design
 from beqforge.diagnose import (
-    Diagnosis,
     DiagnoseParams,
+    Diagnosis,
     diagnose,
     mean_spectrum,
     plateau_reference,
@@ -66,14 +65,14 @@ from beqforge.filters import (
     FitRequest,
     FitStats,
     Realisation,
-    publication_filters,
     biquad_sos,
     correction_band_hz,
     fit_near_equal_all,
     magnitude_db,
+    publication_filters,
     unstable_sections,
 )
-from beqforge.identify import IdentifyParams, Identification, identify_rolloff
+from beqforge.identify import Identification, IdentifyParams, identify_rolloff
 from beqforge.material import (
     LFE_GAIN,
     MAIN_GAIN,
@@ -756,7 +755,7 @@ def _deficit_anchor(
     if not over.any():
         # nothing to correct anywhere; the caller discards the proposal on max() < 1 dB
         return float(plateau_hz[0])
-    run = max(1, int(round(len(grid) * params.flatten_settled_octaves / _GRID_OCTAVES)))
+    run = max(1, round(len(grid) * params.flatten_settled_octaves / _GRID_OCTAVES))
     first = int(np.argmax(over))
     settled = np.convolve(
         ((~over & keep)[first:]).astype(float), np.ones(run), mode="valid"
@@ -1805,14 +1804,12 @@ def analyse(
     # One effective exclusion contract at every stage, including directly configured omissions.
     bands = tuple(
         sorted(
-            set(
-                (
-                    *params.exclude_bands_hz,
-                    *params.diagnose.exclude_bands_hz,
-                    *params.extraction.exclude_bands_hz,
-                    *params.identify.exclude_bands_hz,
-                )
-            )
+            {
+                *params.exclude_bands_hz,
+                *params.diagnose.exclude_bands_hz,
+                *params.extraction.exclude_bands_hz,
+                *params.identify.exclude_bands_hz,
+            }
         )
     )
     unexcluded(DESIGN_GRID, bands)  # validate even when all evidence is unavailable
@@ -2500,9 +2497,11 @@ def _within_ceiling(
         passed=False,
         failures=[
             *verdict.failures,
-            f"boosts {correction.freqs[below][worst]:.1f} Hz by {gain[worst]:.1f} dB "
-            f"where contrast licenses {allowed[worst]:.1f} — lifting the quiet floor, "
-            "not content",
+            (
+                f"boosts {correction.freqs[below][worst]:.1f} Hz by {gain[worst]:.1f} dB "
+                f"where contrast licenses {allowed[worst]:.1f} — lifting the quiet floor, "
+                "not content"
+            ),
         ],
     )
 
@@ -2567,10 +2566,12 @@ def _choose_fit(
                 kept,
                 target_notes=(
                     *kept.target_notes,
-                    f"fit: {len(filters)} section(s) at {error:.2f} dB, one of "
-                    f"{len(options)} fits within the residual bar of the fitter's "
-                    f"{len(answer[0])}-section answer at {answer[1]:.2f} dB, which the "
-                    "judge does not pass",
+                    (
+                        f"fit: {len(filters)} section(s) at {error:.2f} dB, one of "
+                        f"{len(options)} fits within the residual bar of the fitter's "
+                        f"{len(answer[0])}-section answer at {answer[1]:.2f} dB, which the "
+                        "judge does not pass"
+                    ),
                 ),
             )
     kept = judge(*answer, True)

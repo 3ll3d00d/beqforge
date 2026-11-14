@@ -297,4 +297,5 @@ def test_no_cached_stage_carries_the_material_name(tmp_path) -> None:
         propose(named, analysed, path)
     import gzip
 
-    assert "zz-unmistakable-title" not in gzip.open(path, "rt").read()
+    with gzip.open(path, "rt") as f:
+        assert "zz-unmistakable-title" not in f.read()

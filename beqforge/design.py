@@ -15,7 +15,7 @@ Two routes, matching the contract's `method`:
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
@@ -118,7 +118,7 @@ class DesignParams:
     least often selected. `PipelineParams.fit_seeds` sets this now, and the
     reasoning there applies here unchanged."""
 
-    realisation: Realisation | None = Realisation()
+    realisation: Realisation | None = field(default_factory=Realisation)
     """How the cascade will actually be realised, scored during the fit.
 
     On by default. Fitting in float64 alone accepts cascades built from large opposing
@@ -321,7 +321,7 @@ def _unpriced_fitted_target(
 
 
 def _nearest_even_order(order: float) -> int:
-    return max(2, 2 * int(round(order / 2.0)))
+    return max(2, 2 * round(order / 2.0))
 
 
 PROTECTIVE_ALIGNMENT = Alignment.BUTTERWORTH

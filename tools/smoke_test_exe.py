@@ -45,13 +45,13 @@ from pathlib import Path
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import numpy as np  # noqa: E402
-from scipy import signal  # noqa: E402
+import numpy as np
+from scipy import signal
 
-from beqforge import Alignment, HighPass  # noqa: E402
-from beqforge.designer import DESIGN_VERSION  # noqa: E402
-from beqforge.harness import apply_high_pass  # noqa: E402
-from beqforge.material import LFE_GAIN  # noqa: E402
+from beqforge import Alignment, HighPass
+from beqforge.designer import DESIGN_VERSION
+from beqforge.harness import apply_high_pass
+from beqforge.material import LFE_GAIN
 
 
 def _encode(arr: np.ndarray) -> dict:

@@ -10,6 +10,7 @@ the answer it is supposed to help find.
 """
 
 import argparse
+import itertools
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from scipy import signal
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge.material import Material, load  # noqa: E402
+from beqforge.material import Material, load
 
 BARS = " ▁▂▃▄▅▆▇█"
 
@@ -38,16 +39,14 @@ def sparkline(freqs: np.ndarray, db: np.ndarray, columns: int = 60) -> str:
             db[(freqs >= lo) & (freqs < hi)].mean()
             if ((freqs >= lo) & (freqs < hi)).any()
             else np.nan
-            for lo, hi in zip(edges[:-1], edges[1:], strict=True)
+            for lo, hi in itertools.pairwise(edges)
         ]
     )
     finite = binned[np.isfinite(binned)]
     lo, hi = finite.min(), finite.max()
     scale = (hi - lo) or 1.0
     return "".join(
-        " "
-        if not np.isfinite(v)
-        else BARS[int(round((v - lo) / scale * (len(BARS) - 1)))]
+        " " if not np.isfinite(v) else BARS[round((v - lo) / scale * (len(BARS) - 1))]
         for v in binned
     )
 

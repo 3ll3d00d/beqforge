@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge.accept import confidence_from_evidence
 from beqforge.design import DesignParams, _noise_ceiling, design
 from beqforge.diagnose import Diagnosis

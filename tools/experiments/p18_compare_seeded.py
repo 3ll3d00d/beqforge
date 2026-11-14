@@ -8,10 +8,10 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import seeded
+
 import beqforge.filters as F
 from beqforge.filters import Realisation
-
-import seeded
 
 GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
 FS, REAL = 96000.0, Realisation()

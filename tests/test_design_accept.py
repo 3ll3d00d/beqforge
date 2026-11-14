@@ -64,8 +64,8 @@ def test_extent_reaches_the_bottom_when_the_whole_band_is_flat() -> None:
 
 def test_relocating_a_cliff_is_rejected() -> None:
     """The notch-filling design of §11: flat over what it covers, cliff moved down."""
-    before = lambda f: 0.0 if f >= 23.0 else -13.0  # noqa: E731
-    after = lambda f: -1.5 if f >= 14.0 else -13.0  # noqa: E731
+    before = lambda f: 0.0 if f >= 23.0 else -13.0
+    after = lambda f: -1.5 if f >= 14.0 else -13.0
     verdict = assess(
         [BiquadSpec("low_shelf", 18.0, 6.0, 1.0)],
         correction(before, after),
@@ -76,7 +76,7 @@ def test_relocating_a_cliff_is_rejected() -> None:
 
 
 def test_removing_a_cliff_is_accepted() -> None:
-    before = lambda f: 0.0 if f >= 23.0 else -13.0  # noqa: E731
+    before = lambda f: 0.0 if f >= 23.0 else -13.0
     verdict = assess(
         [BiquadSpec("low_shelf", 17.0, 11.5, 0.73)],
         correction(before, lambda f: -1.5),
@@ -180,8 +180,7 @@ def test_drift_is_measured_over_publication_rounding_not_one_point() -> None:
     """A cancelling cascade can measure well at the optimiser's exact output and badly once
     published. Two shelves that do not fight each other must stay tight under the same jitter.
     """
-    from beqforge.filters import drift_distribution
-    from beqforge.filters import Realisation
+    from beqforge.filters import Realisation, drift_distribution
 
     grid = np.logspace(np.log10(3.0), np.log10(400.0), 400)
     realisation = Realisation()

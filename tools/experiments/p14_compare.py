@@ -5,23 +5,25 @@ import math
 import os
 import sys
 import time
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import surrogate
+
 import beqforge.filters as F
 from beqforge.filters import Realisation
-import surrogate
 
 GRID = np.logspace(math.log10(3.0), math.log10(400.0), 400)
 FS = 96000.0
-KW = dict(
-    band_hz=(5.0, 200.0),
-    placement_band_hz=(5.0, 40.0),
-    max_gain_db=26.0,
-    realisation=Realisation(),
-    seeds=(0, 1),
-    max_drift_db=3.0,
-)
+KW = {
+    "band_hz": (5.0, 200.0),
+    "placement_band_hz": (5.0, 40.0),
+    "max_gain_db": 26.0,
+    "realisation": Realisation(),
+    "seeds": (0, 1),
+    "max_drift_db": 3.0,
+}
 HERE = os.path.dirname(__file__)
 
 

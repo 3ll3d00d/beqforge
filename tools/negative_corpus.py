@@ -32,11 +32,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scipy.stats import beta  # noqa: E402
+from scipy.stats import beta
 
-from beqforge import record  # noqa: E402
-from beqforge.harness import CORPUS_GATED, CORPUS_SHAPES, corpus_case  # noqa: E402
-from beqforge.pipeline import PipelineParams  # noqa: E402
+from beqforge import record
+from beqforge.harness import CORPUS_GATED, CORPUS_SHAPES, corpus_case
+from beqforge.pipeline import PipelineParams
 
 
 def clopper_pearson(k: int, n: int, confidence: float = 0.95) -> tuple[float, float]:

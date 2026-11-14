@@ -4,14 +4,14 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge import DESIGN_GRID, BiquadSpec
 from beqforge.filters import (
     Realisation,
     biquad_sos,
     magnitude_db,
     publication_filters,
 )
-from beqforge.verify import device_waveform, waveform_peak, verify, _mean_db
+from beqforge.verify import _mean_db, device_waveform, verify, waveform_peak
 
 FS = 1000
 
@@ -134,8 +134,8 @@ def test_headroom_uses_published_device_phase_quantisation_and_ringout(monkeypat
 
 
 def test_unstable_device_cannot_supply_headroom():
-    from beqforge.pipeline import PipelineParams, required_gain_reduction_db
     from beqforge.material import Material
+    from beqforge.pipeline import PipelineParams, required_gain_reduction_db
 
     filters = [
         BiquadSpec(

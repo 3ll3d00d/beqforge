@@ -1,19 +1,18 @@
 """R9: effective settings, cache identity and parametric correction intent."""
 
-from dataclasses import replace
 import importlib
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from beqforge import DESIGN_GRID, BiquadSpec
-from beqforge import cache, pipeline, record
+from beqforge import DESIGN_GRID, BiquadSpec, cache, pipeline, record
 from beqforge.accept import assess
 from beqforge.diagnose import Diagnosis
 from beqforge.filters import Realisation
 from beqforge.material import Material
 from beqforge.verify import Correction
-from tests.test_design_design import identified_rolloff, envelopes_with_margin
+from tests.test_design_design import envelopes_with_margin, identified_rolloff
 
 D = importlib.import_module("beqforge.design")
 
@@ -151,7 +150,7 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
     tmp_path, monkeypatch
 ):
     material, diagnosis, envelopes, identification = inputs()
-    counts = dict(diagnose=0, extract=0, identify=0, design=0)
+    counts = {"diagnose": 0, "extract": 0, "identify": 0, "design": 0}
 
     def measured(name, value):
         def call(*args):
@@ -181,7 +180,7 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
     path = tmp_path / "stages.json.gz"
     first = pipeline.run(material, params, cache_path=path)
     hit = pipeline.run(material, params, cache_path=path)
-    assert counts == dict(diagnose=1, extract=1, identify=1, design=1)
+    assert counts == {"diagnose": 1, "extract": 1, "identify": 1, "design": 1}
     assert len(first.candidates) == len(hit.candidates) == 1
     # This compares actual published filters, targets, verdicts and method/settings metadata.
     assert record._candidate(first.candidates[0]) == record._candidate(
@@ -197,9 +196,9 @@ def test_cached_run_matches_fresh_and_seed_change_reuses_analysis(
     assert hit.candidates[0].target_notes
     changed = replace(params, fit_seeds=(8,))
     moved = pipeline.run(material, changed, cache_path=path)
-    assert counts == dict(diagnose=1, extract=1, identify=1, design=2)
+    assert counts == {"diagnose": 1, "extract": 1, "identify": 1, "design": 2}
     fresh = pipeline.run(material, changed, cache_path=path, fresh=True)
-    assert counts == dict(diagnose=2, extract=2, identify=2, design=3)
+    assert counts == {"diagnose": 2, "extract": 2, "identify": 2, "design": 3}
     assert record._candidate(moved.candidates[0]) == record._candidate(
         fresh.candidates[0]
     )

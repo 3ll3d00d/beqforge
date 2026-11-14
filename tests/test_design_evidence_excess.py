@@ -5,8 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from beqforge import DESIGN_GRID, BiquadSpec
-from beqforge import record
+from beqforge import DESIGN_GRID, BiquadSpec, record
 from beqforge.filters import Realisation
 from beqforge.pipeline import evidence_excess
 

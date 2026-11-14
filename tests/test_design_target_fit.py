@@ -5,8 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from beqforge import DESIGN_GRID, BiquadSpec
-from beqforge import explain, record
+from beqforge import DESIGN_GRID, BiquadSpec, explain, record
 from beqforge.filters import Realisation, biquad_sos, magnitude_db
 from beqforge.pipeline import target_fit
 

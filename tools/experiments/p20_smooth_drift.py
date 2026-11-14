@@ -13,17 +13,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import numpy as np  # noqa: E402
+import numpy as np
+from p14_jacobian import coefficient_sensitivity
 
-import beqforge.filters as F  # noqa: E402
-from p14_jacobian import coefficient_sensitivity  # noqa: E402
+import beqforge.filters as F
 
 SENSITIVITY_TO_P90 = 3.0
 _original = F._fit_structure
 
 
-def patched(target_db, freqs, fs, shelves, peaks, band_hz, placement_hz,
-            max_q, max_gain_db, realisation, seed):
+def patched(
+    target_db,
+    freqs,
+    fs,
+    shelves,
+    peaks,
+    band_hz,
+    placement_hz,
+    max_q,
+    max_gain_db,
+    realisation,
+    seed,
+):
     """`_fit_structure` with the drift term swapped, by patching the cost it builds."""
     import time as _time
 
@@ -61,7 +72,10 @@ def patched(target_db, freqs, fs, shelves, peaks, band_hz, placement_hz,
         cost, bounds, seed=seed, maxiter=300, popsize=20, tol=1e-10, polish=True
     )
     fine = optimize.minimize(
-        cost, coarse.x, method="Nelder-Mead", bounds=bounds,
+        cost,
+        coarse.x,
+        method="Nelder-Mead",
+        bounds=bounds,
         options={"maxiter": 60000, "maxfev": 60000, "xatol": 1e-10, "fatol": 1e-12},
     )
     best = fine.x if fine.fun < coarse.fun else coarse.x
@@ -75,9 +89,9 @@ def patched(target_db, freqs, fs, shelves, peaks, band_hz, placement_hz,
 
 F._fit_structure = patched
 
-from beqforge import record  # noqa: E402
-from beqforge.material import load  # noqa: E402
-from beqforge.pipeline import PipelineParams, run  # noqa: E402
+from beqforge import record
+from beqforge.material import load
+from beqforge.pipeline import PipelineParams, run
 
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 out = Path(sys.argv[1])

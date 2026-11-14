@@ -73,7 +73,8 @@ def test_the_record_carries_the_accounting(monkeypatch, tmp_path):
         {},
         material_sha256="0" * 64,
     )
-    timings = json.load(gzip.open(written))["timings"]
+    with gzip.open(written) as f:
+        timings = json.load(f)["timings"]
     assert timings["elapsed_s"] >= timings["total_s"]
     assert math.isfinite(timings["unattributed_s"])
     assert set(timings["fit"]) == {

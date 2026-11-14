@@ -59,10 +59,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from beqforge import filters  # noqa: E402
-from beqforge import pipeline, record  # noqa: E402
-from beqforge.material import load  # noqa: E402
-from beqforge.pipeline import (  # noqa: E402
+from beqforge import (
+    filters,
+    pipeline,
+    record,
+)
+from beqforge.material import load
+from beqforge.pipeline import (
     Headroom,
     PipelineParams,
     Report,

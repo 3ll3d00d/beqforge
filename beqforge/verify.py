@@ -105,9 +105,7 @@ def device_transfer(
     sos = device.quantise(biquad_sos(filters, device.fs))
     radius = max(float(np.max(np.abs(np.roots(row[3:])))) for row in sos)
     decay = 0.0 if radius == 0 else -math.log(1e-12) / -math.log(radius)
-    guard = max(
-        int(math.ceil(8 * fs)), int(math.ceil(decay * len(sos) * fs / device.fs))
-    )
+    guard = max(math.ceil(8 * fs), math.ceil(decay * len(sos) * fs / device.fs))
     size = fft.next_fast_len(samples + 2 * guard)
     freqs = fft.rfftfreq(size, 1 / fs)
     _, transfer = signal.freqz_sos(sos, worN=freqs, fs=device.fs)

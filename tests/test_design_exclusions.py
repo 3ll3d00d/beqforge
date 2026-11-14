@@ -5,7 +5,7 @@ import importlib
 import numpy as np
 import pytest
 
-from beqforge import BiquadSpec, DESIGN_GRID
+from beqforge import DESIGN_GRID, BiquadSpec, pipeline
 from beqforge.diagnose import (
     DiagnoseParams,
     Diagnosis,
@@ -14,7 +14,6 @@ from beqforge.diagnose import (
     unexcluded,
 )
 from beqforge.material import Material
-from beqforge import pipeline
 
 BANDS = ((65.0, 75.0), (90.0, 95.0))
 
@@ -50,8 +49,12 @@ def test_excluded_peak_cannot_move_flatten_target_judged_extent_or_verification(
     results = []
     for peak in (0.0, 60.0):
         freqs, values = spectrum(peak)
-        monkeypatch.setattr(pipeline, "mean_spectrum", lambda *args: (freqs, values))
-        monkeypatch.setattr(verification, "_mean_db", lambda *args: (freqs, values))
+        monkeypatch.setattr(
+            pipeline, "mean_spectrum", lambda *args, f=freqs, v=values: (f, v)
+        )
+        monkeypatch.setattr(
+            verification, "_mean_db", lambda *args, f=freqs, v=values: (f, v)
+        )
         diagnosis = Diagnosis(freqs, values, {})
         target = pipeline.flatten_targets(material, diagnosis, None, None, params)[
             0
@@ -103,7 +106,9 @@ def test_excluded_power_cannot_choose_scenes_or_coherence(monkeypatch):
     for scale in (1.0, 1e10):
         changed = power.copy()
         changed[~unexcluded(freqs, BANDS)] *= scale
-        monkeypatch.setattr(extraction, "_spectrogram", lambda *args: (freqs, changed))
+        monkeypatch.setattr(
+            extraction, "_spectrogram", lambda *args, c=changed: (freqs, c)
+        )
         results.append(extraction.extract(np.ones(5000), 1000, params))
     a, b = results
     assert a.loud_frames == b.loud_frames
@@ -157,6 +162,7 @@ def test_sub_bin_exclusion_still_splits_reference():
 
 def test_counterfactual_does_not_restore_an_excluded_feature():
     from dataclasses import replace
+
     from beqforge.diagnose import ChannelDiagnosis, mean_spectrum
 
     rng = np.random.default_rng(80)

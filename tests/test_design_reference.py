@@ -31,7 +31,7 @@ FS = 1000
 def write_wav(path: Path, frames: np.ndarray, fmt: str, fs: int = FS, extensible=False):
     """`frames` (n, channels) of raw sample values in `fmt`: s16, s24, s32, f32 or u8."""
     frames = np.atleast_2d(frames.T).T if frames.ndim == 1 else frames
-    n, channels = frames.shape
+    _n, channels = frames.shape
     width = {"s16": 2, "s24": 3, "s32": 4, "f32": 4, "u8": 1}[fmt]
     if fmt == "s24":
         raw = b"".join(

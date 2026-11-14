@@ -32,7 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from beqforge import impact  # noqa: E402
+from beqforge import impact
 
 PACKAGES = ("beqforge", "beq_common")
 _TIERS = ("will_move", "unknown", "likely", "possible", "unaffected")

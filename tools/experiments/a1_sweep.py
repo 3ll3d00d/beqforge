@@ -35,9 +35,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from beqforge import BiquadSpec  # noqa: E402
-from beqforge.harness import CORPUS_GATED, CORPUS_SHAPES, corpus_case  # noqa: E402
-from beqforge.pipeline import PipelineParams  # noqa: E402
+from beqforge import BiquadSpec
+from beqforge.harness import CORPUS_GATED, CORPUS_SHAPES, corpus_case
+from beqforge.pipeline import PipelineParams
 
 OFF = 1e6
 """A multiple that switches a clause off. Finite, because `assess` rounds tolerances to its

@@ -35,10 +35,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
-import numpy as np  # noqa: E402
+import numpy as np
 
-from beqforge.material import load  # noqa: E402
-from beqforge.reference import digest, read_column  # noqa: E402
+from beqforge.material import load
+from beqforge.reference import digest, read_column
 
 TIMING = re.compile(
     r"request timing: body (?P<mb>[\d.]+) MB, read (?P<read>[\d.]+) s, "

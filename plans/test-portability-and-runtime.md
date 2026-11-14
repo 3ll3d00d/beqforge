@@ -66,3 +66,17 @@ tests still execute real searches. Validation: all 47 filter/parallel tests pass
 in 52.64s with the inhibitor; the modified test's call took under 0.005s.
 Formatting and whitespace checks passed. Ruff reports three existing import/dict
 style issues elsewhere in `tests/test_design_filters.py`.
+
+## Repository-wide Ruff clean-up — 2026-11-14
+
+The 186 findings Ruff had accumulated (ruff 0.17.4), and the 8 files it would reformat, are
+fixed: `ruff check` and `ruff format --check` now pass over every package, `tools` and `tests`.
+Most were stale `noqa` comments and import order. Redundant `int()` around `round()` and
+`math.ceil()` were removed (both return `int`, for numpy 2.5 scalars too). Implicit string
+concatenations in lists were parenthesised. Loop variables captured by test lambdas and
+`p18_greedy`'s closure are now bound as defaults (each was called inside its own iteration, so
+none was a live bug). `DesignParams`' default `Realisation` became a `default_factory`, and
+the scripts with a shebang were made executable. Validation: `probe.py compare --tol 0`
+against the commit before: all 11 titles unchanged; `impact.py check`: the expected warning
+for answer-reaching code changed without a bump, which the probe answers; `uv run pytest`:
+1,170 passed. CI does not run Ruff.

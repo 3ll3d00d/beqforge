@@ -35,8 +35,8 @@ from typing import Any
 # lands on sys.path when this is run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge import record  # noqa: E402
-from beqforge.charts import _slug, render_cached  # noqa: E402
+from beqforge import record
+from beqforge.charts import _slug, render_cached
 
 logger = logging.getLogger("render_ledger")
 
@@ -101,7 +101,10 @@ def title_entry(document: dict[str, Any]) -> dict[str, Any]:
             "confidence": None,
             "mv_adjust_db": None,
             "offset_db": None,
-            "band": [None, None],  # NaN is not JSON; None round-trips as null (record.py)
+            "band": [
+                None,
+                None,
+            ],  # NaN is not JSON; None round-trips as null (record.py)
             "filters": [],
             "notes": [
                 {"text": text, "kind": "failure"}

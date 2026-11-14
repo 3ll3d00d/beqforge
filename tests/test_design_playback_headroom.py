@@ -1,13 +1,13 @@
 """R11: clipping outputs carry the playback assumptions they actually measured."""
 
-from dataclasses import replace, asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from scipy import signal
 
-from beqforge import BiquadSpec, DESIGN_GRID, pipeline, record
+from beqforge import DESIGN_GRID, BiquadSpec, pipeline, record
 from beqforge.filters import Realisation, biquad_sos, magnitude_db
 from beqforge.material import Material, PlaybackParams, bass_managed_sum
 from tests.test_design_device_rate import programme, reference
@@ -94,8 +94,8 @@ def test_output_gain_changes_clipping_cost_but_not_peak_filter_gain(monkeypatch)
     )
     assert low.offset_db < 0
     assert high.offset_db == pytest.approx(low.offset_db - 6, abs=1e-10)
-    from tests.test_design_playback import material as broadband
     from beqforge.diagnose import Diagnosis
+    from tests.test_design_playback import material as broadband
 
     monkeypatch.setattr(pipeline, "judged_band_hz", lambda *args: (5, 200))
     candidate = pipeline._judge(
@@ -204,8 +204,8 @@ def test_zero_cost_is_qualified_in_cli_and_legacy_output():
 def test_record_and_ledger_preserve_assumptions_without_upgrading_legacy(
     monkeypatch, tmp_path
 ):
-    from tests.test_design_playback import material
     from beqforge.diagnose import Diagnosis
+    from tests.test_design_playback import material
 
     model = PlaybackParams(crossover_hz=120, sub_lowpass_hz=None, sub_gain_db=6)
     params = pipeline.PipelineParams(playback=model, realisation=Realisation(fs=48000))

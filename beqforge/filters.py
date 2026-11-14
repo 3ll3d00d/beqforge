@@ -860,7 +860,7 @@ def _escalate(
         pending = [state for state in states if state.answer is None]
         if not pending:
             break
-        tasks: list["FitTask"] = []
+        tasks: list[FitTask] = []
         owners: list[tuple[_Escalation, int]] = []
         for sections in group:
             for state in pending:

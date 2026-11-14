@@ -10,8 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from beqforge.harness import evidence_cases, score_evidence_case  # noqa: E402
-from beqforge.pipeline import PipelineParams, run  # noqa: E402
+from beqforge.harness import evidence_cases, score_evidence_case
+from beqforge.pipeline import PipelineParams, run
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -27,8 +29,8 @@ def main():
         rows.append(score_evidence_case(case, report, params))
         document = {"seed": args.seed, "params": repr(params), "cases": rows}
         args.output.write_text(json.dumps(document, indent=2, allow_nan=False) + "\n")
-        logging.info(f"SCORED {rows[-1]}")
-    logging.info("EVIDENCE_VALIDATION_DONE")
+        logger.info(f"SCORED {rows[-1]}")
+    logger.info("EVIDENCE_VALIDATION_DONE")
 
 
 if __name__ == "__main__":

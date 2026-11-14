@@ -27,7 +27,7 @@ import math
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -439,7 +439,7 @@ def write(
             material_path="" if material_path is None else str(material_path),
             params=repr(params),
             revision=revision(),
-            written_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            written_at=datetime.now(UTC).isoformat(timespec="seconds"),
         ).to_json(),
         "design_identity": identity,
         "material": {

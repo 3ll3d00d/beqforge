@@ -10,6 +10,7 @@ import math
 import numpy as np
 import pytest
 
+import beqforge.filters as F
 from beqforge import (
     BIQUAD_BUDGET,
     Alignment,
@@ -17,7 +18,6 @@ from beqforge import (
     ExactInversionUnavailable,
     HighPass,
 )
-import beqforge.filters as F
 from beqforge.filters import (
     Realisation,
     biquad_sos,
@@ -525,13 +525,13 @@ def test_escalating_reaches_what_enumerating_reached() -> None:
     """
     freqs, target = escalation_target()
     realisation = F.Realisation()
-    kwargs = dict(
-        band_hz=(5.0, 200.0),
-        max_gain_db=20.0,
-        realisation=realisation,
-        seeds=(0, 1),
-        max_drift_db=3.0,
-    )
+    kwargs = {
+        "band_hz": (5.0, 200.0),
+        "max_gain_db": 20.0,
+        "realisation": realisation,
+        "seeds": (0, 1),
+        "max_drift_db": 3.0,
+    }
     escalated = F.fit_minimal_biquads(target, freqs, 96000.0, 3, 0.5, **kwargs)
 
     # what the old code did: fit every tier, prune, screen, take the first that clears both
@@ -572,7 +572,7 @@ def test_batching_targets_does_not_change_any_of_them() -> None:
     """Fitting several together must decide exactly what fitting each alone decides."""
     freqs, first = escalation_target()
     second = first * 0.6
-    kwargs = dict(band_hz=(5.0, 200.0), max_gain_db=20.0, seeds=(0,))
+    kwargs = {"band_hz": (5.0, 200.0), "max_gain_db": 20.0, "seeds": (0,)}
 
     alone = [
         F.fit_minimal_biquads(t, freqs, 96000.0, 2, 0.5, **kwargs)
@@ -830,7 +830,7 @@ def test_a_last_digit_difference_in_the_target_publishes_the_same_cascade() -> N
     """The same fit from targets that differ by far less than a quantisation step."""
     freqs, target = escalation_target()
     nudge = 1.0e-6 * np.sin(np.arange(len(target)))
-    kwargs = dict(band_hz=(5.0, 200.0), max_gain_db=20.0, seeds=(0,))
+    kwargs = {"band_hz": (5.0, 200.0), "max_gain_db": 20.0, "seeds": (0,)}
     here = F.fit_minimal_biquads(target, freqs, 96000.0, 2, 0.5, **kwargs)
     there = F.fit_minimal_biquads(target + nudge, freqs, 96000.0, 2, 0.5, **kwargs)
     assert here == there
